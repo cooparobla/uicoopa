@@ -1,0 +1,5 @@
+# Build output
+build/
+
+# Generated screenshots / captured frames
+output/
