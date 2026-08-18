@@ -58,6 +58,9 @@ public:
     bool            interactable = true;
     ColorTransition colors;
     Graphic*        target_graphic = nullptr; /**< Non-owning; auto-discovered in start() if left null. */
+    std::string     target_graphic_name;      /**< If set and target_graphic is null, start() resolves this
+                                                    descendant's Graphic by name (set by the YAML parser;
+                                                    programmatic callers should just set target_graphic directly). */
 
     ClickSignal   on_click;       /**< Press and release landed on this object. */
     PointerSignal on_hover_enter; /**< Pointer entered while interactable. */
@@ -74,6 +77,11 @@ public:
     bool pressed() const { return pressed_; }
 
     void start() override {
+        if (!target_graphic && owner && !target_graphic_name.empty()) {
+            if (auto* named = owner->find_descendant(target_graphic_name)) {
+                target_graphic = named->get_component<Graphic>();
+            }
+        }
         if (!target_graphic && owner) {
             target_graphic = owner->get_component<Graphic>();
         }

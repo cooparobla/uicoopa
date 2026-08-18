@@ -1,8 +1,16 @@
 /**
  * @file test_window.cpp
- * @brief Windowed demo: opens a real GLFW/Vulkan window and exercises RectTransform
- *        anchoring, a HorizontalLayoutGroup, and a Button wired entirely through
- *        coopa::event::Signal.
+ * @brief Windowed demo: loads assets/scenes/test_window/scene.yaml — RectTransform
+ *        anchoring, a HorizontalLayoutGroup, and a Button — then wires the Button's
+ *        behavior entirely through coopa::event::Signal in C++.
+ *
+ * The UI tree itself is pure data (see scene.yaml); this file's job is to load it
+ * (register_ui_components() + SceneManager::load_scene()), look up the handful of
+ * objects it wants to react to by name (SceneLoader parses components[] before
+ * children[], so cross-references like Button::target_graphic/ScrollRect::content
+ * resolve in start() rather than in the YAML — see uicoopa/ui_yaml.h), and drive
+ * one UiScene per frame instead of hand-rolling a single CanvasComponent's
+ * layout/input/emit passes.
  *
  * Not part of the headless test suite (test.cpp) — this is an interactive demo,
  * built as its own target (uicoopa_test_window) so `cbuild`'s test target stays
@@ -58,8 +66,11 @@
 #include <uicoopa/groups/layout_group.h>
 #include <uicoopa/input/ui_input.h>
 #include <uicoopa/input/event_system.h>
+#include <uicoopa/ui_yaml.h>
+#include <uicoopa/ui_scene.h>
 
 #include <coopa/scene/scene_object.h>
+#include <coopa/scene/scene_manager.h>
 #include <coopa/event/signal.h>
 
 #include <algorithm>
@@ -76,42 +87,6 @@ using namespace coopa::ui;
 using coopa::scene::SceneObject;
 
 namespace {
-
-/** @brief Adds a child SceneObject with a RectTransform (given preset/position/size) and a solid-color Image. */
-SceneObject* add_panel(SceneObject& parent, const std::string& name, AnchorPreset preset,
-                       glm::vec2 anchored_position, glm::vec2 size, glm::vec4 color) {
-    auto* obj = parent.add_child(std::make_unique<SceneObject>(name));
-    auto* rt = obj->add_component<RectTransform>();
-    rt->anchor_preset(preset);
-    rt->set_anchored_position(anchored_position);
-    rt->set_size_delta(size);
-    auto* img = obj->add_component<Image>();
-    img->color = color;
-    return obj;
-}
-
-/**
- * @brief Adds a Text component onto an existing SceneObject, sharing its RectTransform's rect.
- *
- * raycast_target is left false so a label never steals a raycast hit from the panel/Button
- * it sits on top of.
- */
-Text* add_label(SceneObject& obj, Font& font, const std::string& text, uint32_t font_size,
-                glm::vec4 color,
-                HorizontalAlign h_align = HorizontalAlign::Center,
-                VerticalAlign v_align = VerticalAlign::Middle,
-                TextOverflow overflow = TextOverflow::Overflow) {
-    auto* label = obj.add_component<Text>();
-    label->font = &font;
-    label->text = text;
-    label->font_size = font_size;
-    label->color = color;
-    label->horizontal_align = h_align;
-    label->vertical_align = v_align;
-    label->overflow = overflow;
-    label->raycast_target = false;
-    return label;
-}
 
 /**
  * @struct ColorFade
@@ -299,163 +274,66 @@ int main() {
     UiPass ui_pass(device, allocator, cmd_pool, swapchain_pass,
                   shader_dir + "/ui.vert.spv", shader_dir + "/ui.frag.spv");
 
-    // --- Font: one Font, two baked sizes (title + body/labels) ---
-    Font ui_font(device, allocator, cmd_pool, std::string(ROOT_DIR) + "/assets/fonts/DejaVuSans.ttf");
-    constexpr uint32_t kTitleSize = 36;
-    constexpr uint32_t kBodySize  = 16;
-    ui_pass.mark_as_text_atlas(ui_font.atlas_for_size(kTitleSize).texture().view());
-    ui_pass.mark_as_text_atlas(ui_font.atlas_for_size(kBodySize).texture().view());
+    // --- Load the UI tree from scene.yaml ---
+    //
+    // register_ui_components() must run before load_scene() so every !RectTransform/
+    // !Image/!Text/!Button/!HorizontalLayoutGroup node in the file has a parser
+    // registered to dispatch to (see uicoopa/ui_yaml.h).
+    coopa::ui::register_ui_components(device, allocator, cmd_pool);
 
-    // --- Build the UI tree ---
-    SceneObject canvas_obj("Canvas");
-    auto* canvas = canvas_obj.add_component<CanvasComponent>();
-    canvas->scaler.mode = ScaleMode::ScaleWithScreenSize;
-    canvas->scaler.reference_resolution = { 1280.0f, 720.0f };
-    canvas->scaler.match_width_or_height = 0.5f;
+    coopa::scene::SceneManager scene_mgr;
+    scene_mgr.load_scene(std::string(ROOT_DIR) + "/assets/scenes/test_window/scene.yaml");
+    auto& scene = scene_mgr.get_active_scene();
 
-    // Full-screen, constant-color background — everything else draws on top of it.
-    add_panel(canvas_obj, "Background", AnchorPreset::StretchAll,
-             { 0.0f, 0.0f }, { 0.0f, 0.0f }, glm::vec4(0.08f, 0.09f, 0.12f, 1.0f));
+    // Bakes every (font, size) pair any !Text component actually referenced — replaces
+    // this file's old two hand-listed mark_as_text_atlas() calls.
+    UIResourceCache::instance().mark_text_atlases(ui_pass);
 
-    // Four corner-anchored panels — resize the window and these stay pinned to their corner.
-    // Each carries a Text label sharing its RectTransform's rect, centered.
-    glm::vec4 label_color(0.98f, 0.98f, 0.98f, 1.0f);
-    auto* top_left     = add_panel(canvas_obj, "TopLeft",     AnchorPreset::TopLeft,     { 20.0f, -20.0f }, { 220.0f, 90.0f }, { 0.20f, 0.55f, 0.60f, 0.95f });
-    auto* top_right    = add_panel(canvas_obj, "TopRight",    AnchorPreset::TopRight,    { -20.0f, -20.0f }, { 220.0f, 90.0f }, { 0.75f, 0.45f, 0.20f, 0.95f });
-    auto* bottom_left  = add_panel(canvas_obj, "BottomLeft",  AnchorPreset::BottomLeft,  { 20.0f, 20.0f }, { 220.0f, 90.0f }, { 0.45f, 0.25f, 0.55f, 0.95f });
-    auto* bottom_right = add_panel(canvas_obj, "BottomRight", AnchorPreset::BottomRight, { -20.0f, 20.0f }, { 220.0f, 90.0f }, { 0.65f, 0.25f, 0.40f, 0.95f });
-    add_label(*top_left,     ui_font, "Top Left",     kBodySize, label_color);
-    add_label(*top_right,    ui_font, "Top Right",    kBodySize, label_color);
-    add_label(*bottom_left,  ui_font, "Bottom Left",  kBodySize, label_color);
-    add_label(*bottom_right, ui_font, "Bottom Right", kBodySize, label_color);
+    UiScene ui_scene(scene);
 
-    // Title + a word-wrapped paragraph, stacked below it — demonstrates TextOverflow::Wrap.
-    auto* title_obj = canvas_obj.add_child(std::make_unique<SceneObject>("Title"));
-    auto* title_rt = title_obj->add_component<RectTransform>();
-    title_rt->anchor_preset(AnchorPreset::TopCenter);
-    title_rt->set_anchored_position({ 0.0f, -140.0f });
-    title_rt->set_size_delta({ 600.0f, 50.0f });
-    add_label(*title_obj, ui_font, "uicoopa", kTitleSize, glm::vec4(1.0f));
-
-    auto* paragraph_obj = canvas_obj.add_child(std::make_unique<SceneObject>("Paragraph"));
-    auto* paragraph_rt = paragraph_obj->add_component<RectTransform>();
-    paragraph_rt->anchor_preset(AnchorPreset::TopCenter);
-    paragraph_rt->set_anchored_position({ 0.0f, -200.0f });
-    paragraph_rt->set_size_delta({ 460.0f, 90.0f });
-    add_label(*paragraph_obj, ui_font,
-             "A Unity-style RectTransform UI system: anchored panels, layout groups, "
-             "buttons, and word-wrapped text, all composited on top of a Vulkan swapchain.",
-             kBodySize, glm::vec4(0.85f, 0.85f, 0.88f, 1.0f),
-             HorizontalAlign::Center, VerticalAlign::Top, TextOverflow::Wrap);
-
-    // A stretched bottom bar (StretchBottom: full width minus a 20px margin each side) holding
-    // a HorizontalLayoutGroup of three equally force-expanded boxes.
-    auto* bar_obj = add_panel(canvas_obj, "Bar", AnchorPreset::StretchBottom,
-                              { 0.0f, 20.0f }, { -40.0f, 60.0f }, glm::vec4(0.15f, 0.15f, 0.18f, 0.9f));
-    auto* hgroup = bar_obj->add_component<HorizontalLayoutGroup>();
-    hgroup->spacing = 12.0f;
-    hgroup->padding = LayoutPadding{ 12.0f, 12.0f, 8.0f, 8.0f };
-    hgroup->child_control_width = true;
-    hgroup->child_control_height = true;
-    hgroup->child_force_expand_width = true;
-
-    glm::vec4 box_colors[3] = {
-        { 0.85f, 0.35f, 0.35f, 1.0f },
-        { 0.35f, 0.75f, 0.45f, 1.0f },
-        { 0.35f, 0.55f, 0.85f, 1.0f },
-    };
-    for (int i = 0; i < 3; ++i) {
-        auto* box = bar_obj->add_child(std::make_unique<SceneObject>("Box" + std::to_string(i)));
-        box->add_component<RectTransform>()->set_size_delta({ 80.0f, 40.0f });
-        box->add_component<Image>()->color = box_colors[i];
-    }
+    SceneObject* canvas_obj = scene.find_object("Canvas");
+    auto* canvas = canvas_obj->get_component<CanvasComponent>();
 
     // A soft glow that sits *behind* the button, on its own SceneObject — something
     // ColorTransition structurally cannot reach, since it only ever writes to
-    // Button::target_graphic. Bigger than the button and non-raycasting, so it never
-    // steals the hover boundary at its edges. Added before ButtonPanel so it draws
-    // (and hit-tests) underneath it.
+    // Button::target_graphic.
     const glm::vec4 kHaloIdle (0.42f, 0.70f, 1.00f, 0.00f);
     const glm::vec4 kHaloHover(0.42f, 0.70f, 1.00f, 0.35f);
     const glm::vec4 kHaloPress(0.55f, 0.80f, 1.00f, 0.55f);
-    auto* halo_obj = add_panel(canvas_obj, "HoverHalo", AnchorPreset::MiddleCenter,
-                               { 0.0f, 0.0f }, { 300.0f, 110.0f }, kHaloIdle);
-    auto* halo_img = halo_obj->get_component<Image>();
-    halo_img->raycast_target = false;
+    auto* halo_img = scene.find_object("HoverHalo")->get_component<Image>();
 
     // Center button: ColorTransition fades color *and* opacity on hover/press
-    // (normal.a < highlighted.a/pressed.a — see colors below) purely from its own
+    // (normal.a < highlighted.a/pressed.a — see scene.yaml) purely from its own
     // per-frame lerp. Everything else — the halo, the status line, the modal dialog
     // — is driven off Button's Signals instead, to prove those are independently
     // useful, not just a repackaging of ColorTransition.
-    auto* button_obj = add_panel(canvas_obj, "ButtonPanel", AnchorPreset::MiddleCenter,
-                                 { 0.0f, 0.0f }, { 260.0f, 70.0f }, glm::vec4(1.0f));
-    auto* button = button_obj->add_component<Button>();
-    button->colors.normal      = { 0.30f, 0.55f, 0.90f, 0.55f };
-    button->colors.highlighted = { 0.42f, 0.70f, 1.00f, 1.00f };
-    button->colors.pressed     = { 0.20f, 0.40f, 0.70f, 1.00f };
+    auto* button_obj = scene.find_object("ButtonPanel");
+    auto* button = button_obj->get_component<Button>();
     const glm::vec4 kLabelIdle (0.92f, 0.92f, 0.95f, 1.0f);
     const glm::vec4 kLabelHover(1.00f, 0.95f, 0.55f, 1.0f);
-    Text* click_label = add_label(*button_obj, ui_font, "Click Me", kBodySize, kLabelIdle);
+    Text* click_label = button_obj->get_component<Text>();
 
     // A one-line readout, purely a spectator: it never raycasts, it just reflects
     // whatever the button's signals report — including the live slot count, to make
     // the multicast nature of Signal visible rather than asserted.
-    auto* status_obj = canvas_obj.add_child(std::make_unique<SceneObject>("StatusLine"));
-    auto* status_rt = status_obj->add_component<RectTransform>();
-    status_rt->anchor_preset(AnchorPreset::MiddleCenter);
-    status_rt->set_anchored_position({ 0.0f, -80.0f });
-    status_rt->set_size_delta({ 560.0f, 28.0f });
-    Text* status = add_label(*status_obj, ui_font, "idle", kBodySize, glm::vec4(0.75f, 0.80f, 0.85f, 1.0f));
+    Text* status = scene.find_object("StatusLine")->get_component<Text>();
 
-    // --- Modal dialog: a scrim + panel + Close button, all inactive until opened ---
+    // --- Modal dialog ---
     //
-    // Added *last* among Canvas's children so it draws on top of everything else
-    // (CanvasComponent::emit_ draws a node's own components before recursing into
-    // children — later canvas children paint over earlier ones). Raycaster visits
-    // children before parents in *reverse* array order, so ModalDialog is checked
-    // first too: its own Image (the scrim, raycast_target defaults true) swallows
-    // any click that doesn't land on DialogPanel/DialogClose, so the button behind
-    // it is never reachable while the dialog is open — no extra flag required.
-    auto* dialog = add_panel(canvas_obj, "ModalDialog", AnchorPreset::StretchAll,
-                             { 0.0f, 0.0f }, { 0.0f, 0.0f }, glm::vec4(0.02f, 0.02f, 0.04f, 0.62f));
-
-    auto* dialog_panel = add_panel(*dialog, "DialogPanel", AnchorPreset::MiddleCenter,
-                                   { 0.0f, 0.0f }, { 480.0f, 260.0f }, glm::vec4(0.14f, 0.15f, 0.20f, 1.0f));
-
-    auto* dialog_title_obj = dialog_panel->add_child(std::make_unique<SceneObject>("DialogTitle"));
-    auto* dialog_title_rt = dialog_title_obj->add_component<RectTransform>();
-    dialog_title_rt->anchor_preset(AnchorPreset::TopCenter);
-    dialog_title_rt->set_anchored_position({ 0.0f, -34.0f });
-    dialog_title_rt->set_size_delta({ 420.0f, 44.0f });
-    add_label(*dialog_title_obj, ui_font, "Modal Dialog", kTitleSize, glm::vec4(1.0f));
-
-    auto* dialog_body_obj = dialog_panel->add_child(std::make_unique<SceneObject>("DialogBody"));
-    auto* dialog_body_rt = dialog_body_obj->add_component<RectTransform>();
-    dialog_body_rt->anchor_preset(AnchorPreset::TopCenter);
-    dialog_body_rt->set_anchored_position({ 0.0f, -90.0f });
-    dialog_body_rt->set_size_delta({ 420.0f, 96.0f });
-    add_label(*dialog_body_obj, ui_font,
-             "Opened by a Signal-driven Button::on_click slot. This panel and its Close "
-             "button below are an ordinary inactive SceneObject subtree, shown and hidden "
-             "with set_active().",
-             kBodySize, glm::vec4(0.85f, 0.85f, 0.88f, 1.0f),
-             HorizontalAlign::Center, VerticalAlign::Top, TextOverflow::Wrap);
-
-    auto* dialog_close_obj = add_panel(*dialog_panel, "DialogClose", AnchorPreset::BottomCenter,
-                                       { 0.0f, 26.0f }, { 160.0f, 44.0f }, glm::vec4(1.0f));
-    auto* close_button = dialog_close_obj->add_component<Button>();
-    close_button->colors.normal      = { 0.55f, 0.30f, 0.35f, 1.0f };
-    close_button->colors.highlighted = { 0.70f, 0.40f, 0.45f, 1.0f };
-    close_button->colors.pressed     = { 0.40f, 0.20f, 0.25f, 1.0f };
-    add_label(*dialog_close_obj, ui_font, "Close", kBodySize, glm::vec4(1.0f));
+    // Its own Image (the scrim, raycast_target defaults true) swallows any click
+    // that doesn't land on DialogPanel/DialogClose, so the button behind it is never
+    // reachable while the dialog is open — no extra flag required (see ui_scene.h's
+    // ordering contract: ModalDialog is the last child of Canvas in scene.yaml, so it
+    // draws on top of everything else, and Raycaster checks it first for the same reason).
+    auto* dialog = scene.find_object("ModalDialog");
+    auto* close_button = scene.find_object("DialogClose")->get_component<Button>();
 
     // --- Wire the button's signals ---
     //
     // ScopedConnections live in this vector so every slot below disconnects cleanly
     // when main() returns; because Connection only holds a weak_ptr into a shared
     // control block (see coopa/event/signal.h), it does not matter whether this
-    // vector is destroyed before or after canvas_obj — there's no dangling-pointer
+    // vector is destroyed before or after scene_mgr — there's no dangling-pointer
     // ordering hazard either way.
     std::vector<coopa::event::ScopedConnection> connections;
 
@@ -522,12 +400,12 @@ int main() {
         dialog->set_active(false);
     }));
 
-    // Build the dialog subtree *active* so this start() call reaches DialogClose's
-    // Button::start() — which discovers target_graphic AND applies colors.normal —
-    // before it's hidden. SceneObject::start()/update() both skip inactive subtrees
-    // (see coopa/scene/scene_object.h), so a dialog built inactive from the outset
-    // would leave DialogClose's target_graphic null and flash white on first open.
-    canvas_obj.start();
+    // scene.yaml keeps ModalDialog active: true, so the Scene::start() that
+    // SceneLoader::load() already ran (above) reached DialogClose's Button::start()
+    // — which discovers target_graphic AND applies colors.normal — before it's
+    // hidden here. SceneObject::start()/update() both skip inactive subtrees (see
+    // coopa/scene/scene_object.h), so a dialog built inactive from the outset would
+    // leave DialogClose's target_graphic null and flash white on first open.
     dialog->set_active(false);
 
     if (std::getenv("OPEN_DIALOG")) {
@@ -546,9 +424,9 @@ int main() {
         button->on_hover_enter.emit(synth);
     }
 
-    UiInput     ui_input;
-    EventSystem event_system;
-    DrawList    draw_list;
+    UiInput  ui_input;
+    DrawList draw_list;
+    draw_list.set_default_texture(ui_pass.white_view());
 
     auto last_time = std::chrono::steady_clock::now();
     int frame_count = 0;
@@ -565,7 +443,7 @@ int main() {
         float dt = std::chrono::duration<float>(now - last_time).count();
         last_time = now;
 
-        canvas_obj.update(dt);  // drives Button's hover/press color transition
+        ui_scene.update(dt);  // Scene::update — drives Button's hover/press color transition
 
         // Advances the halo/label toward whatever target the hover/press signal slots
         // last set (see wiring above) — the signals carry intent, this animates it.
@@ -577,14 +455,10 @@ int main() {
         auto [sw, sh] = window.framebuffer_size();
         if (sw == 0 || sh == 0) continue;  // minimized
 
-        canvas->rebuild_layout(sw, sh);
+        ui_scene.rebuild(sw, sh, draw_list);
 
-        ui_input.update(window, canvas->root_rect(), canvas->scale_factor());
-        event_system.process(ui_input, canvas_obj);
-
-        draw_list.begin(canvas->root_rect());
-        draw_list.set_default_texture(ui_pass.white_view());
-        canvas->rebuild_emit(draw_list);
+        ui_input.update(window, canvas->root_rect(), ui_scene.primary_scale_factor());
+        ui_scene.process_input(ui_input);
 
         // Must run before begin_frame(): resolving new textures updates descriptor sets,
         // which is unsafe once a render pass is open.
@@ -592,7 +466,7 @@ int main() {
 
         renderer.begin_frame(
             [&](coopa::gfx::command::CommandBuffer& cmd) {
-                ui_pass.draw(cmd, renderer.current_frame(), sw, sh, canvas->scale_factor(), draw_list);
+                ui_pass.draw(cmd, renderer.current_frame(), sw, sh, ui_scene.primary_scale_factor(), draw_list);
             },
             VkClearColorValue{{ 0.05f, 0.05f, 0.07f, 1.0f }}
         );
@@ -612,8 +486,16 @@ int main() {
     auto [final_w, final_h] = window.framebuffer_size();
     std::string screenshot_path = std::string(ROOT_DIR) + "/output/test_window.png";
     save_screenshot(device, allocator, cmd_pool, swapchain_pass, swapchain.image_format(),
-                    ui_pass, draw_list, final_w, final_h, canvas->scale_factor(), screenshot_path);
+                    ui_pass, draw_list, final_w, final_h, ui_scene.primary_scale_factor(), screenshot_path);
 
     std::cout << "[test_window] Exiting cleanly.\n";
+
+    // UIResourceCache owns GPU-resident Fonts/Textures in static storage, and
+    // SceneLoader's parser registry is also static — both would otherwise only be
+    // torn down at program exit, after device/allocator (locals above) are already
+    // gone. Clear them now, while those are still alive (see ui_yaml.h's clear()).
+    UIResourceCache::instance().clear();
+    coopa::scene::SceneLoader::clear_component_parsers();
+
     return 0;
 }

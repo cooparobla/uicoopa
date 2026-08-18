@@ -3,6 +3,8 @@
 #include <cassert>
 #include <cmath>
 #include <stdexcept>
+#include <fstream>
+#include <filesystem>
 
 #include <glm/glm.hpp>
 
@@ -35,8 +37,10 @@
 #include <uicoopa/groups/scroll_rect.h>
 #include <uicoopa/widgets/mask.h>
 #include <uicoopa/ui_yaml.h>
+#include <uicoopa/ui_scene.h>
 
 #include <coopa/scene/scene_object.h>
+#include <coopa/scene/scene_manager.h>
 
 // ANSI Colors for nice UI
 #define ANSI_COLOR_RED     "\x1b[31m"
@@ -89,6 +93,21 @@ static int g_tests_failed = 0;
 
 using namespace coopa::ui;
 using coopa::scene::SceneObject;
+using coopa::scene::SceneLoader;
+using coopa::scene::SceneManager;
+
+/**
+ * @brief Writes yaml_content to a uniquely-named file under the system temp
+ *        directory and returns its path, so tests can exercise
+ *        SceneLoader::load() (a real file path) without checking in fixture files.
+ */
+std::string write_temp_yaml(const std::string& name, const std::string& yaml_content) {
+    std::filesystem::path path = std::filesystem::temp_directory_path() / ("uicoopa_test_" + name + ".yaml");
+    std::ofstream out(path);
+    out << yaml_content;
+    out.close();
+    return path.string();
+}
 
 // ---------------------------------------------------------
 // Test Cases
@@ -525,6 +544,51 @@ void test_raycaster_topmost_wins() {
     ASSERT_TRUE(after_deactivate.object == obj_a);
 }
 
+void test_raycast_masked() {
+    // Viewport (0,0)-(100,100) carries a Mask; Content is deliberately wider than
+    // the viewport and shifted left, so part of it geometrically extends past
+    // x=100 -- exactly the shape a scrolled ScrollRect content object takes.
+    SceneObject root("Canvas");
+
+    auto* viewport = root.add_child(std::make_unique<SceneObject>("Viewport"));
+    auto* viewport_rt = viewport->add_component<RectTransform>();
+    viewport_rt->set_anchor_min({0.0f, 0.0f});
+    viewport_rt->set_anchor_max({0.0f, 0.0f});
+    viewport_rt->set_pivot({0.0f, 0.0f});
+    viewport_rt->set_size_delta({100.0f, 100.0f});
+    viewport_rt->resolve(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });
+    viewport->add_component<Mask>();
+
+    auto* content = viewport->add_child(std::make_unique<SceneObject>("Content"));
+    auto* content_rt = content->add_component<RectTransform>();
+    content_rt->set_anchor_min({0.0f, 0.0f});
+    content_rt->set_anchor_max({0.0f, 0.0f});
+    content_rt->set_pivot({0.0f, 0.0f});
+    content_rt->set_anchored_position({-50.0f, 0.0f});
+    content_rt->set_size_delta({200.0f, 100.0f});
+    content_rt->resolve(viewport_rt->rect());  // -> rect (-50,0)-(150,100)
+    content->add_component<TestRaycastTarget>();
+
+    // Inside Content's own rect, but outside the Viewport's Mask -> must miss.
+    RaycastHit clipped = Raycaster::hit_test(root, glm::vec2(120.0f, 50.0f));
+    ASSERT_TRUE(!static_cast<bool>(clipped));
+
+    // Inside both the Mask and Content's rect -> must hit Content.
+    RaycastHit visible = Raycaster::hit_test(root, glm::vec2(50.0f, 50.0f));
+    ASSERT_TRUE(static_cast<bool>(visible));
+    ASSERT_TRUE(visible.object == content);
+
+    // A Mask does not clip itself -- a raycast target directly on the Viewport
+    // (not just its Content) must still hit within the Viewport's own rect.
+    // Content is deactivated first since its rect fully overlaps Viewport's here
+    // and, being checked first (children before parent), would otherwise win.
+    viewport->add_component<TestRaycastTarget>();
+    content->set_active(false);
+    RaycastHit on_viewport = Raycaster::hit_test(root, glm::vec2(10.0f, 10.0f));
+    ASSERT_TRUE(static_cast<bool>(on_viewport));
+    ASSERT_TRUE(on_viewport.object == viewport);
+}
+
 void test_horizontal_layout_group_distribution() {
     auto canvas_obj = std::make_unique<SceneObject>("Canvas");
     auto* canvas = canvas_obj->add_component<CanvasComponent>();
@@ -697,6 +761,169 @@ void test_ui_yaml_parsing() {
     ASSERT_TRUE(group.child_control_height == true);  // untouched field keeps its default
 }
 
+void test_scene_yaml_loads_hierarchy() {
+    // No GPU device anywhere in this test: SceneLoader::load() needs none, which is
+    // exactly the gap this whole decoupling effort closes (see coopa/scene/scene_loader.h).
+    std::string path = write_temp_yaml("hierarchy",
+        "format: test\n"
+        "scene:\n"
+        "  scene_name: Fixture\n"
+        "  auto_transform: false\n"
+        "  root_objects:\n"
+        "    - name: Root\n"
+        "      active: true\n"
+        "      components: []\n"
+        "      children:\n"
+        "        - name: ChildA\n"
+        "          active: true\n"
+        "          components: []\n"
+        "          children: []\n"
+        "        - name: ChildB\n"
+        "          active: true\n"
+        "          components: []\n"
+        "          children: []\n");
+
+    SceneManager mgr;
+    mgr.load_scene(path);
+    auto& scene = mgr.get_active_scene();
+
+    ASSERT_TRUE(scene.name() == "Fixture");
+    ASSERT_TRUE(scene.root_objects().size() == 1);
+
+    auto* root = scene.find_object("Root");
+    ASSERT_TRUE(root != nullptr);
+    ASSERT_TRUE(root->children().size() == 2);
+    // Document order is z-order (see ui_scene.h) -- assert it landed in the same
+    // order it was written, not e.g. reversed or alphabetized.
+    ASSERT_TRUE(root->children()[0]->name() == "ChildA");
+    ASSERT_TRUE(root->children()[1]->name() == "ChildB");
+
+    auto* child_b = scene.find_object("ChildB");
+    ASSERT_TRUE(child_b != nullptr);
+    ASSERT_TRUE(child_b->parent() == root);
+}
+
+void test_scene_yaml_component_parsing() {
+    register_ui_components();
+
+    std::string path = write_temp_yaml("component_parsing",
+        "format: test\n"
+        "scene:\n"
+        "  auto_transform: false\n"
+        "  root_objects:\n"
+        "    - name: Panel\n"
+        "      active: true\n"
+        "      components:\n"
+        "        - type: RectTransform\n"
+        "          anchor_preset: TopLeft\n"
+        "          anchored_position: { x: 20.0, y: -20.0 }\n"
+        "          size_delta: { x: 200.0, y: 80.0 }\n"
+        "        - type: Image\n"
+        "          color: { r: 0.2, g: 0.4, b: 0.6, a: 0.9 }\n"
+        "        - type: HorizontalLayoutGroup\n"
+        "          spacing: 5.0\n"
+        "          padding: { left: 1.0, right: 2.0, top: 3.0, bottom: 4.0 }\n"
+        "          child_alignment: MiddleCenter\n"
+        "      children: []\n");
+
+    SceneManager mgr;
+    mgr.load_scene(path);
+    auto* panel = mgr.get_active_scene().find_object("Panel");
+    ASSERT_TRUE(panel != nullptr);
+
+    auto* rt = panel->get_component<RectTransform>();
+    ASSERT_TRUE(rt != nullptr);
+    // TopLeft preset, then the explicit anchored_position/size_delta on top of it.
+    ASSERT_VEC2_NEAR(rt->anchor_min(), glm::vec2(0.0f, 1.0f), 1e-4f);
+    ASSERT_VEC2_NEAR(rt->anchor_max(), glm::vec2(0.0f, 1.0f), 1e-4f);
+    ASSERT_VEC2_NEAR(rt->pivot(), glm::vec2(0.0f, 1.0f), 1e-4f);
+    ASSERT_VEC2_NEAR(rt->anchored_position(), glm::vec2(20.0f, -20.0f), 1e-4f);
+    ASSERT_VEC2_NEAR(rt->size_delta(), glm::vec2(200.0f, 80.0f), 1e-4f);
+
+    auto* img = panel->get_component<Image>();
+    ASSERT_TRUE(img != nullptr);
+    ASSERT_NEAR(img->color.r, 0.2f, 1e-4f);
+    ASSERT_NEAR(img->color.a, 0.9f, 1e-4f);
+
+    auto* group = panel->get_component<HorizontalLayoutGroup>();
+    ASSERT_TRUE(group != nullptr);
+    ASSERT_NEAR(group->spacing, 5.0f, 1e-4f);
+    ASSERT_NEAR(group->padding.left, 1.0f, 1e-4f);
+    ASSERT_NEAR(group->padding.bottom, 4.0f, 1e-4f);
+    ASSERT_TRUE(group->child_alignment == ChildAlignment::MiddleCenter);
+}
+
+void test_canvas_sort_order() {
+    coopa::scene::Scene scene("SortOrderFixture");
+
+    // Added in descending sort_order to prove UiScene sorts rather than just
+    // keeping insertion/document order.
+    auto obj_a = std::make_unique<SceneObject>("CanvasA");
+    auto* canvas_a = obj_a->add_component<CanvasComponent>();
+    canvas_a->sort_order = 5;
+    canvas_a->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas_a->scaler.scale_factor = 2.0f;
+    scene.add_root_object(std::move(obj_a));
+
+    auto obj_b = std::make_unique<SceneObject>("CanvasB");
+    auto* canvas_b = obj_b->add_component<CanvasComponent>();
+    canvas_b->sort_order = 1;
+    canvas_b->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas_b->scaler.scale_factor = 3.0f;
+    scene.add_root_object(std::move(obj_b));
+
+    UiScene ui_scene(scene);
+    ASSERT_TRUE(ui_scene.canvases().size() == 2);
+    ASSERT_TRUE(ui_scene.canvases()[0] == canvas_b);  // sort_order 1, drawn first (bottom)
+    ASSERT_TRUE(ui_scene.canvases()[1] == canvas_a);  // sort_order 5, drawn last (top)
+
+    DrawList draw_list;
+    ui_scene.rebuild(800, 600, draw_list);
+    // primary_scale_factor() is the highest-sort_order (topmost) canvas's -- CanvasA's 2.0,
+    // not CanvasB's 3.0 -- matching UiPass::draw()'s single shared scale factor.
+    ASSERT_NEAR(ui_scene.primary_scale_factor(), 2.0f, 1e-4f);
+}
+
+void test_scroll_rect_content_by_name() {
+    register_ui_components();
+
+    std::string path = write_temp_yaml("scroll_content",
+        "format: test\n"
+        "scene:\n"
+        "  auto_transform: false\n"
+        "  root_objects:\n"
+        "    - name: Viewport\n"
+        "      active: true\n"
+        "      components:\n"
+        "        - type: RectTransform\n"
+        "        - type: ScrollRect\n"
+        "          content: Content\n"
+        "      children:\n"
+        "        - name: Decoy\n"
+        "          active: true\n"
+        "          components:\n"
+        "            - type: RectTransform\n"
+        "          children: []\n"
+        "        - name: Content\n"
+        "          active: true\n"
+        "          components:\n"
+        "            - type: RectTransform\n"
+        "          children: []\n");
+
+    // SceneLoader::load() calls Scene::start() internally, which is what resolves
+    // ScrollRect::content_name -- see scroll_rect.h's start().
+    SceneManager mgr;
+    mgr.load_scene(path);
+    auto& scene = mgr.get_active_scene();
+
+    auto* viewport = scene.find_object("Viewport");
+    auto* content = scene.find_object("Content");
+    auto* scroll = viewport->get_component<ScrollRect>();
+    ASSERT_TRUE(scroll != nullptr);
+    // Must resolve "Content" by name, NOT fall back to the first child ("Decoy").
+    ASSERT_TRUE(scroll->content == content);
+}
+
 void test_button_signals() {
     // Exercises Button's IPointerHandler overrides directly — no EventSystem/Raycaster
     // involved, so this needs no Vulkan device despite Button living next to widgets
@@ -770,10 +997,15 @@ int main() {
     RUN_TEST(test_rect_transform_world_corners_identity);
     RUN_TEST(test_text_layout_wrap);
     RUN_TEST(test_raycaster_topmost_wins);
+    RUN_TEST(test_raycast_masked);
     RUN_TEST(test_horizontal_layout_group_distribution);
     RUN_TEST(test_vertical_layout_group_top_down_order);
     RUN_TEST(test_grid_layout_fixed_columns);
     RUN_TEST(test_ui_yaml_parsing);
+    RUN_TEST(test_scene_yaml_loads_hierarchy);
+    RUN_TEST(test_scene_yaml_component_parsing);
+    RUN_TEST(test_canvas_sort_order);
+    RUN_TEST(test_scroll_rect_content_by_name);
     RUN_TEST(test_button_signals);
 
     std::cout << "===========================================" << std::endl;

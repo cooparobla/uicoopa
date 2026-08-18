@@ -51,6 +51,9 @@ enum class MovementType {
 class ScrollRect : public UIComponent, public IPointerHandler {
 public:
     coopa::scene::SceneObject* content = nullptr; /**< Non-owning; the scrollable child. */
+    std::string   content_name; /**< If set and content is null, start() resolves this descendant
+                                     by name (set by the YAML parser; programmatic callers should
+                                     just set content directly). */
     bool          horizontal = false;
     bool          vertical   = true;
     MovementType  movement_type = MovementType::Elastic;
@@ -63,6 +66,9 @@ public:
     bool wants_raycast() const override { return true; }
 
     void start() override {
+        if (!content && owner && !content_name.empty()) {
+            content = owner->find_descendant(content_name);
+        }
         if (!content && owner && !owner->children().empty()) {
             content = owner->children().front().get();
         }

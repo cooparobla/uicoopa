@@ -19,9 +19,12 @@
 #include <gfxcoopa/memory/buffer.h>
 #include <gfxcoopa/memory/image.h>
 #include <gfxcoopa/command/command_pool.h>
+#include <stb/stb_image.h>
 #include <memory>
 #include <cstdint>
 #include <array>
+#include <stdexcept>
+#include <string>
 
 namespace coopa {
 namespace ui {
@@ -85,6 +88,31 @@ public:
         std::array<uint8_t, 4> white_px = { 255, 255, 255, 255 };
         return std::make_unique<Texture>(device, allocator, cmd_pool, 1, 1,
                                           VK_FORMAT_R8G8B8A8_UNORM, white_px.data(), 4);
+    }
+
+    /**
+     * @brief Loads a PNG/JPG/etc. file via stb_image and uploads it as an RGBA8 texture.
+     *
+     * STB_IMAGE_IMPLEMENTATION is defined once, by the application (matching how
+     * VOLK_IMPLEMENTATION/VMA_IMPLEMENTATION are handled) — see test_window.cpp's
+     * CMakeLists.txt definition, or define it in one of your own translation units.
+     *
+     * @throws std::runtime_error if the file cannot be found or decoded.
+     */
+    static std::unique_ptr<Texture> from_file(coopa::gfx::core::Device& device,
+                                              coopa::gfx::memory::Allocator& allocator,
+                                              coopa::gfx::command::CommandPool& cmd_pool,
+                                              const std::string& path) {
+        int w = 0, h = 0, channels = 0;
+        stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &channels, STBI_rgb_alpha);
+        if (!pixels) {
+            throw std::runtime_error("[uicoopa] Texture::from_file: failed to load '" + path + "'.");
+        }
+        auto tex = std::make_unique<Texture>(device, allocator, cmd_pool,
+                                             static_cast<uint32_t>(w), static_cast<uint32_t>(h),
+                                             VK_FORMAT_R8G8B8A8_UNORM, pixels, 4);
+        stbi_image_free(pixels);
+        return tex;
     }
 
 private:
