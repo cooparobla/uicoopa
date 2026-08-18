@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 cmake_policy(VERSION 3.16)
 
-project(uicoopa)
+project(uicoopa_test_window)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 20)
@@ -50,7 +50,9 @@ add_definitions(-DSTB_IMAGE_WRITE_IMPLEMENTATION)
 add_definitions(-DGLM_FORCE_DEPTH_ZERO_TO_ONE)
 
 # --- Add executables ---
-add_executable(uicoopa test_window.cpp)
+# `uicoopa` is the headless suite ctest runs below — test.cpp, not test_window.cpp,
+# so `ctest`/CI never needs a display.
+add_executable(uicoopa test.cpp)
 target_link_libraries(uicoopa
     PRIVATE
     Vulkan::Vulkan

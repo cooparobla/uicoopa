@@ -83,6 +83,13 @@ public:
 
         if (input.is_button_released(kPrimaryButton)) {
             dispatch_(hit_object, [&](IPointerHandler* h) { h->on_pointer_up(data); });
+            // A press-and-drag-off-then-release never revisits press_object_ above (hit_object
+            // has moved on), so without this it would never see on_pointer_up and would be
+            // stuck "pressed" forever. Handlers must tolerate a duplicate call (Button's guard
+            // on pressed_ already does), so dispatching to both is harmless when they match.
+            if (press_object_ && press_object_ != hit_object) {
+                dispatch_(press_object_, [&](IPointerHandler* h) { h->on_pointer_up(data); });
+            }
             // A click requires press and release over the *same* object — a drag-away
             // release must not fire a click.
             if (hit_object != nullptr && hit_object == press_object_) {

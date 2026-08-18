@@ -1,15 +1,24 @@
 /**
  * @file test_window.cpp
  * @brief Windowed demo: opens a real GLFW/Vulkan window and exercises RectTransform
- *        anchoring, a HorizontalLayoutGroup, and a clickable Button.
+ *        anchoring, a HorizontalLayoutGroup, and a Button wired entirely through
+ *        coopa::event::Signal.
  *
  * Not part of the headless test suite (test.cpp) — this is an interactive demo,
  * built as its own target (uicoopa_test_window) so `cbuild`'s test target stays
  * headless and CI-friendly. Resize the window to see the anchored panels track
- * their corners; click the center button to see EventSystem route the click.
+ * their corners. Hover the center button: ColorTransition fades it from translucent
+ * to fully opaque while independent on_hover_enter/on_hover_exit slots bloom a halo
+ * behind it and update a status readout — two unrelated consumers of the same
+ * Signal, driven purely by the event system. Click it to open a modal dialog (an
+ * ordinary inactive SceneObject subtree toggled via set_active()) with its own
+ * hover-tinting Close button.
  *
  * Set MAX_FRAMES=<n> to exit automatically after n frames (useful for scripted
- * "does it still run" checks without a human watching the window).
+ * "does it still run" checks without a human watching the window). OPEN_DIALOG=1
+ * starts with the modal already visible; FORCE_HOVER=1 emits the button's
+ * on_hover_enter signal once before the loop starts, so the halo/status effects
+ * show up in a screenshot with no pointer anywhere near the button.
  */
 
 #include <volk/volk.h>
@@ -51,6 +60,7 @@
 #include <uicoopa/input/event_system.h>
 
 #include <coopa/scene/scene_object.h>
+#include <coopa/event/signal.h>
 
 #include <algorithm>
 #include <chrono>
@@ -60,6 +70,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <vector>
 
 using namespace coopa::ui;
 using coopa::scene::SceneObject;
@@ -101,6 +112,25 @@ Text* add_label(SceneObject& obj, Font& font, const std::string& text, uint32_t 
     label->raycast_target = false;
     return label;
 }
+
+/**
+ * @struct ColorFade
+ * @brief Exponential fade of a color toward a target, ticked once per frame.
+ *
+ * The button's hover/press signals only ever set target — they carry intent, not
+ * animation. Something has to drive current toward it every frame; that's this
+ * struct's only job, and it's deliberately independent of Button/ColorTransition
+ * (which fades a *different* graphic — the button's own Image — through its own
+ * mechanism). Used here to animate the halo and label colors that live outside
+ * the button and that ColorTransition therefore cannot reach.
+ */
+struct ColorFade {
+    glm::vec4 current{1.0f};
+    glm::vec4 target{1.0f};
+    float     speed = 10.0f; /**< Higher = snappier; 1/speed is roughly the settle time in seconds. */
+
+    void tick(float dt) { current = glm::mix(current, target, std::min(1.0f, dt * speed)); }
+};
 
 /** @brief True for the B8G8R8A8 family — stb_image_write expects R,G,B,A byte order, not B,G,R,A. */
 bool is_bgra_format(VkFormat format) {
@@ -240,7 +270,9 @@ int main() {
     std::cout << "==========================================================\n";
     std::cout << "  uicoopa test_window\n";
     std::cout << "  Resize the window to see the anchored panels track their\n";
-    std::cout << "  corners. Click the center button. Press ESC to quit.\n";
+    std::cout << "  corners. Hover/click the center button — a modal dialog\n";
+    std::cout << "  opens, wired entirely through coopa::event::Signal. Press\n";
+    std::cout << "  ESC to quit.\n";
     std::cout << "==========================================================\n\n";
 
 #ifdef NDEBUG
@@ -281,9 +313,9 @@ int main() {
     canvas->scaler.reference_resolution = { 1280.0f, 720.0f };
     canvas->scaler.match_width_or_height = 0.5f;
 
-    // Full-screen background; toggled by the button below.
-    auto* background = add_panel(canvas_obj, "Background", AnchorPreset::StretchAll,
-                                 { 0.0f, 0.0f }, { 0.0f, 0.0f }, glm::vec4(0.08f, 0.09f, 0.12f, 1.0f));
+    // Full-screen, constant-color background — everything else draws on top of it.
+    add_panel(canvas_obj, "Background", AnchorPreset::StretchAll,
+             { 0.0f, 0.0f }, { 0.0f, 0.0f }, glm::vec4(0.08f, 0.09f, 0.12f, 1.0f));
 
     // Four corner-anchored panels — resize the window and these stay pinned to their corner.
     // Each carries a Text label sharing its RectTransform's rect, centered.
@@ -338,25 +370,181 @@ int main() {
         box->add_component<Image>()->color = box_colors[i];
     }
 
-    // Center button: tints on hover/press (Button), and its click toggles the background
-    // color to prove EventSystem's press-and-release-over-the-same-object routing.
+    // A soft glow that sits *behind* the button, on its own SceneObject — something
+    // ColorTransition structurally cannot reach, since it only ever writes to
+    // Button::target_graphic. Bigger than the button and non-raycasting, so it never
+    // steals the hover boundary at its edges. Added before ButtonPanel so it draws
+    // (and hit-tests) underneath it.
+    const glm::vec4 kHaloIdle (0.42f, 0.70f, 1.00f, 0.00f);
+    const glm::vec4 kHaloHover(0.42f, 0.70f, 1.00f, 0.35f);
+    const glm::vec4 kHaloPress(0.55f, 0.80f, 1.00f, 0.55f);
+    auto* halo_obj = add_panel(canvas_obj, "HoverHalo", AnchorPreset::MiddleCenter,
+                               { 0.0f, 0.0f }, { 300.0f, 110.0f }, kHaloIdle);
+    auto* halo_img = halo_obj->get_component<Image>();
+    halo_img->raycast_target = false;
+
+    // Center button: ColorTransition fades color *and* opacity on hover/press
+    // (normal.a < highlighted.a/pressed.a — see colors below) purely from its own
+    // per-frame lerp. Everything else — the halo, the status line, the modal dialog
+    // — is driven off Button's Signals instead, to prove those are independently
+    // useful, not just a repackaging of ColorTransition.
     auto* button_obj = add_panel(canvas_obj, "ButtonPanel", AnchorPreset::MiddleCenter,
                                  { 0.0f, 0.0f }, { 260.0f, 70.0f }, glm::vec4(1.0f));
     auto* button = button_obj->add_component<Button>();
-    button->colors.normal      = { 0.30f, 0.55f, 0.90f, 1.0f };
-    button->colors.highlighted = { 0.40f, 0.65f, 1.00f, 1.0f };
-    button->colors.pressed     = { 0.20f, 0.40f, 0.70f, 1.0f };
-    add_label(*button_obj, ui_font, "Click Me", kBodySize, glm::vec4(1.0f));
+    button->colors.normal      = { 0.30f, 0.55f, 0.90f, 0.55f };
+    button->colors.highlighted = { 0.42f, 0.70f, 1.00f, 1.00f };
+    button->colors.pressed     = { 0.20f, 0.40f, 0.70f, 1.00f };
+    const glm::vec4 kLabelIdle (0.92f, 0.92f, 0.95f, 1.0f);
+    const glm::vec4 kLabelHover(1.00f, 0.95f, 0.55f, 1.0f);
+    Text* click_label = add_label(*button_obj, ui_font, "Click Me", kBodySize, kLabelIdle);
+
+    // A one-line readout, purely a spectator: it never raycasts, it just reflects
+    // whatever the button's signals report — including the live slot count, to make
+    // the multicast nature of Signal visible rather than asserted.
+    auto* status_obj = canvas_obj.add_child(std::make_unique<SceneObject>("StatusLine"));
+    auto* status_rt = status_obj->add_component<RectTransform>();
+    status_rt->anchor_preset(AnchorPreset::MiddleCenter);
+    status_rt->set_anchored_position({ 0.0f, -80.0f });
+    status_rt->set_size_delta({ 560.0f, 28.0f });
+    Text* status = add_label(*status_obj, ui_font, "idle", kBodySize, glm::vec4(0.75f, 0.80f, 0.85f, 1.0f));
+
+    // --- Modal dialog: a scrim + panel + Close button, all inactive until opened ---
+    //
+    // Added *last* among Canvas's children so it draws on top of everything else
+    // (CanvasComponent::emit_ draws a node's own components before recursing into
+    // children — later canvas children paint over earlier ones). Raycaster visits
+    // children before parents in *reverse* array order, so ModalDialog is checked
+    // first too: its own Image (the scrim, raycast_target defaults true) swallows
+    // any click that doesn't land on DialogPanel/DialogClose, so the button behind
+    // it is never reachable while the dialog is open — no extra flag required.
+    auto* dialog = add_panel(canvas_obj, "ModalDialog", AnchorPreset::StretchAll,
+                             { 0.0f, 0.0f }, { 0.0f, 0.0f }, glm::vec4(0.02f, 0.02f, 0.04f, 0.62f));
+
+    auto* dialog_panel = add_panel(*dialog, "DialogPanel", AnchorPreset::MiddleCenter,
+                                   { 0.0f, 0.0f }, { 480.0f, 260.0f }, glm::vec4(0.14f, 0.15f, 0.20f, 1.0f));
+
+    auto* dialog_title_obj = dialog_panel->add_child(std::make_unique<SceneObject>("DialogTitle"));
+    auto* dialog_title_rt = dialog_title_obj->add_component<RectTransform>();
+    dialog_title_rt->anchor_preset(AnchorPreset::TopCenter);
+    dialog_title_rt->set_anchored_position({ 0.0f, -34.0f });
+    dialog_title_rt->set_size_delta({ 420.0f, 44.0f });
+    add_label(*dialog_title_obj, ui_font, "Modal Dialog", kTitleSize, glm::vec4(1.0f));
+
+    auto* dialog_body_obj = dialog_panel->add_child(std::make_unique<SceneObject>("DialogBody"));
+    auto* dialog_body_rt = dialog_body_obj->add_component<RectTransform>();
+    dialog_body_rt->anchor_preset(AnchorPreset::TopCenter);
+    dialog_body_rt->set_anchored_position({ 0.0f, -90.0f });
+    dialog_body_rt->set_size_delta({ 420.0f, 96.0f });
+    add_label(*dialog_body_obj, ui_font,
+             "Opened by a Signal-driven Button::on_click slot. This panel and its Close "
+             "button below are an ordinary inactive SceneObject subtree, shown and hidden "
+             "with set_active().",
+             kBodySize, glm::vec4(0.85f, 0.85f, 0.88f, 1.0f),
+             HorizontalAlign::Center, VerticalAlign::Top, TextOverflow::Wrap);
+
+    auto* dialog_close_obj = add_panel(*dialog_panel, "DialogClose", AnchorPreset::BottomCenter,
+                                       { 0.0f, 26.0f }, { 160.0f, 44.0f }, glm::vec4(1.0f));
+    auto* close_button = dialog_close_obj->add_component<Button>();
+    close_button->colors.normal      = { 0.55f, 0.30f, 0.35f, 1.0f };
+    close_button->colors.highlighted = { 0.70f, 0.40f, 0.45f, 1.0f };
+    close_button->colors.pressed     = { 0.40f, 0.20f, 0.25f, 1.0f };
+    add_label(*dialog_close_obj, ui_font, "Close", kBodySize, glm::vec4(1.0f));
+
+    // --- Wire the button's signals ---
+    //
+    // ScopedConnections live in this vector so every slot below disconnects cleanly
+    // when main() returns; because Connection only holds a weak_ptr into a shared
+    // control block (see coopa/event/signal.h), it does not matter whether this
+    // vector is destroyed before or after canvas_obj — there's no dangling-pointer
+    // ordering hazard either way.
+    std::vector<coopa::event::ScopedConnection> connections;
+
+    ColorFade halo_fade;
+    halo_fade.current = kHaloIdle;
+    halo_fade.target  = kHaloIdle;
+    ColorFade label_fade;
+    label_fade.current = kLabelIdle;
+    label_fade.target  = kLabelIdle;
+
+    // Two independent consumers of the same on_hover_enter signal — the halo/label
+    // fade targets, and the status line's text (which also reports the live slot
+    // count via on_hover_enter.slot_count(), so the multicast is visible, not just
+    // asserted). Neither consumer knows the other exists.
+    connections.push_back(button->on_hover_enter.connect_scoped(
+        [&](const PointerEventData& e) {
+            halo_fade.target = kHaloHover;
+            label_fade.target = kLabelHover;
+            status->text = "hover @ (" + std::to_string(static_cast<int>(e.position.x)) + ", " +
+                           std::to_string(static_cast<int>(e.position.y)) + ")  —  " +
+                           std::to_string(button->on_hover_enter.slot_count()) + " on_hover_enter slot(s)";
+        }));
+    connections.push_back(button->on_hover_exit.connect_scoped(
+        [&](const PointerEventData&) {
+            halo_fade.target = kHaloIdle;
+            label_fade.target = kLabelIdle;
+            status->text = "idle";
+        }));
+    connections.push_back(button->on_press.connect_scoped(
+        [&](const PointerEventData& e) {
+            halo_fade.target = kHaloPress;
+            status->text = "pressed (button " + std::to_string(e.button) + ")";
+        }));
+    connections.push_back(button->on_release.connect_scoped(
+        [&](const PointerEventData&) {
+            halo_fade.target = button->hovered() ? kHaloHover : kHaloIdle;
+            status->text = button->hovered() ? "hover" : "idle";
+        }));
+
     int click_count = 0;
-    button->on_click = [&]() {
+    connections.push_back(button->on_click.connect_scoped([&]() {
         ++click_count;
         std::cout << "[test_window] Button clicked " << click_count << " time(s).\n";
-        background->get_component<Image>()->color = (click_count % 2 == 0)
-            ? glm::vec4(0.08f, 0.09f, 0.12f, 1.0f)
-            : glm::vec4(0.12f, 0.08f, 0.10f, 1.0f);
-    };
+    }));
+    connections.push_back(button->on_click.connect_scoped([&]() {
+        // Only ever toggle visibility from a slot. EventSystem::dispatch_ is mid-iteration
+        // over button_obj's components() while this runs, so destroying that object
+        // (detach_child / remove_component) here would be undefined behavior — set_active()
+        // is the one operation Signal's re-entrancy guarantees make safe.
+        dialog->set_active(true);
+    }));
+    // A one-shot hint: proves a slot can disconnect *itself* mid-emit without Signal
+    // destroying the very std::function currently running it (see signal.h's emit()/
+    // disconnect() re-entrancy notes). Declared as a plain Connection, not a
+    // ScopedConnection, precisely because it means to outlive this scope by exactly
+    // one click and then remove itself.
+    coopa::event::Connection hint;
+    hint = button->on_click.connect([&]() {
+        status->text = "Tip: use the dialog's Close button to dismiss it.";
+        hint.disconnect();
+    });
 
+    connections.push_back(close_button->on_click.connect_scoped([&]() {
+        dialog->set_active(false);
+    }));
+
+    // Build the dialog subtree *active* so this start() call reaches DialogClose's
+    // Button::start() — which discovers target_graphic AND applies colors.normal —
+    // before it's hidden. SceneObject::start()/update() both skip inactive subtrees
+    // (see coopa/scene/scene_object.h), so a dialog built inactive from the outset
+    // would leave DialogClose's target_graphic null and flash white on first open.
     canvas_obj.start();
+    dialog->set_active(false);
+
+    if (std::getenv("OPEN_DIALOG")) {
+        dialog->set_active(true);
+    }
+    if (std::getenv("FORCE_HOVER")) {
+        // Emits on_hover_enter with no pointer anywhere near the button, to prove the
+        // halo/label/status effects are driven by the signal, not by Button::hovered_
+        // (which stays false here — ColorTransition's own tint is untouched by this).
+        // Resolve layout once first so button_obj's rect (and the reported position
+        // below) reflects real geometry rather than the pre-layout default of {0,0}.
+        auto [init_w, init_h] = window.framebuffer_size();
+        canvas->rebuild_layout(init_w, init_h);
+        PointerEventData synth;
+        synth.position = button_obj->get_component<RectTransform>()->rect().center();
+        button->on_hover_enter.emit(synth);
+    }
 
     UiInput     ui_input;
     EventSystem event_system;
@@ -378,6 +566,13 @@ int main() {
         last_time = now;
 
         canvas_obj.update(dt);  // drives Button's hover/press color transition
+
+        // Advances the halo/label toward whatever target the hover/press signal slots
+        // last set (see wiring above) — the signals carry intent, this animates it.
+        halo_fade.tick(dt);
+        label_fade.tick(dt);
+        halo_img->color = halo_fade.current;
+        click_label->color = label_fade.current;
 
         auto [sw, sh] = window.framebuffer_size();
         if (sw == 0 || sh == 0) continue;  // minimized
