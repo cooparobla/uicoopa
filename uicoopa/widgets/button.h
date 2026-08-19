@@ -10,6 +10,8 @@
 #include <uicoopa/input/event_system.h>
 #include <uicoopa/widgets/graphic.h>
 #include <coopa/event/signal.h>
+#include <coopa/event/event_bus.h>
+#include <coopa/scene/scene.h>
 #include <glm/glm.hpp>
 #include <string>
 #include <algorithm>
@@ -36,18 +38,27 @@ struct ColorTransition {
  * Tints target_graphic (defaulting to the first Graphic on the same SceneObject,
  * e.g. a sibling Image) according to hover/press/disabled state.
  *
- * Beyond the color tint, every pointer transition is also exposed as a
- * coopa::event::Signal so unrelated systems can react without subclassing:
- * on_hover_enter/on_hover_exit fire on hover boundary crossings, on_press/
- * on_release on primary-button down/up, and on_click when a press and release
- * land on this same object. Each fires at most once per matching transition —
- * e.g. on_hover_exit never fires without a preceding on_hover_enter.
+ * Beyond the color tint, every pointer transition is exposed TWO ways, kept
+ * in sync with each other:
+ *  - a typed coopa::event::Signal member (on_hover_enter/on_hover_exit/
+ *    on_press/on_release/on_click) for tight, compile-checked C++ coupling —
+ *    connect() needs a pointer/reference to this exact Button.
+ *  - the same transition, also emitted on the owning Scene's named
+ *    coopa::event::EventBus as ("hover_enter"/"hover_exit"/"press"/"release"/
+ *    "click") "from" this object's name — for loose, name-based coupling: a
+ *    listener anywhere else in the scene can react via
+ *    `scene.events().on(owner_name, "click", handler)` without ever holding
+ *    a Button* at all. Only available once this component is scene-resident
+ *    (Component::scene set, i.e. after Scene::start()) — a no-op before that.
+ * Each fires at most once per matching transition — e.g. on_hover_exit/
+ * "hover_exit" never fires without a preceding on_hover_enter/"hover_enter".
  *
  * Usage:
  * @code
  * auto* img = obj->add_component<Image>();
  * auto* btn = obj->add_component<Button>();
- * btn->on_click.connect([] { std::cout << "clicked!\n"; });
+ * btn->on_click.connect([] { std::cout << "clicked!\n"; });        // typed
+ * scene.events().on("MyButton", "click", [](const EventArgs&) {}); // named
  * @endcode
  */
 class Button : public UIComponent, public IPointerHandler {
@@ -105,30 +116,44 @@ public:
         if (!interactable || hovered_) return;
         hovered_ = true;
         on_hover_enter.emit(data);
+        emit_named_("hover_enter", data);
     }
     void on_pointer_exit(const PointerEventData& data) override {
         if (!hovered_) return;
         hovered_ = false;
         on_hover_exit.emit(data);
+        emit_named_("hover_exit", data);
     }
     void on_pointer_down(const PointerEventData& data) override {
         if (!interactable || pressed_) return;
         pressed_ = true;
         on_press.emit(data);
+        emit_named_("press", data);
     }
     void on_pointer_up(const PointerEventData& data) override {
         if (!pressed_) return;
         pressed_ = false;
         on_release.emit(data);
+        emit_named_("release", data);
     }
-    void on_pointer_click(const PointerEventData&) override {
-        if (interactable) on_click.emit();
+    void on_pointer_click(const PointerEventData& data) override {
+        if (!interactable) return;
+        on_click.emit();
+        emit_named_("click", data);
     }
 
 private:
     void apply_color_(const glm::vec4& c) {
         current_color_ = c;
         if (target_graphic) target_graphic->color = c;
+    }
+
+    /** @brief Emits signal_name on the owning Scene's EventBus with data's position/button packed in. */
+    void emit_named_(const char* signal_name, const PointerEventData& data) {
+        if (!scene || !owner) return;
+        coopa::event::EventArgs args;
+        args.set("x", static_cast<int64_t>(data.position.x)).set("y", static_cast<int64_t>(data.position.y)).set("button", data.button);
+        scene->events().emit(owner->name(), signal_name, args);
     }
 
     bool      hovered_ = false;

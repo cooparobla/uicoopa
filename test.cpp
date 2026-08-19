@@ -37,7 +37,6 @@
 #include <uicoopa/groups/scroll_rect.h>
 #include <uicoopa/widgets/mask.h>
 #include <uicoopa/ui_yaml.h>
-#include <uicoopa/ui_scene.h>
 
 #include <coopa/scene/scene_object.h>
 #include <coopa/scene/scene_manager.h>
@@ -793,8 +792,8 @@ void test_scene_yaml_loads_hierarchy() {
     auto* root = scene.find_object("Root");
     ASSERT_TRUE(root != nullptr);
     ASSERT_TRUE(root->children().size() == 2);
-    // Document order is z-order (see ui_scene.h) -- assert it landed in the same
-    // order it was written, not e.g. reversed or alphabetized.
+    // Document order is z-order (see canvas.h's CanvasComponent doc) -- assert
+    // it landed in the same order it was written, not e.g. reversed or alphabetized.
     ASSERT_TRUE(root->children()[0]->name() == "ChildA");
     ASSERT_TRUE(root->children()[1]->name() == "ChildB");
 
@@ -856,8 +855,8 @@ void test_scene_yaml_component_parsing() {
 void test_canvas_sort_order() {
     coopa::scene::Scene scene("SortOrderFixture");
 
-    // Added in descending sort_order to prove UiScene sorts rather than just
-    // keeping insertion/document order.
+    // Added in descending sort_order to prove collect_canvases() sorts rather
+    // than just keeping insertion/document order.
     auto obj_a = std::make_unique<SceneObject>("CanvasA");
     auto* canvas_a = obj_a->add_component<CanvasComponent>();
     canvas_a->sort_order = 5;
@@ -872,16 +871,20 @@ void test_canvas_sort_order() {
     canvas_b->scaler.scale_factor = 3.0f;
     scene.add_root_object(std::move(obj_b));
 
-    UiScene ui_scene(scene);
-    ASSERT_TRUE(ui_scene.canvases().size() == 2);
-    ASSERT_TRUE(ui_scene.canvases()[0] == canvas_b);  // sort_order 1, drawn first (bottom)
-    ASSERT_TRUE(ui_scene.canvases()[1] == canvas_a);  // sort_order 5, drawn last (top)
+    scene.start();
 
-    DrawList draw_list;
-    ui_scene.rebuild(800, 600, draw_list);
-    // primary_scale_factor() is the highest-sort_order (topmost) canvas's -- CanvasA's 2.0,
-    // not CanvasB's 3.0 -- matching UiPass::draw()'s single shared scale factor.
-    ASSERT_NEAR(ui_scene.primary_scale_factor(), 2.0f, 1e-4f);
+    auto canvases = collect_canvases(scene);
+    ASSERT_TRUE(canvases.size() == 2);
+    ASSERT_TRUE(canvases[0] == canvas_b);  // sort_order 1, drawn first (bottom)
+    ASSERT_TRUE(canvases[1] == canvas_a);  // sort_order 5, drawn last (top)
+
+    // Each canvas is driven directly through Scene::late_update() -- no wrapper
+    // class involved -- and computes its OWN scale factor independently, unlike
+    // the old UiScene's single shared "primary" scale factor.
+    for (auto* c : canvases) c->set_viewport(800, 600);
+    scene.late_update(0.016f);
+    ASSERT_NEAR(canvas_a->scale_factor(), 2.0f, 1e-4f);
+    ASSERT_NEAR(canvas_b->scale_factor(), 3.0f, 1e-4f);
 }
 
 void test_scroll_rect_content_by_name() {
@@ -922,6 +925,112 @@ void test_scroll_rect_content_by_name() {
     ASSERT_TRUE(scroll != nullptr);
     // Must resolve "Content" by name, NOT fall back to the first child ("Decoy").
     ASSERT_TRUE(scroll->content == content);
+}
+
+void test_late_update_and_event_bus() {
+    // A component whose late_update() reads a value a DIFFERENT component's
+    // update() sets the same frame -- proves the two are separate, ordered
+    // passes (Scene::update() fully finishes before Scene::late_update() starts).
+    struct Setter : public coopa::scene::Component {
+        std::string type_name() const override { return "Setter"; }
+        int value = 0;
+        void update(float) override { value = 7; }
+    };
+    struct Reader : public coopa::scene::Component {
+        std::string type_name() const override { return "Reader"; }
+        Setter* target = nullptr;
+        int observed = -1;
+        void late_update(float) override { if (target) observed = target->value; }
+    };
+
+    coopa::scene::Scene scene("LateUpdateFixture");
+    auto obj = std::make_unique<SceneObject>("Root");
+    auto* setter = obj->add_component<Setter>();
+    auto* reader = obj->add_component<Reader>();
+    reader->target = setter;
+    scene.add_root_object(std::move(obj));
+    scene.start();
+
+    ASSERT_TRUE(reader->observed == -1);
+    scene.update(0.016f);
+    ASSERT_TRUE(reader->observed == -1);  // late_update hasn't run yet
+    scene.late_update(0.016f);
+    ASSERT_TRUE(reader->observed == 7);
+
+    // Named EventBus: object+signal-scoped listener, a signal-name-only
+    // wildcard listener, and confirmation a different object/signal does NOT fire.
+    bool specific_fired = false, wildcard_fired = false, wrong_fired = false;
+    coopa::event::EventArgs got;
+    scene.events().on("Root", "ping", [&](const coopa::event::EventArgs& a) {
+        specific_fired = true;
+        got = a;
+    });
+    scene.events().on_any("ping", [&](const coopa::event::EventArgs&) { wildcard_fired = true; });
+    scene.events().on("Root", "pong", [&](const coopa::event::EventArgs&) { wrong_fired = true; });
+    scene.events().on("Elsewhere", "ping", [&](const coopa::event::EventArgs&) { wrong_fired = true; });
+
+    coopa::event::EventArgs args;
+    args.set("n", 3).set("label", std::string("hi"));
+    scene.events().emit("Root", "ping", args);
+
+    ASSERT_TRUE(specific_fired);
+    ASSERT_TRUE(wildcard_fired);
+    ASSERT_TRUE(!wrong_fired);
+    ASSERT_TRUE(got.get<int>("n", -1) == 3);
+    ASSERT_TRUE(got.get<std::string>("label", "") == "hi");
+}
+
+void test_canvas_self_driven() {
+    // No UiScene, no external rebuild_layout()/rebuild_emit() calls -- just
+    // Scene::late_update(), exactly like an application drives a real frame.
+    coopa::scene::Scene scene("CanvasSelfDriven");
+
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    auto* panel = canvas_obj->add_child(std::make_unique<SceneObject>("Panel"));
+    panel->add_component<RectTransform>()->set_size_delta({ 50.0f, 50.0f });
+    panel->add_component<Image>()->color = glm::vec4(1.0f);
+
+    scene.add_root_object(std::move(canvas_obj));
+    scene.start();
+
+    canvas->set_viewport(800, 600);
+    ASSERT_NEAR(canvas->root_rect().size().x, 800.0f, 1e-3f);
+
+    scene.late_update(0.016f);  // measure -> arrange -> emit -> EventSystem::process, all internal to Canvas
+
+    ASSERT_TRUE(!canvas->draw_list().batches().empty());
+    ASSERT_TRUE(collect_canvases(scene).size() == 1);
+    ASSERT_TRUE(collect_canvases(scene)[0] == canvas);
+}
+
+void test_button_emits_named_events() {
+    // Unlike test_button_signals() below (a bare, Scene-less SceneObject),
+    // Button here is scene-resident, so its EventBus emission path is live.
+    coopa::scene::Scene scene("ButtonEventsFixture");
+    auto obj = std::make_unique<SceneObject>("MyButton");
+    obj->add_component<RectTransform>();
+    obj->add_component<Image>();
+    auto* button = obj->add_component<Button>();
+    scene.add_root_object(std::move(obj));
+    scene.start();  // stamps Component::scene AND discovers target_graphic
+
+    bool click_fired = false;
+    int64_t got_x = -1;
+    scene.events().on("MyButton", "click", [&](const coopa::event::EventArgs& a) {
+        click_fired = true;
+        got_x = a.get<int64_t>("x", -1);
+    });
+
+    PointerEventData data;
+    data.position = { 12.0f, 34.0f };
+    button->on_pointer_click(data);
+
+    ASSERT_TRUE(click_fired);
+    ASSERT_TRUE(got_x == 12);
 }
 
 void test_button_signals() {
@@ -978,6 +1087,123 @@ void test_button_signals() {
     ASSERT_NEAR(c.a, 0.9f, 1e-4f);
 }
 
+void test_reactor_set_active_on_signal() {
+    // Mirrors ModalDialog's real usage: a SetActiveOnSignal attached directly to the
+    // object it controls (target left empty -> acts on its own owner).
+    coopa::scene::Scene scene("SetActiveReactorFixture");
+
+    auto emitter = std::make_unique<SceneObject>("Emitter");
+    scene.add_root_object(std::move(emitter));
+
+    auto dialog = std::make_unique<SceneObject>("Dialog");
+    auto* opener = dialog->add_component<coopa::ui::SetActiveOnSignal>();
+    opener->listen_object = "Emitter";
+    opener->listen_signal = "open";
+    opener->active_value = true;
+    auto* closer = dialog->add_component<coopa::ui::SetActiveOnSignal>();
+    closer->listen_object = "Emitter";
+    closer->listen_signal = "close";
+    closer->active_value = false;
+    scene.add_root_object(std::move(dialog));
+
+    // Must be built+started active, THEN deactivated: SceneObject::start() skips
+    // inactive subtrees entirely, so it never reaches a reactor's start() (which
+    // registers its EventBus listener) unless the object starts active.
+    scene.start();
+    auto* dialog_obj = scene.find_object("Dialog");
+    dialog_obj->set_active(false);
+    ASSERT_TRUE(!dialog_obj->active());
+
+    scene.events().emit("Emitter", "open");
+    ASSERT_TRUE(dialog_obj->active());
+
+    scene.events().emit("Emitter", "close");
+    ASSERT_TRUE(!dialog_obj->active());
+}
+
+void test_reactor_color_on_signal() {
+    // Also covers target_component disambiguation: an object with both an Image
+    // and a Text needs to say which Graphic a given ColorOnSignal should drive.
+    coopa::scene::Scene scene("ColorReactorFixture");
+
+    auto emitter = std::make_unique<SceneObject>("Emitter");
+    scene.add_root_object(std::move(emitter));
+
+    auto obj = std::make_unique<SceneObject>("Multi");
+    obj->add_component<RectTransform>();
+    auto* img = obj->add_component<Image>();
+    img->color = glm::vec4(1.0f);
+    auto* txt = obj->add_component<Text>();
+    txt->color = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+
+    auto* to_image = obj->add_component<coopa::ui::ColorOnSignal>();
+    to_image->listen_object = "Emitter";
+    to_image->listen_signal = "tint_image";
+    to_image->color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);
+    to_image->fade_duration = 0.0f;  // instant, for a deterministic test
+    to_image->target_component = "Image";
+
+    auto* to_text = obj->add_component<coopa::ui::ColorOnSignal>();
+    to_text->listen_object = "Emitter";
+    to_text->listen_signal = "tint_text";
+    to_text->color = glm::vec4(0.0f, 1.0f, 0.0f, 1.0f);
+    to_text->fade_duration = 0.0f;
+    to_text->target_component = "Text";
+
+    scene.add_root_object(std::move(obj));
+    scene.start();
+
+    scene.events().emit("Emitter", "tint_image");
+    scene.events().emit("Emitter", "tint_text");
+    scene.update(0.016f);  // ticks the fade -- instant with fade_duration == 0
+
+    ASSERT_TRUE(img->color == glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+    ASSERT_TRUE(txt->color == glm::vec4(0.0f, 1.0f, 0.0f, 1.0f));
+}
+
+void test_reactor_text_on_signal() {
+    // {key} placeholder substitution from the firing signal's EventArgs, plus
+    // once: true disconnecting a reactor after its first firing.
+    coopa::scene::Scene scene("TextReactorFixture");
+
+    auto emitter = std::make_unique<SceneObject>("Emitter");
+    scene.add_root_object(std::move(emitter));
+
+    auto obj = std::make_unique<SceneObject>("Status");
+    auto* txt = obj->add_component<Text>();
+    txt->text = "idle";
+
+    auto* hover_reactor = obj->add_component<coopa::ui::TextOnSignal>();
+    hover_reactor->listen_object = "Emitter";
+    hover_reactor->listen_signal = "hover";
+    hover_reactor->text = "hover @ ({x}, {y})";
+
+    auto* tip_reactor = obj->add_component<coopa::ui::TextOnSignal>();
+    tip_reactor->listen_object = "Emitter";
+    tip_reactor->listen_signal = "click";
+    tip_reactor->once = true;
+    tip_reactor->text = "tip shown once";
+
+    scene.add_root_object(std::move(obj));
+    scene.start();
+
+    coopa::event::EventArgs hover_args;
+    hover_args.set("x", 640).set("y", 360);
+    scene.events().emit("Emitter", "hover", hover_args);
+    ASSERT_TRUE(txt->text == "hover @ (640, 360)");
+
+    scene.events().emit("Emitter", "click");
+    ASSERT_TRUE(txt->text == "tip shown once");
+
+    // once: true must have disconnected -- a second "hover" after the "click"
+    // still updates txt (proving the hover reactor itself is unaffected), but a
+    // second "click" must NOT flip it away from whatever hover just set.
+    scene.events().emit("Emitter", "hover", hover_args);
+    ASSERT_TRUE(txt->text == "hover @ (640, 360)");
+    scene.events().emit("Emitter", "click");
+    ASSERT_TRUE(txt->text == "hover @ (640, 360)");  // once-reactor no longer listening
+}
+
 int main() {
     std::cout << "===========================================" << std::endl;
     std::cout << "          Running uicoopa Test Suite       " << std::endl;
@@ -1006,7 +1232,13 @@ int main() {
     RUN_TEST(test_scene_yaml_component_parsing);
     RUN_TEST(test_canvas_sort_order);
     RUN_TEST(test_scroll_rect_content_by_name);
+    RUN_TEST(test_late_update_and_event_bus);
+    RUN_TEST(test_canvas_self_driven);
+    RUN_TEST(test_button_emits_named_events);
     RUN_TEST(test_button_signals);
+    RUN_TEST(test_reactor_set_active_on_signal);
+    RUN_TEST(test_reactor_color_on_signal);
+    RUN_TEST(test_reactor_text_on_signal);
 
     std::cout << "===========================================" << std::endl;
     std::cout << "Tests run: " << g_tests_run << ", Failed: " << g_tests_failed << std::endl;

@@ -62,6 +62,11 @@
 #include <uicoopa/groups/grid_layout_group.h>
 #include <uicoopa/groups/content_size_fitter.h>
 #include <uicoopa/groups/scroll_rect.h>
+#include <uicoopa/reactors/signal_reactor.h>
+#include <uicoopa/reactors/set_active_on_signal.h>
+#include <uicoopa/reactors/color_on_signal.h>
+#include <uicoopa/reactors/text_on_signal.h>
+#include <uicoopa/reactors/log_on_signal.h>
 
 #include <glm/glm.hpp>
 #include <filesystem>
@@ -346,6 +351,14 @@ inline void parse_layout_group_common(const fkyaml::node& node, LayoutGroupBase&
     if (node.contains("child_control_height"))      g.child_control_height      = node.at("child_control_height").get_value<bool>();
 }
 
+/** @brief listen_object/listen_signal/once/target fields shared by every SignalReactor subclass. */
+inline void parse_signal_reactor_common(const fkyaml::node& node, coopa::ui::SignalReactor& r) {
+    if (node.contains("listen_object")) r.listen_object = node.at("listen_object").get_value<std::string>();
+    if (node.contains("listen_signal")) r.listen_signal = node.at("listen_signal").get_value<std::string>();
+    if (node.contains("once"))          r.once          = node.at("once").get_value<bool>();
+    if (node.contains("target"))        r.target        = node.at("target").get_value<std::string>();
+}
+
 }  // namespace detail
 
 /**
@@ -516,6 +529,50 @@ inline void register_ui_components() {
         if (node.contains("inertia"))            sr->inertia            = node.at("inertia").get_value<bool>();
         if (node.contains("deceleration_rate"))  sr->deceleration_rate  = node.at("deceleration_rate").get_value<float>();
         if (node.contains("scroll_sensitivity")) sr->scroll_sensitivity = node.at("scroll_sensitivity").get_value<float>();
+    });
+
+    SceneLoader::register_component_parser("SetActiveOnSignal", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
+        auto* r = obj.add_component<SetActiveOnSignal>();
+        parse_signal_reactor_common(node, *r);
+        if (node.contains("active_value")) r->active_value = node.at("active_value").get_value<bool>();
+    });
+
+    SceneLoader::register_component_parser("ColorOnSignal", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
+        auto* r = obj.add_component<ColorOnSignal>();
+        parse_signal_reactor_common(node, *r);
+        if (node.contains("color"))            r->color = parse_color(node.at("color"), r->color);
+        if (node.contains("fade_duration"))    r->fade_duration = node.at("fade_duration").get_value<float>();
+        if (node.contains("target_component")) r->target_component = node.at("target_component").get_value<std::string>();
+
+        // Link to an earlier sibling ColorOnSignal on the SAME object that animates the
+        // SAME graphic (matching target_component), so they share one continuous fade
+        // chase instead of independently clobbering each other's writes each frame (see
+        // ColorOnSignal::FadeState's doc). Only meaningful for target-empty (self)
+        // reactors -- cross-object `target` reactors aren't resolved until start(), so
+        // there's no sibling list to search here yet.
+        if (r->target.empty()) {
+            for (auto& c : obj.components()) {
+                auto* sibling = dynamic_cast<ColorOnSignal*>(c.get());
+                if (sibling && sibling != r && sibling->target.empty() &&
+                    sibling->target_component == r->target_component) {
+                    r->shared_fade = sibling->shared_fade;
+                    r->ticks = false;
+                    break;
+                }
+            }
+        }
+    });
+
+    SceneLoader::register_component_parser("TextOnSignal", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
+        auto* r = obj.add_component<TextOnSignal>();
+        parse_signal_reactor_common(node, *r);
+        if (node.contains("text")) r->text = node.at("text").get_value<std::string>();
+    });
+
+    SceneLoader::register_component_parser("LogOnSignal", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
+        auto* r = obj.add_component<LogOnSignal>();
+        parse_signal_reactor_common(node, *r);
+        if (node.contains("message")) r->message = node.at("message").get_value<std::string>();
     });
 }
 

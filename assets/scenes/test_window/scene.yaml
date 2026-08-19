@@ -200,15 +200,35 @@ scene:
             - type: Image
               color: { r: 0.42, g: 0.70, b: 1.00, a: 0.0 }
               raycast_target: false
+            - type: ColorOnSignal
+              listen_object: ButtonPanel
+              listen_signal: hover_enter
+              color: { r: 0.42, g: 0.70, b: 1.00, a: 0.35 }
+              fade_duration: 0.1
+            - type: ColorOnSignal
+              listen_object: ButtonPanel
+              listen_signal: hover_exit
+              color: { r: 0.42, g: 0.70, b: 1.00, a: 0.0 }
+              fade_duration: 0.1
+            - type: ColorOnSignal
+              listen_object: ButtonPanel
+              listen_signal: press
+              color: { r: 0.55, g: 0.80, b: 1.00, a: 0.55 }
+              fade_duration: 0.1
+            - type: ColorOnSignal
+              listen_object: ButtonPanel
+              listen_signal: release
+              color: { r: 0.42, g: 0.70, b: 1.00, a: 0.35 }
+              fade_duration: 0.1
           children: []
 
         # ---- Center button ----
         #
         # ColorTransition fades color AND opacity on hover/press (normal.a <
         # highlighted.a/pressed.a) purely from Button's own per-frame lerp.
-        # Everything else -- the halo, the status line, the modal dialog -- is
-        # driven off Button's Signals in test_window.cpp, to prove those are
-        # independently useful, not just a repackaging of ColorTransition.
+        # Everything else -- the halo, the status line, the modal dialog -- reacts
+        # to Button's named EventBus signals via SignalReactor components declared
+        # right here in the scene (see uicoopa/reactors/), not in test_window.cpp.
 
         - name: ButtonPanel
           active: true
@@ -231,6 +251,22 @@ scene:
               horizontal_align: Center
               vertical_align: Middle
               raycast_target: false
+            - type: ColorOnSignal
+              listen_object: ButtonPanel
+              listen_signal: hover_enter
+              target_component: Text
+              color: { r: 1.00, g: 0.95, b: 0.55, a: 1.0 }
+              fade_duration: 0.1
+            - type: ColorOnSignal
+              listen_object: ButtonPanel
+              listen_signal: hover_exit
+              target_component: Text
+              color: { r: 0.92, g: 0.92, b: 0.95, a: 1.0 }
+              fade_duration: 0.1
+            - type: LogOnSignal
+              listen_object: ButtonPanel
+              listen_signal: click
+              message: "Button clicked"
           children: []
 
         # ---- Status line readout ----
@@ -250,6 +286,27 @@ scene:
               horizontal_align: Center
               vertical_align: Middle
               raycast_target: false
+            - type: TextOnSignal
+              listen_object: ButtonPanel
+              listen_signal: hover_enter
+              text: "hover @ ({x}, {y})"
+            - type: TextOnSignal
+              listen_object: ButtonPanel
+              listen_signal: hover_exit
+              text: "idle"
+            - type: TextOnSignal
+              listen_object: ButtonPanel
+              listen_signal: press
+              text: "pressed (button {button})"
+            - type: TextOnSignal
+              listen_object: ButtonPanel
+              listen_signal: release
+              text: "hover"
+            - type: TextOnSignal
+              listen_object: ButtonPanel
+              listen_signal: click
+              once: true
+              text: "Tip: use the dialog's Close button to dismiss it."
           children: []
 
         # ---- Modal dialog ----
@@ -258,9 +315,11 @@ scene:
         # ui_scene.h's ordering contract). Stays active: true here so
         # Scene::start() (run once, inline, by SceneLoader::load()) reaches
         # DialogClose's Button::start() -- which discovers target_graphic AND
-        # applies colors.normal -- before test_window.cpp hides it right after
-        # load_scene() returns. A dialog built inactive from the outset would
-        # leave DialogClose's target_graphic null and flash white on first open.
+        # applies colors.normal -- AND this object's own SetActiveOnSignal
+        # reactors' start() (registering their EventBus listeners) -- before
+        # test_window.cpp hides it right after load_scene() returns. A dialog
+        # built inactive from the outset would leave those uninitialized and
+        # flash white / never reopen on first open.
 
         - name: ModalDialog
           active: true
@@ -269,6 +328,14 @@ scene:
               anchor_preset: StretchAll
             - type: Image
               color: { r: 0.02, g: 0.02, b: 0.04, a: 0.62 }
+            - type: SetActiveOnSignal
+              listen_object: ButtonPanel
+              listen_signal: click
+              active_value: true
+            - type: SetActiveOnSignal
+              listen_object: DialogClose
+              listen_signal: click
+              active_value: false
           children:
 
             - name: DialogPanel
