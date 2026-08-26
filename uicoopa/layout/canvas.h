@@ -155,7 +155,7 @@ public:
     EventSystem& event_system() { return event_system_; }
 
     /** @brief Sets the texture used for untextured/solid-color quads (typically a 1x1 white texel). */
-    void set_default_texture(VkImageView view) { draw_list_.set_default_texture(view); }
+    void set_default_texture(coopa::gfx::TextureView view) { draw_list_.set_default_texture(view); }
 
     /** @brief The geometry this canvas emitted on its most recent late_update(). */
     const DrawList& draw_list() const { return draw_list_; }

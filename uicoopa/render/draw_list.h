@@ -2,7 +2,7 @@
  * @file draw_list.h
  * @brief Accumulates a frame's UI geometry into batched, indexed draw calls.
  *
- * Batches carry a VkImageView rather than a resolved VkDescriptorSet: DrawList
+ * Batches carry a TextureView rather than a resolved DescriptorSet: DrawList
  * has no notion of descriptor sets at all, so it can be filled in during
  * CanvasComponent's emit pass regardless of when/how UiPass has resolved
  * textures to descriptor sets. UiPass is the only place image-view-to-set
@@ -16,7 +16,7 @@
 #include <uicoopa/render/ui_vertex.h>
 #include <uicoopa/render/sprite.h>
 #include <uicoopa/layout/rect.h>
-#include <volk/volk.h>
+#include <gfxcoopa/types/texture_view.h>
 #include <vector>
 #include <array>
 #include <cstdint>
@@ -31,8 +31,8 @@ namespace ui {
 struct DrawBatch {
     uint32_t    first_index;  /**< Offset into DrawList::indices(). */
     uint32_t    index_count;
-    VkImageView texture_view; /**< Resolved to a descriptor set by UiPass at draw time. */
-    Rect        clip;         /**< Canvas-space clip rect; converted to a screen-space VkRect2D by UiPass. */
+    coopa::gfx::TextureView texture_view; /**< Resolved to a descriptor set by UiPass at draw time. */
+    Rect        clip;         /**< Canvas-space clip rect; converted to a screen-space scissor by UiPass. */
 };
 
 /**
@@ -41,7 +41,7 @@ struct DrawBatch {
  *
  * Usage (from CanvasComponent's emit pass, via Graphic::emit()):
  * @code
- * draw_list.set_texture(sprite.texture->view());
+ * draw_list.set_texture(sprite.texture->view_typed());
  * draw_list.add_quad(rect, sprite.uv, packed_color);
  * @endcode
  */
@@ -61,17 +61,17 @@ public:
     }
 
     /** @brief Sets the texture used for untextured/solid-color quads (typically a 1x1 white texel). */
-    void set_default_texture(VkImageView view) {
+    void set_default_texture(coopa::gfx::TextureView view) {
         default_texture_view_ = view;
-        if (current_texture_ == VK_NULL_HANDLE) current_texture_ = view;
+        if (!current_texture_.valid()) current_texture_ = view;
     }
 
     /** @brief The texture set via set_default_texture(); widgets with no sprite should bind this explicitly. */
-    VkImageView default_texture() const { return default_texture_view_; }
+    coopa::gfx::TextureView default_texture() const { return default_texture_view_; }
 
     /** @brief Sets the texture for subsequent add_quad()/add_nine_slice() calls. */
-    void set_texture(VkImageView view) { current_texture_ = view; }
-    VkImageView current_texture() const { return current_texture_; }
+    void set_texture(coopa::gfx::TextureView view) { current_texture_ = view; }
+    coopa::gfx::TextureView current_texture() const { return current_texture_; }
 
     /** @brief Pushes a nested clip rect, intersected with the current one (nested masks narrow, never widen). */
     void push_clip(const Rect& r) { clip_stack_.push_back(intersect(clip_stack_.back(), r)); }
@@ -112,11 +112,11 @@ public:
      */
     void add_nine_slice(const Rect& pos, const Sprite& sprite, uint32_t color) {
         if (!sprite.is_nine_sliced() || !sprite.texture) {
-            set_texture(sprite.texture ? sprite.texture->view() : current_texture_);
+            set_texture(sprite.texture ? sprite.texture->view_typed() : current_texture_);
             add_quad(pos, sprite.uv, color);
             return;
         }
-        set_texture(sprite.texture->view());
+        set_texture(sprite.texture->view_typed());
 
         float tex_w = static_cast<float>(sprite.texture->width());
         float tex_h = static_cast<float>(sprite.texture->height());
@@ -187,8 +187,8 @@ private:
     std::vector<uint32_t>  indices_;
     std::vector<DrawBatch> batches_;
     std::vector<Rect>      clip_stack_{ Rect{} };
-    VkImageView            current_texture_ = VK_NULL_HANDLE;
-    VkImageView            default_texture_view_ = VK_NULL_HANDLE;
+    coopa::gfx::TextureView current_texture_;
+    coopa::gfx::TextureView default_texture_view_;
 };
 
 }  // namespace ui

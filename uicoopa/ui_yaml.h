@@ -51,7 +51,7 @@
 #include <uicoopa/layout/canvas_scaler.h>
 #include <uicoopa/layout/layout_element.h>
 #include <uicoopa/render/sprite.h>
-#include <uicoopa/render/texture.h>
+#include <uicoopa/render/texture_factory.h>
 #include <uicoopa/render/ui_pass.h>
 #include <uicoopa/text/font.h>
 #include <uicoopa/widgets/image.h>
@@ -174,7 +174,7 @@ public:
      */
     Sprite* sprite_for(const std::string& ref, const coopa::scene::SceneLoader::ParseContext& ctx) {
         if (auto* named = UIResources::instance().find_sprite(ref)) return named;
-        Texture* tex = texture_for(ref, ctx);
+        coopa::gfx::engine::data::Texture* tex = texture_for(ref, ctx);
         if (!tex) return nullptr;
 
         auto sprite = std::make_unique<Sprite>();
@@ -195,12 +195,12 @@ public:
      *
      * Call once after loading a scene (or scenes) — replaces the app hand-listing
      * every baked size itself, e.g. test_window.cpp's old
-     * `ui_pass.mark_as_text_atlas(ui_font.atlas_for_size(kTitleSize).texture().view())`
+     * `ui_pass.mark_as_text_atlas(ui_font.atlas_for_size(kTitleSize).texture().view_typed())`
      * lines.
      */
     void mark_text_atlases(UiPass& ui_pass) {
         for (auto& [font, size] : used_text_sizes_) {
-            ui_pass.mark_as_text_atlas(font->atlas_for_size(size).texture().view());
+            ui_pass.mark_as_text_atlas(font->atlas_for_size(size).texture().view_typed());
         }
     }
 
@@ -225,15 +225,15 @@ public:
     }
 
 private:
-    Texture* texture_for(const std::string& ref, const coopa::scene::SceneLoader::ParseContext& ctx) {
+    coopa::gfx::engine::data::Texture* texture_for(const std::string& ref, const coopa::scene::SceneLoader::ParseContext& ctx) {
         if (!device_) return nullptr;
         std::string resolved = resolve_path_(ref, ctx);
         auto it = textures_by_path_.find(resolved);
         if (it != textures_by_path_.end()) return it->second.get();
 
         try {
-            auto tex = Texture::from_file(*device_, *allocator_, *cmd_pool_, resolved);
-            Texture* raw = tex.get();
+            auto tex = load_texture_from_file(*device_, *allocator_, *cmd_pool_, resolved);
+            coopa::gfx::engine::data::Texture* raw = tex.get();
             textures_by_path_.emplace(resolved, std::move(tex));
             return raw;
         } catch (const std::exception& e) {
@@ -255,7 +255,7 @@ private:
     coopa::gfx::command::CommandPool* cmd_pool_  = nullptr;
 
     std::unordered_map<std::string, std::unique_ptr<Font>>    fonts_by_path_;
-    std::unordered_map<std::string, std::unique_ptr<Texture>> textures_by_path_;
+    std::unordered_map<std::string, std::unique_ptr<coopa::gfx::engine::data::Texture>> textures_by_path_;
     std::vector<std::unique_ptr<Sprite>>                      owned_sprites_;
     std::vector<std::pair<Font*, uint32_t>>                   used_text_sizes_;
 };

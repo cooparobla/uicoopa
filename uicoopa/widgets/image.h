@@ -57,7 +57,7 @@ public:
         if (type == ImageType::Sliced && sprite->is_nine_sliced()) {
             draw_list.add_nine_slice(*rect, *sprite, packed);
         } else {
-            draw_list.set_texture(sprite->texture->view());
+            draw_list.set_texture(sprite->texture->view_typed());
             draw_list.add_quad(*rect, sprite->uv, packed);
         }
     }

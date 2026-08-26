@@ -6,7 +6,7 @@
 #ifndef UICOOPA_RENDER_SPRITE_H
 #define UICOOPA_RENDER_SPRITE_H
 
-#include <uicoopa/render/texture.h>
+#include <gfxcoopa/engine/data/texture.h>
 #include <uicoopa/layout/rect.h>
 #include <glm/glm.hpp>
 
@@ -18,7 +18,7 @@ namespace ui {
  * @brief A texture region plus optional nine-slice border metadata.
  */
 struct Sprite {
-    Texture*  texture = nullptr;                                  /**< Non-owning; caller owns the Texture's lifetime. */
+    coopa::gfx::engine::data::Texture* texture = nullptr;         /**< Non-owning; caller owns the Texture's lifetime. */
     Rect      uv{ glm::vec2(0.0f), glm::vec2(1.0f) };              /**< Sub-region within the texture, in [0,1] UV space. */
     glm::vec4 border{0.0f};                                        /**< Nine-slice border in source texture pixels: (left, bottom, right, top). */
 

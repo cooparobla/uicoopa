@@ -36,30 +36,19 @@
  * show up in a screenshot with no pointer anywhere near the button.
  */
 
+// The one raw Vulkan include in this file, for save_screenshot()'s framebuffer
+// create/destroy pair -- see that function's doc for why (gfxcoopa has no
+// Framebuffer wrapper). Nothing else in this file names a Vk*/VK_*/GLFW_*
+// symbol.
 #include <volk/volk.h>
-
-#define VMA_STATIC_VULKAN_FUNCTIONS  0
-#define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
-#include <vma/vk_mem_alloc.h>
-
-// stb_image_write's implementation is compiled once here (STB_IMAGE_WRITE_IMPLEMENTATION is
-// defined via CMakeLists.txt, matching how VOLK_IMPLEMENTATION/VMA_IMPLEMENTATION are handled).
-#include <stb/stb_image_write.h>
 
 #include <root_directory.h>
 
-#include <gfxcoopa/core/instance.h>
-#include <gfxcoopa/presentation/window.h>
-#include <gfxcoopa/core/surface.h>
-#include <gfxcoopa/core/device.h>
-#include <gfxcoopa/core/swapchain.h>
-#include <gfxcoopa/memory/allocator.h>
+#include <gfxcoopa/app/context.h>
 #include <gfxcoopa/memory/image.h>
 #include <gfxcoopa/memory/buffer.h>
-#include <gfxcoopa/pipeline/render_pass.h>
-#include <gfxcoopa/command/command_pool.h>
 #include <gfxcoopa/command/command_buffer.h>
-#include <gfxcoopa/presentation/renderer.h>
+#include <gfxcoopa/util/image_readback.h>
 
 #include <uicoopa/layout/rect_transform.h>
 #include <uicoopa/layout/canvas.h>
@@ -79,10 +68,8 @@
 #include <coopa/scene/scene_manager.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -92,106 +79,74 @@ using coopa::scene::SceneObject;
 
 namespace {
 
-/** @brief True for the B8G8R8A8 family — stb_image_write expects R,G,B,A byte order, not B,G,R,A. */
-bool is_bgra_format(VkFormat format) {
-    switch (format) {
-        case VK_FORMAT_B8G8R8A8_UNORM:
-        case VK_FORMAT_B8G8R8A8_SRGB:
-        case VK_FORMAT_B8G8R8A8_SNORM:
-        case VK_FORMAT_B8G8R8A8_USCALED:
-        case VK_FORMAT_B8G8R8A8_SSCALED:
-        case VK_FORMAT_B8G8R8A8_UINT:
-        case VK_FORMAT_B8G8R8A8_SINT:
-            return true;
-        default:
-            return false;
-    }
-}
-
 /**
  * @brief Re-renders draw_list into a throwaway offscreen image and writes it to a PNG.
  *
  * Reuses ui_pass's existing pipeline (built against swapchain_pass) by giving the capture
- * image the same format and wrapping it in a fresh VkFramebuffer against that same render
+ * image the same format and wrapping it in a fresh framebuffer against that same render
  * pass — no new pipeline needed. Call only when no render pass is open and the device is
  * idle (frame-slot 0's geometry buffers are reused here).
+ *
+ * The framebuffer create/destroy pair below is the one place this file still touches raw
+ * Vulkan: gfxcoopa has no Framebuffer wrapper (every render target it owns internally
+ * manages its own), and this function specifically needs one bound to swapchain_pass's
+ * existing render pass -- not a new gfxcoopa-owned target. Everything else (the image
+ * itself, the state transition, the copy-to-buffer, the BGRA swizzle, the PNG write) goes
+ * through gfxcoopa's sealed memory::Image/command::CommandBuffer/util::read_image.
  */
-void save_screenshot(coopa::gfx::core::Device& device,
-                     coopa::gfx::memory::Allocator& allocator,
-                     coopa::gfx::command::CommandPool& cmd_pool,
-                     coopa::gfx::pipeline::RenderPass& swapchain_pass,
-                     VkFormat color_format,
+void save_screenshot(coopa::gfx::app::Context& ctx,
                      UiPass& ui_pass,
                      const DrawList& draw_list,
                      uint32_t width, uint32_t height,
                      float scale_factor,
                      const std::string& out_path) {
+    using namespace coopa::gfx;
+
     if (width == 0 || height == 0) {
         std::cerr << "[test_window] save_screenshot: zero-sized framebuffer, skipping.\n";
         return;
     }
 
-    // Safe here (no render pass open, and the caller has already called device.wait_idle()).
+    // Safe here (no render pass open, and the caller has already called ctx.wait_idle()).
     ui_pass.register_textures(draw_list);
 
-    coopa::gfx::memory::Image capture_image(
-        device, allocator, width, height, color_format,
-        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+    memory::Image capture_image(ctx.device(), ctx.allocator(), width, height, ctx.color_format(),
+                                ImageUsage::ColorAttachment | ImageUsage::TransferSrc);
 
-    VkImageView attachment = capture_image.view();
-    VkFramebufferCreateInfo fb_info{};
-    fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    fb_info.renderPass = swapchain_pass.handle();
+    // gfxcoopa has no Framebuffer wrapper (out of scope for the Vulkan-sealing refactor --
+    // see its plan's "explicitly out of scope" list), so building one for this ad-hoc capture
+    // target is the one genuinely unavoidable raw-Vulkan block left in this file; every
+    // gfx-allow-vulkan marker below belongs to this single escape, not eight separate ones.
+    VkImageView attachment = capture_image.view(); // gfx-allow-vulkan
+    VkFramebufferCreateInfo fb_info{}; // gfx-allow-vulkan
+    fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO; // gfx-allow-vulkan
+    fb_info.renderPass = ctx.render_pass().handle();
     fb_info.attachmentCount = 1;
     fb_info.pAttachments = &attachment;
     fb_info.width = width;
     fb_info.height = height;
     fb_info.layers = 1;
 
-    VkFramebuffer framebuffer = VK_NULL_HANDLE;
-    if (vkCreateFramebuffer(device.handle(), &fb_info, nullptr, &framebuffer) != VK_SUCCESS) {
-        std::cerr << "[test_window] save_screenshot: vkCreateFramebuffer failed.\n";
+    VkFramebuffer framebuffer = VK_NULL_HANDLE; // gfx-allow-vulkan
+    if (vkCreateFramebuffer(ctx.device().handle(), &fb_info, nullptr, &framebuffer) != VK_SUCCESS) { // gfx-allow-vulkan
+        std::cerr << "[test_window] save_screenshot: vkCreateFramebuffer failed.\n"; // gfx-allow-vulkan
         return;
     }
 
-    VkDeviceSize buffer_size = static_cast<VkDeviceSize>(width) * height * 4;
-    coopa::gfx::memory::Buffer staging(
-        device, allocator, buffer_size,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VMA_MEMORY_USAGE_AUTO,
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    ctx.command_pool().submit_once([&](command::CommandBuffer& cmd) {
+        cmd.begin_render_pass(ctx.render_pass().handle(), framebuffer, { width, height },
+                              VkClearColorValue{{ 0.05f, 0.05f, 0.07f, 1.0f }}); // gfx-allow-vulkan
+        ui_pass.draw(cmd, /*frame_index=*/0, width, height, scale_factor, draw_list);
+        cmd.end_render_pass();
+        // The render pass leaves capture_image in its color_final_layout default
+        // (Present, per RenderPass's constructor default) -- record that so the
+        // read_image() call below computes the right "from" barrier automatically.
+        capture_image.mark_transitioned(TextureUsage::Present);
+    });
 
-    VkCommandBuffer raw_cmd = cmd_pool.begin_single_use();
-    coopa::gfx::command::CommandBuffer cmd(raw_cmd);
+    vkDestroyFramebuffer(ctx.device().handle(), framebuffer, nullptr); // gfx-allow-vulkan
 
-    cmd.begin_render_pass(swapchain_pass.handle(), framebuffer, { width, height },
-                          VkClearColorValue{{ 0.05f, 0.05f, 0.07f, 1.0f }});
-    ui_pass.draw(cmd, /*frame_index=*/0, width, height, scale_factor, draw_list);
-    cmd.end_render_pass();
-
-    // The render pass leaves capture_image in its color_final_layout default (PRESENT_SRC_KHR,
-    // per RenderPass's constructor default) — transition to a copy-friendly layout before reading.
-    capture_image.transition_layout(raw_cmd, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-
-    VkBufferImageCopy region{};
-    region.bufferOffset = 0;
-    region.bufferRowLength = 0;
-    region.bufferImageHeight = 0;
-    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.imageSubresource.mipLevel = 0;
-    region.imageSubresource.baseArrayLayer = 0;
-    region.imageSubresource.layerCount = 1;
-    region.imageOffset = { 0, 0, 0 };
-    region.imageExtent = { width, height, 1 };
-    vkCmdCopyImageToBuffer(raw_cmd, capture_image.handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           staging.handle(), 1, &region);
-
-    cmd_pool.end_single_use(raw_cmd, device.graphics_queue());  // blocks until the copy completes
-
-    std::filesystem::create_directories(std::filesystem::path(out_path).parent_path());
-
-    void* mapped = nullptr;
-    vmaMapMemory(allocator.handle(), staging.allocation(), &mapped);
+    util::ImageData data = util::read_image(ctx.device(), ctx.allocator(), ctx.command_pool(), capture_image);
 
     // gfxcoopa's alpha-blend factors are (srcAlpha=ONE, dstAlpha=ZERO) — see pipeline.h — so each
     // draw's alpha *replaces* the framebuffer's alpha instead of compositing onto it. After the
@@ -199,29 +154,16 @@ void save_screenshot(coopa::gfx::core::Device& device,
     // with its own coverage (0 in a glyph's "hole", partial at antialiased edges), leaving a
     // non-opaque alpha channel that has nothing to do with the scene's true (fully opaque) look.
     // The live window never shows this — a compositor presents the swapchain as opaque and
-    // discards its alpha — but stbi_write_png faithfully writes whatever's here, so a PNG viewer
+    // discards its alpha — but stb_image_write faithfully writes whatever's here, so a PNG viewer
     // that *does* respect alpha would recomposite those pixels against black. Force full opacity;
-    // RGB is already correct (blending worked fine on those channels).
-    auto* pixels = static_cast<uint8_t*>(mapped);
-    size_t pixel_count = static_cast<size_t>(width) * height;
-    for (size_t i = 0; i < pixel_count; ++i) {
-        if (is_bgra_format(color_format)) {
-            std::swap(pixels[i * 4 + 0], pixels[i * 4 + 2]);
-        }
-        pixels[i * 4 + 3] = 255;
+    // RGB is already correct (blending worked fine on those channels, and read_image() already
+    // did the BGRA->RGBA swizzle if this platform's swapchain format needed it).
+    for (size_t i = 3; i < data.pixels.size(); i += 4) {
+        data.pixels[i] = 255;
     }
 
-    bool ok = stbi_write_png(out_path.c_str(), static_cast<int>(width), static_cast<int>(height), 4,
-                             mapped, static_cast<int>(width * 4)) != 0;
-    vmaUnmapMemory(allocator.handle(), staging.allocation());
-
-    vkDestroyFramebuffer(device.handle(), framebuffer, nullptr);
-
-    if (ok) {
-        std::cout << "[test_window] Saved screenshot to " << out_path << "\n";
-    } else {
-        std::cerr << "[test_window] Failed to write screenshot to " << out_path << "\n";
-    }
+    util::save_image_png(data, out_path);
+    std::cout << "[test_window] Saved screenshot to " << out_path << "\n";
 }
 
 }  // namespace
@@ -235,28 +177,19 @@ int main() {
     std::cout << "  in scene.yaml. Press ESC to quit.\n";
     std::cout << "==========================================================\n\n";
 
+coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env(
+        coopa::gfx::app::ContextConfig{
+            .title = "uicoopa test_window", .width = 1280, .height = 720, .resizable = true,
+        });
 #ifdef NDEBUG
-    constexpr bool enable_validation = false;
-#else
-    constexpr bool enable_validation = true;
+    config.validation = false;
 #endif
-
-    coopa::gfx::presentation::Window window("uicoopa test_window", 1280, 720, /*resizable=*/true);
-    coopa::gfx::core::Instance instance("uicoopa_test_window", enable_validation);
-    coopa::gfx::core::Surface  surface(instance, window.handle());
-    coopa::gfx::core::Device   device(instance, surface);
-    coopa::gfx::memory::Allocator allocator(instance, device);
-
-    auto [fb_w, fb_h] = window.framebuffer_size();
-    coopa::gfx::core::Swapchain swapchain(device, surface, fb_w, fb_h, /*vsync=*/true);
-    coopa::gfx::command::CommandPool cmd_pool(device, device.graphics_family());
-
-    // Depth=UNDEFINED: this pass only draws 2D UI geometry, no depth testing needed.
-    coopa::gfx::pipeline::RenderPass swapchain_pass(device, swapchain.image_format(), VK_FORMAT_UNDEFINED);
-    coopa::gfx::presentation::Renderer renderer(device, swapchain, swapchain_pass, cmd_pool);
+    // Context's swapchain render pass is always depth-less (see its constructor's
+    // comment) -- exactly the "2D UI geometry, no depth testing" pass this demo needs.
+    coopa::gfx::app::Context ctx(config);
 
     std::string shader_dir = std::string(ROOT_DIR) + "/assets/shaders";
-    UiPass ui_pass(device, allocator, cmd_pool, swapchain_pass,
+    UiPass ui_pass(ctx.device(), ctx.allocator(), ctx.command_pool(), ctx.render_pass(),
                   shader_dir + "/ui.vert.spv", shader_dir + "/ui.frag.spv");
 
     // --- Load the UI tree from scene.yaml ---
@@ -264,7 +197,7 @@ int main() {
     // register_ui_components() must run before load_scene() so every !RectTransform/
     // !Image/!Text/!Button/!HorizontalLayoutGroup node in the file has a parser
     // registered to dispatch to (see uicoopa/ui_yaml.h).
-    coopa::ui::register_ui_components(device, allocator, cmd_pool);
+    coopa::ui::register_ui_components(ctx.device(), ctx.allocator(), ctx.command_pool());
 
     coopa::scene::SceneManager scene_mgr;
     scene_mgr.load_scene(std::string(ROOT_DIR) + "/assets/scenes/test_window/scene.yaml");
@@ -314,7 +247,7 @@ int main() {
         // this). Resolve layout once first so button_obj's rect (and the
         // reported position below) reflects real geometry rather than the
         // pre-layout default of {0,0}.
-        auto [init_w, init_h] = window.framebuffer_size();
+        auto [init_w, init_h] = ctx.window().framebuffer_size();
         canvas->set_viewport(init_w, init_h);
         canvas->rebuild_layout(init_w, init_h);
         PointerEventData synth;
@@ -322,22 +255,16 @@ int main() {
         button->on_pointer_enter(synth);
     }
 
-    auto last_time = std::chrono::steady_clock::now();
-    int frame_count = 0;
+    while (!ctx.should_close()) {
+        ctx.poll(); // window.new_frame() + poll_events() + frame timer update.
 
-    while (!window.should_close()) {
-        window.new_frame();
-        window.poll_events();
-
-        if (window.is_key_pressed(GLFW_KEY_ESCAPE)) {
-            window.set_should_close(true);
+        if (ctx.window().is_key_pressed(coopa::gfx::input::Key::Escape)) {
+            ctx.window().set_should_close(true);
         }
 
-        auto now = std::chrono::steady_clock::now();
-        float dt = std::chrono::duration<float>(now - last_time).count();
-        last_time = now;
+        float dt = ctx.delta_time();
 
-        auto [sw, sh] = window.framebuffer_size();
+        auto [sw, sh] = ctx.window().framebuffer_size();
         if (sw == 0 || sh == 0) continue;  // minimized
 
         // Each canvas converts the SAME window cursor into its own canvas space
@@ -345,7 +272,7 @@ int main() {
         // CanvasComponent::set_window_input()'s doc).
         for (auto* c : canvases) {
             c->set_viewport(sw, sh);
-            c->set_window_input(window);
+            c->set_window_input(ctx.window());
         }
 
         // Drives Button's own hover/press ColorTransition AND every ColorOnSignal
@@ -359,35 +286,32 @@ int main() {
         // why this is a separate pass from update() above.
         scene_mgr.late_update(dt);
 
-        // Must run before begin_frame(): resolving new textures updates descriptor
+        // Must run before frame(): resolving new textures updates descriptor
         // sets, which is unsafe once a render pass is open.
         for (auto* c : canvases) ui_pass.register_textures(c->draw_list());
 
-        renderer.begin_frame(
-            [&](coopa::gfx::command::CommandBuffer& cmd) {
-                for (auto* c : canvases) {
-                    ui_pass.draw(cmd, renderer.current_frame(), sw, sh, c->scale_factor(), c->draw_list());
-                }
-            },
-            VkClearColorValue{{ 0.05f, 0.05f, 0.07f, 1.0f }}
-        );
+        coopa::gfx::app::FrameCallbacks cb;
+        cb.record = [&](coopa::gfx::command::CommandBuffer& cmd) {
+            for (auto* c : canvases) {
+                ui_pass.draw(cmd, ctx.current_frame(), sw, sh, c->scale_factor(), c->draw_list());
+            }
+        };
+        cb.clear = coopa::gfx::ClearColor{ 0.05f, 0.05f, 0.07f, 1.0f };
+        ctx.frame(cb);
 
-        if (std::getenv("ONESHOT")) {
+        if (config.headless_oneshot) {
             break;
         }
-        if (const char* mf = std::getenv("MAX_FRAMES")) {
-            if (++frame_count >= std::atoi(mf)) {
-                break;
-            }
+        if (ctx.max_frames() > 0 && ctx.frame_index() >= ctx.max_frames()) {
+            break;
         }
     }
 
-    device.wait_idle();
+    ctx.wait_idle();
 
-    auto [final_w, final_h] = window.framebuffer_size();
+    auto [final_w, final_h] = ctx.window().framebuffer_size();
     std::string screenshot_path = std::string(ROOT_DIR) + "/output/test_window.png";
-    save_screenshot(device, allocator, cmd_pool, swapchain_pass, swapchain.image_format(),
-                    ui_pass, canvas->draw_list(), final_w, final_h, canvas->scale_factor(), screenshot_path);
+    save_screenshot(ctx, ui_pass, canvas->draw_list(), final_w, final_h, canvas->scale_factor(), screenshot_path);
 
     std::cout << "[test_window] Exiting cleanly.\n";
 

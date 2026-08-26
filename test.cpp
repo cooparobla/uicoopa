@@ -17,7 +17,7 @@
 #include <uicoopa/render/ui_vertex.h>
 #include <uicoopa/render/sprite.h>
 #include <uicoopa/render/draw_list.h>
-#include <uicoopa/render/texture.h>
+#include <uicoopa/render/texture_factory.h>
 #include <uicoopa/render/ui_pass.h>
 #include <uicoopa/widgets/graphic.h>
 #include <uicoopa/widgets/image.h>
@@ -388,8 +388,8 @@ void test_draw_list_batching() {
     DrawList dl;
     dl.begin(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });
 
-    VkImageView tex_a = reinterpret_cast<VkImageView>(0x1);
-    VkImageView tex_b = reinterpret_cast<VkImageView>(0x2);
+    coopa::gfx::TextureView tex_a{0x1};
+    coopa::gfx::TextureView tex_b{0x2};
 
     dl.set_texture(tex_a);
     dl.add_quad(Rect{ {0, 0}, {10, 10} }, Rect{ {0, 0}, {1, 1} }, 0xFFFFFFFFu);

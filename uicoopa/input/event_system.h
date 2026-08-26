@@ -54,7 +54,7 @@ public:
  */
 class EventSystem {
 public:
-    static constexpr int kPrimaryButton = 0; /**< GLFW_MOUSE_BUTTON_LEFT / GLFW_MOUSE_BUTTON_1. */
+    static constexpr int kPrimaryButton = 0; /**< coopa::gfx::input::MouseButton::Left. */
 
     void process(UiInput& input, coopa::scene::SceneObject& canvas_object) {
         RaycastHit hit = Raycaster::hit_test(canvas_object, input.position());

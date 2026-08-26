@@ -75,7 +75,7 @@ public:
         float first_baseline_y = top_y - atlas.ascent();
 
         uint32_t packed = UiVertex::pack_color(color.r, color.g, color.b, color.a);
-        draw_list.set_texture(atlas.texture().view());
+        draw_list.set_texture(atlas.texture().view_typed());
 
         uint32_t max_visible_line = 0xFFFFFFFFu;
         if (overflow == TextOverflow::Truncate && line_height > 0.0f) {

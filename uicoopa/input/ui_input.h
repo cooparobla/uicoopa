@@ -13,6 +13,7 @@
 #define UICOOPA_INPUT_UI_INPUT_H
 
 #include <gfxcoopa/presentation/window.h>
+#include <gfxcoopa/input/keys.h>
 #include <uicoopa/layout/rect.h>
 #include <glm/glm.hpp>
 #include <vector>
@@ -33,7 +34,7 @@ namespace ui {
  */
 class UiInput {
 public:
-    static constexpr int kMaxButtons = 8; /**< Covers GLFW_MOUSE_BUTTON_1..8 (GLFW_MOUSE_BUTTON_LAST). */
+    static constexpr int kMaxButtons = static_cast<int>(coopa::gfx::input::MouseButton::Count);
 
     /**
      * @param window          Source of raw input state.
@@ -54,7 +55,7 @@ public:
         position_ = canvas_pos;
 
         for (int b = 0; b < kMaxButtons; ++b) {
-            bool now = window.is_mouse_button_pressed(b);
+            bool now = window.is_mouse_button_pressed(static_cast<coopa::gfx::input::MouseButton>(b));
             pressed_this_frame_[b]  = now && !prev_buttons_[b];
             released_this_frame_[b] = !now && prev_buttons_[b];
             buttons_[b] = now;
@@ -65,7 +66,7 @@ public:
         scroll_ = glm::vec2(static_cast<float>(sx), static_cast<float>(sy));
 
         char_input_ = window.char_input();
-        key_events_ = window.key_events();
+        key_events_ = window.key_events_typed();
     }
 
     const glm::vec2& position() const { return position_; }
@@ -83,7 +84,7 @@ public:
     }
 
     const std::vector<unsigned int>& char_input() const { return char_input_; }
-    const std::vector<coopa::gfx::presentation::KeyEvent>& key_events() const { return key_events_; }
+    const std::vector<coopa::gfx::input::KeyEvent>& key_events() const { return key_events_; }
 
 private:
     glm::vec2 position_{0.0f};
@@ -94,7 +95,7 @@ private:
     bool pressed_this_frame_[kMaxButtons] = {};
     bool released_this_frame_[kMaxButtons] = {};
     std::vector<unsigned int> char_input_;
-    std::vector<coopa::gfx::presentation::KeyEvent> key_events_;
+    std::vector<coopa::gfx::input::KeyEvent> key_events_;
 };
 
 }  // namespace ui

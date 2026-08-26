@@ -18,7 +18,8 @@
 
 #include <stb/stb_truetype.h>
 
-#include <uicoopa/render/texture.h>
+#include <gfxcoopa/engine/data/texture.h>
+#include <gfxcoopa/types/format.h>
 #include <uicoopa/layout/rect.h>
 #include <glm/glm.hpp>
 
@@ -49,7 +50,7 @@ struct GlyphInfo {
  * Usage:
  * @code
  * FontAtlas atlas(device, allocator, cmd_pool, ttf_bytes, ttf_size, 24.0f);
- * ui_pass.mark_as_text_atlas(atlas.texture().view());
+ * ui_pass.mark_as_text_atlas(atlas.texture().view_typed());
  * const GlyphInfo* g = atlas.glyph('A');
  * @endcode
  */
@@ -127,9 +128,10 @@ public:
             glyphs_[first_codepoint + i] = g;
         }
 
-        texture_ = std::make_unique<Texture>(device, allocator, cmd_pool,
-                                              atlas_width, atlas_height,
-                                              VK_FORMAT_R8_UNORM, bitmap.data(), 1);
+        texture_ = std::make_unique<coopa::gfx::engine::data::Texture>(
+            coopa::gfx::engine::data::Texture::upload(
+                device, allocator, cmd_pool, bitmap.data(), atlas_width, atlas_height,
+                coopa::gfx::Format::R8_Unorm));
     }
 
     /** @brief Returns glyph metrics for codepoint, or nullptr if it wasn't baked into this atlas. */
@@ -138,7 +140,7 @@ public:
         return it != glyphs_.end() ? &it->second : nullptr;
     }
 
-    Texture& texture() const { return *texture_; }
+    coopa::gfx::engine::data::Texture& texture() const { return *texture_; }
     float pixel_height() const { return pixel_height_; }
 
     /** @brief Font design space, +Y up: positive distance above the baseline. */
@@ -150,7 +152,7 @@ public:
     float line_height() const { return ascent_ - descent_ + line_gap_; }
 
 private:
-    std::unique_ptr<Texture> texture_;
+    std::unique_ptr<coopa::gfx::engine::data::Texture> texture_;
     std::unordered_map<uint32_t, GlyphInfo> glyphs_;
     float pixel_height_;
     float ascent_ = 0.0f, descent_ = 0.0f, line_gap_ = 0.0f;
