@@ -28,80 +28,48 @@ scene:
         # ---- Corner-anchored panels ----
 
         - name: TopLeft
-          active: true
+          inherit_from: ../../prefabs/corner_panel.yaml
           components:
             - type: RectTransform
               anchor_preset: TopLeft
               anchored_position: { x: 20.0, y: -20.0 }
-              size_delta: { x: 220.0, y: 90.0 }
             - type: Image
               color: { r: 0.20, g: 0.55, b: 0.60, a: 0.95 }
             - type: Text
-              font: ../../fonts/DejaVuSans.ttf
               text: "Top Left"
-              font_size: 16
-              color: { r: 0.98, g: 0.98, b: 0.98, a: 1.0 }
-              horizontal_align: Center
-              vertical_align: Middle
-              raycast_target: false
-          children: []
 
         - name: TopRight
-          active: true
+          inherit_from: ../../prefabs/corner_panel.yaml
           components:
             - type: RectTransform
               anchor_preset: TopRight
               anchored_position: { x: -20.0, y: -20.0 }
-              size_delta: { x: 220.0, y: 90.0 }
             - type: Image
               color: { r: 0.75, g: 0.45, b: 0.20, a: 0.95 }
             - type: Text
-              font: ../../fonts/DejaVuSans.ttf
               text: "Top Right"
-              font_size: 16
-              color: { r: 0.98, g: 0.98, b: 0.98, a: 1.0 }
-              horizontal_align: Center
-              vertical_align: Middle
-              raycast_target: false
-          children: []
 
         - name: BottomLeft
-          active: true
+          inherit_from: ../../prefabs/corner_panel.yaml
           components:
             - type: RectTransform
               anchor_preset: BottomLeft
               anchored_position: { x: 20.0, y: 20.0 }
-              size_delta: { x: 220.0, y: 90.0 }
             - type: Image
               color: { r: 0.45, g: 0.25, b: 0.55, a: 0.95 }
             - type: Text
-              font: ../../fonts/DejaVuSans.ttf
               text: "Bottom Left"
-              font_size: 16
-              color: { r: 0.98, g: 0.98, b: 0.98, a: 1.0 }
-              horizontal_align: Center
-              vertical_align: Middle
-              raycast_target: false
-          children: []
 
         - name: BottomRight
-          active: true
+          inherit_from: ../../prefabs/corner_panel.yaml
           components:
             - type: RectTransform
               anchor_preset: BottomRight
               anchored_position: { x: -20.0, y: 20.0 }
-              size_delta: { x: 220.0, y: 90.0 }
             - type: Image
               color: { r: 0.65, g: 0.25, b: 0.40, a: 0.95 }
             - type: Text
-              font: ../../fonts/DejaVuSans.ttf
               text: "Bottom Right"
-              font_size: 16
-              color: { r: 0.98, g: 0.98, b: 0.98, a: 1.0 }
-              horizontal_align: Center
-              vertical_align: Middle
-              raycast_target: false
-          children: []
 
         # ---- Title + Paragraph ----
 
@@ -163,31 +131,22 @@ scene:
               child_force_expand_width:  true
           children:
             - name: Box0
-              active: true
+              inherit_from: ../../prefabs/bar_box.yaml
               components:
-                - type: RectTransform
-                  size_delta: { x: 80.0, y: 40.0 }
                 - type: Image
                   color: { r: 0.85, g: 0.35, b: 0.35, a: 1.0 }
-              children: []
 
             - name: Box1
-              active: true
+              inherit_from: ../../prefabs/bar_box.yaml
               components:
-                - type: RectTransform
-                  size_delta: { x: 80.0, y: 40.0 }
                 - type: Image
                   color: { r: 0.35, g: 0.75, b: 0.45, a: 1.0 }
-              children: []
 
             - name: Box2
-              active: true
+              inherit_from: ../../prefabs/bar_box.yaml
               components:
-                - type: RectTransform
-                  size_delta: { x: 80.0, y: 40.0 }
                 - type: Image
                   color: { r: 0.35, g: 0.55, b: 0.85, a: 1.0 }
-              children: []
 
         # ---- Halo (drawn before ButtonPanel so it renders behind it) ----
 
@@ -322,87 +281,4 @@ scene:
         # flash white / never reopen on first open.
 
         - name: ModalDialog
-          active: true
-          components:
-            - type: RectTransform
-              anchor_preset: StretchAll
-            - type: Image
-              color: { r: 0.02, g: 0.02, b: 0.04, a: 0.62 }
-            - type: SetActiveOnSignal
-              listen_object: ButtonPanel
-              listen_signal: click
-              active_value: true
-            - type: SetActiveOnSignal
-              listen_object: DialogClose
-              listen_signal: click
-              active_value: false
-          children:
-
-            - name: DialogPanel
-              active: true
-              components:
-                - type: RectTransform
-                  anchor_preset: MiddleCenter
-                  size_delta: { x: 480.0, y: 260.0 }
-                - type: Image
-                  color: { r: 0.14, g: 0.15, b: 0.20, a: 1.0 }
-              children:
-
-                - name: DialogTitle
-                  active: true
-                  components:
-                    - type: RectTransform
-                      anchor_preset: TopCenter
-                      anchored_position: { x: 0.0, y: -34.0 }
-                      size_delta: { x: 420.0, y: 44.0 }
-                    - type: Text
-                      font: ../../fonts/DejaVuSans.ttf
-                      text: "Modal Dialog"
-                      font_size: 36
-                      color: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
-                      horizontal_align: Center
-                      vertical_align: Middle
-                      raycast_target: false
-                  children: []
-
-                - name: DialogBody
-                  active: true
-                  components:
-                    - type: RectTransform
-                      anchor_preset: TopCenter
-                      anchored_position: { x: 0.0, y: -90.0 }
-                      size_delta: { x: 420.0, y: 96.0 }
-                    - type: Text
-                      font: ../../fonts/DejaVuSans.ttf
-                      text: "Opened by a Signal-driven Button::on_click slot. This panel and its Close button below are an ordinary inactive SceneObject subtree, shown and hidden with set_active()."
-                      font_size: 16
-                      color: { r: 0.85, g: 0.85, b: 0.88, a: 1.0 }
-                      horizontal_align: Center
-                      vertical_align: Top
-                      overflow: Wrap
-                      raycast_target: false
-                  children: []
-
-                - name: DialogClose
-                  active: true
-                  components:
-                    - type: RectTransform
-                      anchor_preset: BottomCenter
-                      anchored_position: { x: 0.0, y: 26.0 }
-                      size_delta: { x: 160.0, y: 44.0 }
-                    - type: Image
-                      color: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
-                    - type: Button
-                      colors:
-                        normal:      { r: 0.55, g: 0.30, b: 0.35, a: 1.0 }
-                        highlighted: { r: 0.70, g: 0.40, b: 0.45, a: 1.0 }
-                        pressed:     { r: 0.40, g: 0.20, b: 0.25, a: 1.0 }
-                    - type: Text
-                      font: ../../fonts/DejaVuSans.ttf
-                      text: "Close"
-                      font_size: 16
-                      color: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
-                      horizontal_align: Center
-                      vertical_align: Middle
-                      raycast_target: false
-                  children: []
+          inherit_from: ../../prefabs/dialog.yaml

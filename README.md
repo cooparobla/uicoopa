@@ -94,6 +94,23 @@ Composition follows a `coopa::scene::SceneObject` tree: every UI node carries a
 libcoopa's `coopa::scene::SceneLoader`, so a scene `.yaml` file can declare UI components
 directly. One-directional bridge only — libcoopa has no dependency on uicoopa.
 
+#### `inherit_from` — prefabs and scene variants
+
+Any object node, or the top-level `scene:` block, can carry `inherit_from: <path.yaml>` to
+merge in another file's object/scene as a base before its own fields override it — see
+[`libcoopa/coopa/scene/scene_inherit.h`](../libcoopa/coopa/scene/scene_inherit.h) for the full
+merge rules (component/child matching, `id:`/`remove:` keys, asset-path provenance). This repo's
+own `assets/scenes/test_window/scene.yaml` is the reference example: the four corner panels
+pull from `assets/prefabs/corner_panel.yaml`, the three bar boxes from `bar_box.yaml`, and the
+entire modal dialog subtree from `dialog.yaml`, each overriding only what actually differs (a
+color, a position, a label). `assets/scenes/test_window_variant/scene.yaml` shows the
+scene-level form — it inherits the whole of `test_window/scene.yaml`, recolors one panel, and
+removes another with `remove: true`.
+
+A relative path inside a prefab (e.g. `font: ../fonts/DejaVuSans.ttf` in `corner_panel.yaml`)
+resolves against the prefab's own directory, not the including scene's — `ParseContext::resolve()`
+handles this via per-node provenance, so prefabs stay relocatable.
+
 ### Events: `coopa::event::Signal`
 `Button`'s signals (and any future event-driven component) are built on
 [libcoopa](../libcoopa)'s `coopa::event::Signal<Args...>` (`libcoopa/coopa/event/signal.h`) —

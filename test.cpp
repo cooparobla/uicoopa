@@ -41,6 +41,8 @@
 #include <coopa/scene/scene_object.h>
 #include <coopa/scene/scene_manager.h>
 
+#include <root_directory.h>
+
 // ANSI Colors for nice UI
 #define ANSI_COLOR_RED     "\x1b[31m"
 #define ANSI_COLOR_GREEN   "\x1b[32m"
@@ -852,6 +854,142 @@ void test_scene_yaml_component_parsing() {
     ASSERT_TRUE(group->child_alignment == ChildAlignment::MiddleCenter);
 }
 
+void test_scene_inherit_object_prefab() {
+    register_ui_components();
+
+    // The prefab file itself (an "object:"-shaped file, not a "scene:" one --
+    // see coopa/scene/scene_inherit.h) referenced by absolute path so this
+    // test doesn't depend on directory layout.
+    std::string prefab_path = write_temp_yaml("inherit_prefab",
+        "object:\n"
+        "  name: Base\n"
+        "  components:\n"
+        "    - type: RectTransform\n"
+        "      size_delta: { x: 220.0, y: 90.0 }\n"
+        "    - type: Image\n"
+        "      color: { r: 1.0, g: 1.0, b: 1.0, a: 0.95 }\n"
+        "    - type: Text\n"
+        "      font_size: 16\n"
+        "      raycast_target: false\n");
+
+    std::string scene_path = write_temp_yaml("inherit_scene",
+        "format: test\n"
+        "scene:\n"
+        "  auto_transform: false\n"
+        "  root_objects:\n"
+        "    - name: TopLeft\n"
+        "      inherit_from: " + prefab_path + "\n"
+        "      components:\n"
+        "        - type: RectTransform\n"
+        "          anchor_preset: TopLeft\n"
+        "          anchored_position: { x: 20.0, y: -20.0 }\n"
+        "        - type: Image\n"
+        "          color: { r: 0.20, g: 0.55, b: 0.60, a: 0.95 }\n"
+        "        - type: Text\n"
+        "          text: \"Top Left\"\n");
+
+    SceneManager mgr;
+    mgr.load_scene(scene_path);
+    auto* obj = mgr.get_active_scene().find_object("TopLeft");
+    ASSERT_TRUE(obj != nullptr);
+
+    auto* rt = obj->get_component<RectTransform>();
+    ASSERT_TRUE(rt != nullptr);
+    ASSERT_VEC2_NEAR(rt->size_delta(), glm::vec2(220.0f, 90.0f), 1e-4f); // inherited
+    ASSERT_VEC2_NEAR(rt->anchored_position(), glm::vec2(20.0f, -20.0f), 1e-4f); // overridden
+
+    auto* img = obj->get_component<Image>();
+    ASSERT_TRUE(img != nullptr);
+    ASSERT_NEAR(img->color.r, 0.20f, 1e-4f); // overridden
+
+    auto* text = obj->get_component<Text>();
+    ASSERT_TRUE(text != nullptr);
+    ASSERT_TRUE(text->text == "Top Left");   // overridden
+    ASSERT_TRUE(text->font_size == 16);      // inherited
+    ASSERT_TRUE(text->raycast_target == false); // inherited
+}
+
+void test_test_window_scene_refactor_shape() {
+    // The real, shipped scene.yaml now leans on assets/prefabs/*.yaml via
+    // inherit_from (see coopa/scene/scene_inherit.h) instead of copy-pasting
+    // the four corner panels / three bar boxes / whole modal dialog subtree.
+    // This is the semantic counterpart to the pixel-diff check done manually
+    // against uicoopa_test_window's screenshot -- it must keep producing the
+    // exact same object graph and field values as before the refactor.
+    register_ui_components();
+
+    SceneManager mgr;
+    mgr.load_scene(std::string(ROOT_DIR) + "/assets/scenes/test_window/scene.yaml");
+    auto& scene = mgr.get_active_scene();
+    ASSERT_TRUE(scene.name() == "test_window");
+
+    auto* canvas = scene.find_object("Canvas");
+    ASSERT_TRUE(canvas != nullptr);
+    ASSERT_TRUE(canvas->children().size() == 12u);
+
+    // A corner panel merged from assets/prefabs/corner_panel.yaml.
+    auto* top_left = scene.find_object("TopLeft");
+    ASSERT_TRUE(top_left != nullptr);
+    auto* tl_rect = top_left->get_component<RectTransform>();
+    ASSERT_VEC2_NEAR(tl_rect->size_delta(), glm::vec2(220.0f, 90.0f), 1e-4f);       // from the prefab
+    ASSERT_VEC2_NEAR(tl_rect->anchored_position(), glm::vec2(20.0f, -20.0f), 1e-4f); // local override
+    auto* tl_img = top_left->get_component<Image>();
+    ASSERT_NEAR(tl_img->color.r, 0.20f, 1e-4f);
+    ASSERT_NEAR(tl_img->color.g, 0.55f, 1e-4f);
+    auto* tl_text = top_left->get_component<Text>();
+    ASSERT_TRUE(tl_text->text == "Top Left");
+    ASSERT_TRUE(tl_text->font_size == 16);           // from the prefab
+    ASSERT_TRUE(tl_text->raycast_target == false);   // from the prefab
+    // Font path resolution against the prefab's own directory (not the
+    // scene's) is exercised end-to-end by the GPU test_window demo, not here:
+    // register_ui_components() headless never loads a Font from disk at all
+    // (see ui_yaml.h's UIResourceCache::font_for), so tl_text->font is always
+    // null in this build regardless of inherit_from.
+
+    // A bar box merged from assets/prefabs/bar_box.yaml.
+    auto* box1 = scene.find_object("Box1");
+    ASSERT_TRUE(box1 != nullptr);
+    auto* box1_rect = box1->get_component<RectTransform>();
+    ASSERT_VEC2_NEAR(box1_rect->size_delta(), glm::vec2(80.0f, 40.0f), 1e-4f); // from the prefab
+    auto* box1_img = box1->get_component<Image>();
+    ASSERT_NEAR(box1_img->color.g, 0.75f, 1e-4f); // local override, distinct from Box0/Box2
+
+    // The whole modal dialog subtree merged from assets/prefabs/dialog.yaml.
+    auto* dialog_close = scene.find_object("DialogClose");
+    ASSERT_TRUE(dialog_close != nullptr);
+    auto* close_btn = dialog_close->get_component<Button>();
+    ASSERT_TRUE(close_btn != nullptr);
+    ASSERT_NEAR(close_btn->colors.normal.r, 0.55f, 1e-4f);
+    auto* close_text = dialog_close->get_component<Text>();
+    ASSERT_TRUE(close_text->text == "Close");
+}
+
+void test_scene_inherit_scene_level_variant() {
+    // The real assets/scenes/test_window_variant/scene.yaml, which inherits
+    // the whole of test_window/scene.yaml at the scene level, overrides
+    // TopLeft's color, and removes BottomRight entirely.
+    register_ui_components();
+
+    SceneManager mgr;
+    mgr.load_scene(std::string(ROOT_DIR) + "/assets/scenes/test_window_variant/scene.yaml");
+    auto& scene = mgr.get_active_scene();
+    ASSERT_TRUE(scene.name() == "test_window_variant");
+
+    auto* top_left = scene.find_object("TopLeft");
+    ASSERT_TRUE(top_left != nullptr);
+    auto* tl_img = top_left->get_component<Image>();
+    ASSERT_NEAR(tl_img->color.r, 0.90f, 1e-4f);
+    ASSERT_NEAR(tl_img->color.g, 0.30f, 1e-4f);
+
+    ASSERT_TRUE(scene.find_object("BottomRight") == nullptr);
+
+    // Untouched by the variant -- still present, still itself inherited from
+    // the corner_panel/dialog prefabs via the base scene.
+    ASSERT_TRUE(scene.find_object("TopRight") != nullptr);
+    ASSERT_TRUE(scene.find_object("ButtonPanel") != nullptr);
+    ASSERT_TRUE(scene.find_object("DialogClose") != nullptr);
+}
+
 void test_canvas_sort_order() {
     coopa::scene::Scene scene("SortOrderFixture");
 
@@ -1230,6 +1368,9 @@ int main() {
     RUN_TEST(test_ui_yaml_parsing);
     RUN_TEST(test_scene_yaml_loads_hierarchy);
     RUN_TEST(test_scene_yaml_component_parsing);
+    RUN_TEST(test_scene_inherit_object_prefab);
+    RUN_TEST(test_test_window_scene_refactor_shape);
+    RUN_TEST(test_scene_inherit_scene_level_variant);
     RUN_TEST(test_canvas_sort_order);
     RUN_TEST(test_scroll_rect_content_by_name);
     RUN_TEST(test_late_update_and_event_bus);

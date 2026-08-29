@@ -140,7 +140,7 @@ public:
 
     /**
      * @brief Resolves a font reference: a UIResources name first, else a path
-     *        (relative to ctx.scene_dir, falling back to as-given) loaded on demand.
+     *        (resolved via ctx.resolve(), falling back to as-given) loaded on demand.
      * @return The font, or nullptr if neither resolved.
      */
     Font* font_for(const std::string& ref, const coopa::scene::SceneLoader::ParseContext& ctx) {
@@ -243,11 +243,12 @@ private:
     }
 
     static std::string resolve_path_(const std::string& ref, const coopa::scene::SceneLoader::ParseContext& ctx) {
-        std::filesystem::path p(ref);
-        if (p.is_absolute()) return ref;
-        std::string scene_relative = ctx.scene_dir + "/" + ref;
-        if (std::filesystem::exists(scene_relative)) return scene_relative;
-        return ref; // falls back to CWD-relative, matching how mesh/animation paths resolve elsewhere
+        // ctx.resolve() tries ctx.search_dirs (the file that actually declared
+        // this component, per SceneInheritance provenance) before ctx.scene_dir,
+        // so a font/sprite/texture reference merged in from a prefab in another
+        // directory still finds its file. Falls back to CWD-relative if nothing
+        // exists, matching how mesh/animation paths resolve elsewhere.
+        return ctx.resolve(ref);
     }
 
     coopa::gfx::core::Device*         device_    = nullptr;
