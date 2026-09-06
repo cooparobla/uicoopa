@@ -43,6 +43,11 @@ target_link_libraries(uicoopa PRIVATE coopa::gfx)
 add_executable(uicoopa_test_window test_window.cpp)
 target_link_libraries(uicoopa_test_window PRIVATE coopa::gfx)
 
+# Windowed demo: the settings_demo-shaped UI built entirely through UIBuilder
+# (no scene YAML except the theme file) -- see test_settings_builder.cpp.
+add_executable(uicoopa_settings_builder test_settings_builder.cpp)
+target_link_libraries(uicoopa_settings_builder PRIVATE coopa::gfx)
+
 enable_testing()
 add_test(NAME uicoopa_tests COMMAND uicoopa)
 
@@ -57,5 +62,6 @@ if(GFX_LEAK_CHECK)
         COMMAND ${GFXCOOPA_DIR}/tools/check_no_vulkan.sh ${CMAKE_SOURCE_DIR})
     add_dependencies(uicoopa uicoopa_leak_check)
     add_dependencies(uicoopa_test_window uicoopa_leak_check)
+    add_dependencies(uicoopa_settings_builder uicoopa_leak_check)
     add_test(NAME uicoopa_no_vulkan COMMAND ${GFXCOOPA_DIR}/tools/check_no_vulkan.sh ${CMAKE_SOURCE_DIR})
 endif()

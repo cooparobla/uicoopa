@@ -199,8 +199,13 @@ coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env
     // registered to dispatch to (see uicoopa/ui_yaml.h).
     coopa::ui::register_ui_components(ctx.device(), ctx.allocator(), ctx.command_pool());
 
+    const char* scene_env = std::getenv("SCENE");
+    std::string scene_name = (scene_env && scene_env[0] != '\0') ? scene_env : "test_window";
+    std::string scene_path = std::string(ROOT_DIR) + "/assets/scenes/" + scene_name + "/scene.yaml";
+    std::cout << "[test_window] Loading scene: " << scene_path << "\n";
+
     coopa::scene::SceneManager scene_mgr;
-    scene_mgr.load_scene(std::string(ROOT_DIR) + "/assets/scenes/test_window/scene.yaml");
+    scene_mgr.load_scene(scene_path);
     auto& scene = scene_mgr.get_active_scene();
 
     // Bakes every (font, size) pair any !Text component actually referenced — replaces
@@ -214,45 +219,68 @@ coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env
     auto canvases = collect_canvases(scene);
 
     SceneObject* canvas_obj = scene.find_object("Canvas");
-    auto* canvas = canvas_obj->get_component<CanvasComponent>();
+    auto* canvas = canvas_obj ? canvas_obj->get_component<CanvasComponent>() : nullptr;
+    if (!canvas) {
+        throw std::runtime_error("Scene has no Canvas component");
+    }
     canvas->set_default_texture(ui_pass.white_view());
 
-    // Every response to the button — the halo bloom, the label tint, the status
-    // readout, the click log line, opening/closing the modal dialog — is declared
-    // as a SignalReactor component directly on the relevant object in scene.yaml
-    // (see uicoopa/reactors/). Nothing below wires a signal; these pointers exist
-    // purely for the OPEN_DIALOG/FORCE_HOVER scripted-screenshot scaffolding.
+    // Optional modal dialog / button handling for test_window scene
     auto* button_obj = scene.find_object("ButtonPanel");
-    auto* button = button_obj->get_component<Button>();
+    auto* button = button_obj ? button_obj->get_component<Button>() : nullptr;
     auto* dialog = scene.find_object("ModalDialog");
 
-    // scene.yaml keeps ModalDialog active: true, so the Scene::start() that
-    // SceneLoader::load() already ran (above) reached DialogClose's Button::start()
-    // — which discovers target_graphic AND applies colors.normal — AND ModalDialog's
-    // own SetActiveOnSignal reactors' start() (registering their EventBus listeners)
-    // — before it's hidden here. SceneObject::start()/update() both skip inactive
-    // subtrees (see coopa/scene/scene_object.h), so a dialog built inactive from the
-    // outset would leave those uninitialized and flash white / never reopen on first open.
-    dialog->set_active(false);
-
-    if (std::getenv("OPEN_DIALOG")) {
-        dialog->set_active(true);
+    if (dialog) {
+        dialog->set_active(false);
+        if (std::getenv("OPEN_DIALOG")) {
+            dialog->set_active(true);
+        }
     }
-    if (std::getenv("FORCE_HOVER")) {
-        // Drives the button's real pointer-enter path (not just the raw typed
-        // Signal) with no pointer anywhere near the button, to prove the
-        // halo/label/status effects are driven by the event (both the typed
-        // Signal AND the named bus fire from here), not by Button::hovered_
-        // (which stays false here — ColorTransition's own tint is untouched by
-        // this). Resolve layout once first so button_obj's rect (and the
-        // reported position below) reflects real geometry rather than the
-        // pre-layout default of {0,0}.
+    if (std::getenv("FORCE_HOVER") && button_obj && button) {
         auto [init_w, init_h] = ctx.window().framebuffer_size();
         canvas->set_viewport(init_w, init_h);
         canvas->rebuild_layout(init_w, init_h);
         PointerEventData synth;
         synth.position = button_obj->get_component<RectTransform>()->rect().center();
         button->on_pointer_enter(synth);
+    }
+    if (const char* scroll_env = std::getenv("SCROLL_Y")) {
+        float sy = std::stof(scroll_env);
+        if (auto* vp = scene.find_object("Viewport")) {
+            if (auto* content_obj = vp->find_descendant("Content")) {
+                if (auto* crt = content_obj->get_component<RectTransform>()) {
+                    crt->set_anchored_position({crt->anchored_position().x, sy});
+                }
+            }
+        }
+    }
+    if (const char* combo_env = std::getenv("OPEN_COMBO")) {
+        if (auto* combo_obj = scene.find_object(combo_env)) {
+            if (auto* combo = combo_obj->get_component<ComboBox>()) {
+                combo->show_popup();
+            }
+        }
+    }
+    if (const char* slider_env = std::getenv("SLIDER_MAX")) {
+        if (auto* slider_obj = scene.find_object(slider_env)) {
+            if (auto* slider = slider_obj->get_component<Slider>()) {
+                slider->set_value(slider->max_value, false);
+            }
+        }
+    }
+    if (const char* hover_slot_env = std::getenv("HOVER_SLOT")) {
+        if (auto* slot_obj = scene.find_object(hover_slot_env)) {
+            if (auto* slot = slot_obj->get_component<InventorySlot>()) {
+                auto [init_w, init_h] = ctx.window().framebuffer_size();
+                canvas->set_viewport(init_w, init_h);
+                canvas->rebuild_layout(init_w, init_h);
+                if (auto* rt = slot_obj->get_component<RectTransform>()) {
+                    PointerEventData synth;
+                    synth.position = rt->rect().center();
+                    slot->on_pointer_enter(synth);
+                }
+            }
+        }
     }
 
     while (!ctx.should_close()) {
@@ -310,7 +338,9 @@ coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env
     ctx.wait_idle();
 
     auto [final_w, final_h] = ctx.window().framebuffer_size();
-    std::string screenshot_path = std::string(ROOT_DIR) + "/output/test_window.png";
+    const char* out_env = std::getenv("SCREENSHOT_NAME");
+    std::string shot_name = (out_env && out_env[0] != '\0') ? out_env : scene_name;
+    std::string screenshot_path = std::string(ROOT_DIR) + "/output/" + shot_name + ".png";
     save_screenshot(ctx, ui_pass, canvas->draw_list(), final_w, final_h, canvas->scale_factor(), screenshot_path);
 
     std::cout << "[test_window] Exiting cleanly.\n";

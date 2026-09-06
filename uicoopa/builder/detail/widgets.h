@@ -1,0 +1,432 @@
+/**
+ * @file widgets.h
+ * @brief UIBuilder's standard widget factories: label, button, slider, toggle, spinbox, dropdown.
+ */
+
+#ifndef UICOOPA_BUILDER_DETAIL_WIDGETS_H
+#define UICOOPA_BUILDER_DETAIL_WIDGETS_H
+
+#include <uicoopa/builder/detail/build_context.h>
+#include <uicoopa/text/font_defaults.h>
+#include <uicoopa/layout/rect_transform.h>
+#include <uicoopa/layout/layout_element.h>
+#include <uicoopa/groups/layout_group.h>
+#include <uicoopa/widgets/image.h>
+#include <uicoopa/widgets/text.h>
+#include <uicoopa/widgets/button.h>
+#include <uicoopa/widgets/slider.h>
+#include <uicoopa/widgets/toggle.h>
+#include <uicoopa/widgets/spinbox.h>
+#include <uicoopa/widgets/combobox.h>
+#include <uicoopa/widgets/mask.h>
+#include <algorithm>
+#include <memory>
+#include <string>
+#include <vector>
+#include <functional>
+
+namespace coopa {
+namespace ui {
+namespace detail {
+
+using coopa::scene::SceneObject;
+
+/** @brief A single line of layout-driven text. `font_size <= 0` uses the theme's label size;
+ *         an alpha < 0 in `color` uses the theme's primary text color. */
+inline Text* make_label(BuildContext ctx, const std::string& text, float font_size,
+                        glm::vec4 color, const std::string& node_name) {
+    const UITheme& theme = *ctx.theme;
+    auto child = std::make_unique<SceneObject>(node_name);
+    child->add_component<RectTransform>()->anchor_preset(AnchorPreset::StretchAll);
+
+    float size = (font_size > 0.0f) ? font_size : theme.text.size_label;
+    glm::vec4 col = (color.a >= 0.0f) ? color : theme.text.primary;
+
+    auto* txt = child->add_component<Text>();
+    apply_font(txt, size, theme.font);
+    txt->text = text;
+    txt->color = col;
+    txt->horizontal_align = HorizontalAlign::Left;
+    txt->vertical_align = VerticalAlign::Middle;
+
+    child->add_component<LayoutElement>()->preferred_size = {-1.0f, size + 4.0f};
+
+    auto* raw = txt;
+    ctx.parent->add_child(std::move(child));
+    return raw;
+}
+
+/** @brief A free-positioned (non-layout-driven, TopLeft-anchored) block of text, e.g. a wrapped
+ *         paragraph. `size_delta.x <= 0` leaves the width at RectParams' 100.0f default. */
+inline Text* make_paragraph(BuildContext ctx, const std::string& name, const std::string& text,
+                            float font_size, glm::vec4 color, glm::vec2 size_delta) {
+    const UITheme& theme = *ctx.theme;
+    auto child = std::make_unique<SceneObject>(name);
+    auto* rt = child->add_component<RectTransform>();
+    rt->anchor_preset(AnchorPreset::TopLeft);
+    if (size_delta.x > 0.0f) rt->set_size_delta(size_delta);
+
+    auto* txt = child->add_component<Text>();
+    apply_font(txt, font_size > 0.0f ? font_size : theme.text.size_small, theme.font);
+    txt->text = text;
+    txt->color = (color.a >= 0.0f) ? color : theme.text.secondary;
+    txt->horizontal_align = HorizontalAlign::Left;
+    txt->vertical_align = VerticalAlign::Top;
+    txt->overflow = TextOverflow::Wrap;
+
+    auto* raw = txt;
+    ctx.parent->add_child(std::move(child));
+    return raw;
+}
+
+/** @brief A clickable button with a centered label, styled from the given ButtonRole's ButtonStyle. */
+inline Button* make_button(BuildContext ctx, const std::string& label, ButtonRole role,
+                           std::function<void()> on_click) {
+    const UITheme& theme = *ctx.theme;
+    const ButtonStyle& style = button_style(theme, role);
+
+    // Auto-fits the button to its label -- measured with the same Font::measure() the
+    // rendered Text itself lays out with, so this can never disagree with what's drawn.
+    // Falls back to just the minimum width when no font is loaded yet (e.g. headless
+    // tests, which never assert on button width).
+    Font* label_font = theme.font ? theme.font : FontDefaults::font;
+    float text_w = label_font ? label_font->measure(label, static_cast<uint32_t>(theme.text.size_label)).x : 0.0f;
+    float width = std::max(theme.metrics.button_min_width, text_w + 2.0f * theme.metrics.button_padding_x);
+
+    auto child = std::make_unique<SceneObject>("Button_" + label);
+    child->add_component<RectTransform>()->set_size_delta({width, theme.metrics.row_height});
+    child->add_component<LayoutElement>()->preferred_size = {width, theme.metrics.row_height};
+
+    child->add_component<Image>()->color = style.normal;
+
+    auto* btn = child->add_component<Button>();
+    btn->colors.normal      = style.normal;
+    btn->colors.highlighted = style.hover;
+    btn->colors.pressed     = style.press;
+    btn->colors.disabled    = style.disabled;
+
+    auto txt_child = std::make_unique<SceneObject>("Label");
+    auto* txt_child_rt = txt_child->add_component<RectTransform>();
+    txt_child_rt->anchor_preset(AnchorPreset::MiddleCenter);
+    txt_child_rt->set_size_delta({width, theme.metrics.row_height});
+    txt_child_rt->hittable = false;  // Purely decorative -- must not shadow the Button beneath it.
+    auto* txt = txt_child->add_component<Text>();
+    apply_font(txt, theme.text.size_label, theme.font);
+    txt->text = label;
+    txt->color = theme.text.primary;
+    txt->horizontal_align = HorizontalAlign::Center;
+    txt->vertical_align = VerticalAlign::Middle;
+    child->add_child(std::move(txt_child));
+
+    if (on_click) btn->on_click.connect(std::move(on_click));
+
+    auto* raw = btn;
+    ctx.parent->add_child(std::move(child));
+    return raw;
+}
+
+/** @brief A horizontal slider with track/fill/handle, wired to `on_change`. */
+inline Slider* make_slider(BuildContext ctx, const std::string& name,
+                           float min_val, float max_val, float initial_val, float step,
+                           std::function<void(float)> on_change) {
+    const UITheme& theme = *ctx.theme;
+    auto slider_obj = std::make_unique<SceneObject>(name);
+    slider_obj->add_component<RectTransform>()->set_size_delta({180.0f, theme.slider.height});
+    auto* le = slider_obj->add_component<LayoutElement>();
+    le->preferred_size = {180.0f, theme.slider.height};
+    le->flexible_size = {1.0f, 0.0f};
+
+    auto track_obj = std::make_unique<SceneObject>("Track");
+    auto* track_rt = track_obj->add_component<RectTransform>();
+    track_rt->set_anchor_min({0.0f, 0.5f});
+    track_rt->set_anchor_max({1.0f, 0.5f});
+    track_rt->set_pivot({0.5f, 0.5f});
+    track_rt->set_size_delta({0.0f, 6.0f});
+    track_rt->hittable = false;  // Decorative -- the slider object itself owns the drag gesture.
+    track_obj->add_component<Image>()->color = theme.slider.track;
+
+    auto fill_obj = std::make_unique<SceneObject>("Fill");
+    auto* fill_rt = fill_obj->add_component<RectTransform>();
+    fill_rt->set_anchor_min({0.0f, 0.0f});
+    fill_rt->set_anchor_max({0.0f, 1.0f});
+    fill_rt->hittable = false;
+    fill_obj->add_component<Image>()->color = theme.slider.fill;
+
+    auto handle_obj = std::make_unique<SceneObject>("Handle");
+    auto* handle_rt = handle_obj->add_component<RectTransform>();
+    handle_rt->set_anchor_min({0.0f, 0.5f});
+    handle_rt->set_anchor_max({0.0f, 0.5f});
+    handle_rt->set_pivot({0.5f, 0.5f});
+    handle_rt->set_size_delta({theme.slider.handle_width, 16.0f});
+    handle_rt->hittable = false;
+    handle_obj->add_component<Image>()->color = theme.slider.handle;
+
+    auto* slider = slider_obj->add_component<Slider>(min_val, max_val, initial_val);
+    slider->step = step;
+    slider->fill_rect = fill_rt;
+    slider->handle_rect = handle_rt;
+    slider->handle_colors.normal      = theme.slider.handle;
+    slider->handle_colors.highlighted = theme.slider.handle_hover;
+    slider->handle_colors.pressed     = theme.slider.handle_press;
+    slider->handle_colors.disabled    = theme.slider.handle_disabled;
+
+    track_obj->add_child(std::move(fill_obj));
+    slider_obj->add_child(std::move(track_obj));
+    slider_obj->add_child(std::move(handle_obj));
+
+    slider->set_value(initial_val, false);
+    if (on_change) slider->on_value_changed.connect(std::move(on_change));
+
+    auto* raw = slider;
+    ctx.parent->add_child(std::move(slider_obj));
+    return raw;
+}
+
+/** @brief A checkbox-style toggle, optionally with a trailing label, wired to `on_change`. */
+inline Toggle* make_toggle(BuildContext ctx, const std::string& name, bool initial_val,
+                           const std::string& label, std::function<void(bool)> on_change) {
+    const UITheme& theme = *ctx.theme;
+    auto toggle_obj = std::make_unique<SceneObject>(name);
+    toggle_obj->add_component<RectTransform>()->set_size_delta({theme.toggle.size, theme.toggle.size});
+    toggle_obj->add_component<LayoutElement>()->preferred_size = {theme.toggle.size, theme.toggle.size};
+
+    toggle_obj->add_component<Image>()->color = theme.toggle.bg;
+
+    auto check_obj = std::make_unique<SceneObject>("Checkmark");
+    auto* check_rt = check_obj->add_component<RectTransform>();
+    check_rt->anchor_preset(AnchorPreset::StretchAll);
+    check_rt->set_size_delta({-6.0f, -6.0f});
+    check_rt->hittable = false;  // Decorative -- the Toggle object itself owns the click.
+    auto* check_img = check_obj->add_component<Image>();
+    check_img->color = theme.toggle.check;
+
+    auto* toggle = toggle_obj->add_component<Toggle>(initial_val);
+    toggle->checkmark = check_img;
+    toggle->box_colors.normal      = theme.toggle.bg;
+    toggle->box_colors.highlighted = theme.toggle.bg_hover;
+    toggle->box_colors.pressed     = theme.toggle.bg_press;
+    toggle->box_colors.disabled    = theme.toggle.bg_disabled;
+    toggle->update_visuals();
+
+    toggle_obj->add_child(std::move(check_obj));
+
+    if (!label.empty()) {
+        auto lbl_obj = std::make_unique<SceneObject>("Label");
+        auto* lbl_rt = lbl_obj->add_component<RectTransform>();
+        lbl_rt->anchor_preset(AnchorPreset::MiddleLeft);
+        lbl_rt->set_anchored_position({theme.toggle.size + 8.0f, 0.0f});
+        lbl_rt->hittable = false;
+        auto* txt = lbl_obj->add_component<Text>();
+        apply_font(txt, theme.text.size_label, theme.font);
+        txt->text = label;
+        txt->color = theme.text.primary;
+        toggle_obj->add_child(std::move(lbl_obj));
+    }
+
+    if (on_change) toggle->on_value_changed.connect(std::move(on_change));
+
+    auto* raw = toggle;
+    ctx.parent->add_child(std::move(toggle_obj));
+    return raw;
+}
+
+/** @brief Private helper for make_spinbox() -- not part of this header's public factory surface. */
+inline SceneObject* make_spinbox_step_button_(BuildContext ctx, const std::string& glyph,
+                                              Button** out_btn) {
+    const UITheme& theme = *ctx.theme;
+    auto obj = std::make_unique<SceneObject>(glyph == "-" ? "DecBtn" : "IncBtn");
+    obj->add_component<RectTransform>()->set_size_delta({theme.spinbox.btn_width, theme.spinbox.height});
+    obj->add_component<LayoutElement>()->preferred_size = {theme.spinbox.btn_width, theme.spinbox.height};
+    obj->add_component<Image>()->color = theme.button.normal;
+    auto* btn = obj->add_component<Button>();
+    btn->colors.normal = theme.button.normal;
+    btn->colors.highlighted = theme.button.hover;
+    btn->colors.pressed = theme.button.press;
+    btn->colors.disabled = theme.button.disabled;
+
+    auto txt_obj = std::make_unique<SceneObject>("Txt");
+    auto* txt_rt = txt_obj->add_component<RectTransform>();
+    txt_rt->anchor_preset(AnchorPreset::MiddleCenter);
+    txt_rt->hittable = false;  // Decorative -- the button itself owns the click.
+    auto* txt = txt_obj->add_component<Text>();
+    apply_font(txt, theme.text.size_label, theme.font);
+    txt->text = glyph;
+    txt->color = theme.text.primary;
+    txt->horizontal_align = HorizontalAlign::Center;
+    txt->vertical_align = VerticalAlign::Middle;
+    obj->add_child(std::move(txt_obj));
+
+    *out_btn = btn;
+    auto* raw = obj.get();
+    ctx.parent->add_child(std::move(obj));
+    return raw;
+}
+
+/** @brief A numeric spinbox: -/readout/+ in a horizontal group, wired to `on_change`. */
+inline SpinBox* make_spinbox(BuildContext ctx, const std::string& name,
+                             double min_val, double max_val, double initial_val, double step,
+                             std::function<void(double)> on_change) {
+    const UITheme& theme = *ctx.theme;
+    auto spin_obj = std::make_unique<SceneObject>(name);
+    spin_obj->add_component<RectTransform>()->set_size_delta({120.0f, theme.spinbox.height});
+    spin_obj->add_component<LayoutElement>()->preferred_size = {120.0f, theme.spinbox.height};
+    auto* hgroup = spin_obj->add_component<HorizontalLayoutGroup>();
+    hgroup->spacing = 2.0f;
+    hgroup->child_force_expand_height = true;
+
+    Button* dec_btn = nullptr;
+    make_spinbox_step_button_(ctx.into(spin_obj.get()), "-", &dec_btn);
+
+    auto val_obj = std::make_unique<SceneObject>("ValueText");
+    val_obj->add_component<RectTransform>()->hittable = false;  // SpinBox itself is the raycast target -- see spinbox.h.
+    auto* val_le = val_obj->add_component<LayoutElement>();
+    val_le->flexible_size = {1.0f, 0.0f};
+    val_le->preferred_size = {50.0f, theme.spinbox.height};
+    val_obj->add_component<Image>()->color = theme.spinbox.bg;
+    auto* readout = val_obj->add_component<Text>();
+    apply_font(readout, theme.text.size_label, theme.font);
+    readout->color = theme.text.primary;
+    readout->horizontal_align = HorizontalAlign::Center;
+    readout->vertical_align = VerticalAlign::Middle;
+    spin_obj->add_child(std::move(val_obj));
+
+    Button* inc_btn = nullptr;
+    make_spinbox_step_button_(ctx.into(spin_obj.get()), "+", &inc_btn);
+
+    auto* spin = spin_obj->add_component<SpinBox>(min_val, max_val, initial_val, step);
+    spin->dec_button = dec_btn;
+    spin->inc_button = inc_btn;
+    spin->label_text = readout;
+
+    spin->start();
+    if (on_change) spin->on_value_changed.connect(std::move(on_change));
+
+    auto* raw = spin;
+    ctx.parent->add_child(std::move(spin_obj));
+    return raw;
+}
+
+/** @brief A dropdown: main button + label + arrow, and a masked popup of one Button per item. */
+inline ComboBox* make_dropdown(BuildContext ctx, const std::string& name,
+                               const std::vector<std::string>& items, int default_index,
+                               std::function<void(int, const std::string&)> on_change) {
+    const UITheme& theme = *ctx.theme;
+    auto combo_obj = std::make_unique<SceneObject>(name);
+    combo_obj->add_component<RectTransform>()->set_size_delta({180.0f, theme.combobox.height});
+    auto* le = combo_obj->add_component<LayoutElement>();
+    le->preferred_size = {180.0f, theme.combobox.height};
+    le->flexible_size = {1.0f, 0.0f};
+
+    combo_obj->add_component<Image>()->color = theme.combobox.bg;
+    auto* main_btn = combo_obj->add_component<Button>();
+    main_btn->colors.normal = theme.combobox.bg;
+    main_btn->colors.highlighted = theme.button.hover;
+    main_btn->colors.pressed = theme.button.press;
+    main_btn->colors.disabled = theme.button.disabled;
+
+    auto txt_obj = std::make_unique<SceneObject>("Label");
+    auto* txt_rt = txt_obj->add_component<RectTransform>();
+    txt_rt->anchor_preset(AnchorPreset::StretchAll);
+    txt_rt->set_offset_min({8.0f, 0.0f});
+    txt_rt->set_offset_max({-28.0f, 0.0f});
+    txt_rt->hittable = false;  // Decorative -- the combo's own Button owns the click.
+    auto* label_text = txt_obj->add_component<Text>();
+    apply_font(label_text, theme.text.size_label, theme.font);
+    label_text->color = theme.text.primary;
+    label_text->overflow = TextOverflow::Overflow;
+    label_text->horizontal_align = HorizontalAlign::Left;
+    label_text->vertical_align = VerticalAlign::Middle;
+
+    auto arrow_obj = std::make_unique<SceneObject>("Arrow");
+    auto* arrow_rt = arrow_obj->add_component<RectTransform>();
+    arrow_rt->anchor_preset(AnchorPreset::MiddleRight);
+    arrow_rt->set_size_delta({20.0f, 20.0f});
+    arrow_rt->set_anchored_position({-12.0f, 0.0f});
+    arrow_rt->hittable = false;
+    auto* arrow_text = arrow_obj->add_component<Text>();
+    apply_font(arrow_text, theme.text.size_small, theme.font);
+    arrow_text->text = "v";
+    arrow_text->color = theme.text.secondary;
+    arrow_text->horizontal_align = HorizontalAlign::Center;
+    arrow_text->vertical_align = VerticalAlign::Middle;
+
+    auto popup_obj = std::make_unique<SceneObject>("Popup");
+    auto* popup_rt = popup_obj->add_component<RectTransform>();
+    popup_rt->set_anchor_min({0.0f, 0.0f});
+    popup_rt->set_anchor_max({1.0f, 0.0f});
+    popup_rt->set_pivot({0.5f, 1.0f});
+    float popup_h = static_cast<float>(items.size()) * theme.combobox.height;
+    popup_rt->set_size_delta({0.0f, popup_h});
+    popup_rt->set_anchored_position({0.0f, -2.0f});
+    // Elevates the popup (and its item buttons) above every later sibling row in
+    // whatever VerticalLayoutGroup this combo lives in, and lets it escape an
+    // ancestor ScrollRect's Mask if it hangs past the viewport -- see
+    // RectTransform::z_order's doc.
+    popup_rt->z_order = 1;
+
+    popup_obj->add_component<Image>()->color = theme.combobox.popup_bg;
+    // Bounds item text to the popup's own rect. Load-bearing now that the popup
+    // escapes any ancestor Mask (z_order above): without its own Mask, nothing
+    // would clip an item whose text is wider than the popup.
+    popup_obj->add_component<Mask>();
+
+    auto* vgroup = popup_obj->add_component<VerticalLayoutGroup>();
+    vgroup->child_force_expand_width = true;
+    vgroup->child_force_expand_height = false;
+    vgroup->spacing = 1.0f;
+
+    auto* combo = combo_obj->add_component<ComboBox>(items, default_index);
+    combo->main_button = main_btn;
+    combo->label_text = label_text;
+    combo->popup_panel = popup_obj.get();
+
+    for (int i = 0; i < static_cast<int>(items.size()); ++i) {
+        auto item_obj = std::make_unique<SceneObject>("Item_" + std::to_string(i));
+        auto* item_rt = item_obj->add_component<RectTransform>();
+        item_rt->set_size_delta({0.0f, theme.combobox.height});
+        auto* item_le = item_obj->add_component<LayoutElement>();
+        item_le->preferred_size = {-1.0f, theme.combobox.height};
+
+        item_obj->add_component<Image>()->color = theme.button.normal;
+        auto* opt_btn = item_obj->add_component<Button>();
+        opt_btn->colors.normal = theme.button.normal;
+        opt_btn->colors.highlighted = theme.button.hover;
+        opt_btn->colors.pressed = theme.button.press;
+        opt_btn->colors.disabled = theme.button.disabled;
+
+        auto opt_txt_obj = std::make_unique<SceneObject>("Text");
+        auto* opt_txt_rt = opt_txt_obj->add_component<RectTransform>();
+        opt_txt_rt->anchor_preset(AnchorPreset::StretchAll);
+        opt_txt_rt->set_offset_min({8.0f, 0.0f});
+        opt_txt_rt->set_offset_max({-8.0f, 0.0f});
+        opt_txt_rt->hittable = false;  // Decorative -- the item's own Button owns the click.
+        auto* opt_txt = opt_txt_obj->add_component<Text>();
+        apply_font(opt_txt, theme.text.size_label, theme.font);
+        opt_txt->text = items[i];
+        opt_txt->color = theme.text.primary;
+        opt_txt->horizontal_align = HorizontalAlign::Left;
+        opt_txt->vertical_align = VerticalAlign::Middle;
+        item_obj->add_child(std::move(opt_txt_obj));
+
+        opt_btn->on_click.connect([combo, i]() { combo->set_current_index(i); });
+
+        popup_obj->add_child(std::move(item_obj));
+    }
+
+    combo_obj->add_child(std::move(txt_obj));
+    combo_obj->add_child(std::move(arrow_obj));
+    combo_obj->add_child(std::move(popup_obj));
+
+    combo->start();
+    if (on_change) combo->on_selection_changed.connect(std::move(on_change));
+
+    auto* raw = combo;
+    ctx.parent->add_child(std::move(combo_obj));
+    return raw;
+}
+
+}  // namespace detail
+}  // namespace ui
+}  // namespace coopa
+
+#endif  // UICOOPA_BUILDER_DETAIL_WIDGETS_H

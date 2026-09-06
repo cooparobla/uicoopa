@@ -35,8 +35,10 @@
 #include <uicoopa/groups/grid_layout_group.h>
 #include <uicoopa/groups/content_size_fitter.h>
 #include <uicoopa/groups/scroll_rect.h>
+#include <uicoopa/widgets/scrollbar.h>
 #include <uicoopa/widgets/mask.h>
 #include <uicoopa/ui_yaml.h>
+#include <uicoopa/builder/ui_builder.h>
 
 #include <coopa/scene/scene_object.h>
 #include <coopa/scene/scene_manager.h>
@@ -415,6 +417,42 @@ void test_draw_list_batching() {
     ASSERT_TRUE(dl.indices().size() == 24);
 }
 
+void test_draw_list_z_order_sorts_batches() {
+    DrawList dl;
+    dl.begin(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });
+
+    coopa::gfx::TextureView tex_a{0x1};  // emitted at z_order 0
+    coopa::gfx::TextureView tex_b{0x2};  // emitted at z_order 1
+    coopa::gfx::TextureView tex_c{0x3};  // emitted at z_order 0, after tex_b
+
+    dl.set_texture(tex_a);
+    dl.add_quad(Rect{ {0, 0}, {10, 10} }, Rect{ {0, 0}, {1, 1} }, 0xFFFFFFFFu);
+
+    dl.set_z_order(1);
+    dl.set_texture(tex_b);
+    dl.add_quad(Rect{ {20, 20}, {30, 30} }, Rect{ {0, 0}, {1, 1} }, 0xFFFFFFFFu);
+
+    dl.set_z_order(0);
+    dl.set_texture(tex_c);
+    dl.add_quad(Rect{ {40, 40}, {50, 50} }, Rect{ {0, 0}, {1, 1} }, 0xFFFFFFFFu);
+
+    // Before finalize_z_order(): a z_order change breaks the batch even with an
+    // unrelated texture change, same as a clip change already does.
+    ASSERT_TRUE(dl.batches().size() == 3);
+    ASSERT_TRUE(dl.batches()[0].texture_view == tex_a);
+    ASSERT_TRUE(dl.batches()[1].texture_view == tex_b);
+    ASSERT_TRUE(dl.batches()[2].texture_view == tex_c);
+
+    dl.finalize_z_order();
+
+    // Only reorders batch metadata: the higher layer (tex_b) sorts last (drawn on
+    // top), while the two z_order=0 batches keep their original relative order.
+    ASSERT_TRUE(dl.batches().size() == 3);
+    ASSERT_TRUE(dl.batches()[0].texture_view == tex_a);
+    ASSERT_TRUE(dl.batches()[1].texture_view == tex_c);
+    ASSERT_TRUE(dl.batches()[2].texture_view == tex_b);
+}
+
 void test_nine_slice_geometry() {
     DrawList dl;
     dl.begin(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });
@@ -502,6 +540,25 @@ struct TestRaycastTarget : public UIComponent {
     std::string type_name() const override { return "TestRaycastTarget"; }
     bool wants_raycast() const override { return true; }
 };
+
+// Mirrors EventSystem's private dispatch_chain_: walks leaf and every
+// SceneObject::parent() above it, calling fn on each IPointerHandler found,
+// stopping as soon as a handler calls data.consume(). Lets these headless
+// tests exercise real widget IPointerHandler overrides (Button, Slider,
+// ScrollRect, InventorySlot) exactly as EventSystem would dispatch to them,
+// without needing a real gfxcoopa Window to drive UiInput/EventSystem::process.
+template<typename Fn>
+static void dispatch_chain_for_test(SceneObject* leaf, PointerEventData& data, Fn&& fn) {
+    for (SceneObject* obj = leaf; obj != nullptr; obj = obj->parent()) {
+        for (auto& comp : obj->components()) {
+            if (auto* handler = dynamic_cast<IPointerHandler*>(comp.get())) {
+                fn(handler, data);
+                if (data.consumed) return;
+            }
+        }
+        if (data.consumed) return;
+    }
+}
 
 void test_raycaster_topmost_wins() {
     SceneObject root("Canvas");
@@ -1342,6 +1399,1567 @@ void test_reactor_text_on_signal() {
     ASSERT_TRUE(txt->text == "hover @ (640, 360)");  // once-reactor no longer listening
 }
 
+void test_slider_value_mapping_and_stepping() {
+    SceneObject obj("SliderObj");
+    auto* rt = obj.add_component<RectTransform>();
+    rt->anchor_preset(AnchorPreset::BottomLeft);
+    rt->set_size_delta({200.0f, 20.0f});
+    rt->resolve(Rect{glm::vec2(0.0f), glm::vec2(200.0f, 20.0f)});
+
+    auto* slider = obj.add_component<Slider>(0.0f, 100.0f, 20.0f);
+    slider->step = 10.0f;
+    ASSERT_NEAR(slider->value(), 20.0f, 1e-4f);
+    ASSERT_NEAR(slider->normalized_value(), 0.2f, 1e-4f);
+
+    float reported_val = 0.0f;
+    slider->on_value_changed.connect([&](float v) { reported_val = v; });
+
+    // Pointer down at x=100 (50% -> 50.0f)
+    PointerEventData event;
+    event.position = glm::vec2(100.0f, 10.0f);
+    slider->on_pointer_down(event);
+    ASSERT_NEAR(slider->value(), 50.0f, 1e-4f);
+    ASSERT_NEAR(reported_val, 50.0f, 1e-4f);
+
+    // Pointer drag to x=115 (57.5% -> snaps to 60.0f due to step=10)
+    event.position = glm::vec2(115.0f, 10.0f);
+    slider->on_drag(event);
+    ASSERT_NEAR(slider->value(), 60.0f, 1e-4f);
+    ASSERT_NEAR(reported_val, 60.0f, 1e-4f);
+
+    // Test out of bounds clamping
+    event.position = glm::vec2(300.0f, 10.0f);
+    slider->on_drag(event);
+    ASSERT_NEAR(slider->value(), 100.0f, 1e-4f);
+
+    event.position = glm::vec2(-50.0f, 10.0f);
+    slider->on_drag(event);
+    ASSERT_NEAR(slider->value(), 0.0f, 1e-4f);
+
+    slider->on_pointer_up(event);
+}
+
+void test_slider_mask_auto_added_for_handle_clipping() {
+    // The handle's anchor sits exactly at t=0/t=1, so half its fixed pixel width
+    // necessarily overhangs the slider's own rect at either end -- start() must
+    // clip that to the slider's own bounds regardless of how the slider was
+    // constructed (builder, YAML, or -- as here -- directly).
+    SceneObject obj("SliderObj");
+    obj.add_component<RectTransform>();
+    obj.add_component<Slider>(0.0f, 1.0f, 0.5f);
+
+    ASSERT_TRUE(obj.get_component<Mask>() == nullptr);
+    obj.start();
+    ASSERT_TRUE(obj.get_component<Mask>() != nullptr);
+
+    // Idempotent: a second start() (e.g. via a test harness re-invoking it) must
+    // not accumulate a second Mask.
+    obj.start();
+    int mask_count = 0;
+    for (auto& c : obj.components()) {
+        if (dynamic_cast<Mask*>(c.get())) ++mask_count;
+    }
+    ASSERT_TRUE(mask_count == 1);
+}
+
+void test_slider_hover_press_color_transition() {
+    SceneObject obj("SliderObj");
+    obj.add_component<RectTransform>();
+    auto* slider = obj.add_component<Slider>(0.0f, 1.0f, 0.5f);
+
+    auto* handle_obj = obj.add_child(std::make_unique<SceneObject>("Handle"));
+    handle_obj->add_component<RectTransform>();
+    auto* handle_img = handle_obj->add_component<Image>();
+    slider->handle_rect = handle_obj->get_component<RectTransform>();
+
+    obj.start();  // discovers handle_image_ from handle_rect's sibling Image
+
+    slider->handle_colors.fade_duration = 0.0f;  // snap instantly, like the Button color test above
+    slider->handle_colors.normal      = glm::vec4(0.9f, 0.9f, 0.9f, 1.0f);
+    slider->handle_colors.highlighted = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+    slider->handle_colors.pressed     = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
+
+    PointerEventData data;
+    slider->update(1.0f);
+    ASSERT_NEAR(handle_img->color.r, 0.9f, 1e-4f);
+
+    slider->on_pointer_enter(data);
+    slider->update(1.0f);
+    ASSERT_NEAR(handle_img->color.r, 1.0f, 1e-4f);
+
+    slider->on_pointer_down(data);  // sets dragging_ = true, reused directly as "pressed"
+    slider->update(1.0f);
+    ASSERT_NEAR(handle_img->color.r, 0.5f, 1e-4f);
+
+    slider->on_pointer_up(data);
+    slider->on_pointer_exit(data);
+    slider->update(1.0f);
+    ASSERT_NEAR(handle_img->color.r, 0.9f, 1e-4f);
+}
+
+void test_toggle_interaction_and_signals() {
+    SceneObject obj("ToggleObj");
+    auto* toggle = obj.add_component<Toggle>(false);
+    ASSERT_TRUE(!toggle->is_on());
+
+    bool reported = false;
+    int emit_count = 0;
+    toggle->on_value_changed.connect([&](bool v) {
+        reported = v;
+        emit_count++;
+    });
+
+    PointerEventData ev;
+    toggle->on_pointer_click(ev);
+    ASSERT_TRUE(toggle->is_on());
+    ASSERT_TRUE(reported == true);
+    ASSERT_TRUE(emit_count == 1);
+
+    toggle->on_pointer_click(ev);
+    ASSERT_TRUE(!toggle->is_on());
+    ASSERT_TRUE(reported == false);
+    ASSERT_TRUE(emit_count == 2);
+}
+
+void test_toggle_hover_press_color_transition_and_no_side_effects() {
+    SceneObject obj("ToggleObj");
+    obj.add_component<RectTransform>();
+    auto* box_img = obj.add_component<Image>();
+    auto* toggle = obj.add_component<Toggle>(false);
+    obj.start();  // discovers box_image_ from the sibling Image
+
+    toggle->box_colors.fade_duration = 0.0f;
+    toggle->box_colors.normal      = glm::vec4(0.2f, 0.2f, 0.2f, 1.0f);
+    toggle->box_colors.highlighted = glm::vec4(0.3f, 0.3f, 0.3f, 1.0f);
+    toggle->box_colors.pressed     = glm::vec4(0.1f, 0.1f, 0.1f, 1.0f);
+
+    PointerEventData data;
+    toggle->update(1.0f);
+    ASSERT_NEAR(box_img->color.r, 0.2f, 1e-4f);
+
+    toggle->on_pointer_enter(data);
+    toggle->update(1.0f);
+    ASSERT_NEAR(box_img->color.r, 0.3f, 1e-4f);
+
+    // Regression guard: the new down/up (added purely for press-color tracking)
+    // must never fire on_value_changed or flip is_on() -- only on_pointer_click does.
+    bool changed = false;
+    toggle->on_value_changed.connect([&](bool) { changed = true; });
+    bool before = toggle->is_on();
+
+    toggle->on_pointer_down(data);
+    toggle->update(1.0f);
+    ASSERT_NEAR(box_img->color.r, 0.1f, 1e-4f);
+    ASSERT_TRUE(toggle->is_on() == before);
+    ASSERT_TRUE(!changed);
+
+    toggle->on_pointer_up(data);
+    ASSERT_TRUE(toggle->is_on() == before);
+    ASSERT_TRUE(!changed);
+    toggle->update(1.0f);
+    ASSERT_NEAR(box_img->color.r, 0.3f, 1e-4f);  // back to hovered (still hovered_, not pressed_)
+
+    toggle->on_pointer_click(data);
+    ASSERT_TRUE(changed);
+    ASSERT_TRUE(toggle->is_on() != before);
+}
+
+void test_spinbox_stepping_and_bounds() {
+    SceneObject obj("SpinObj");
+    auto* spin = obj.add_component<SpinBox>(0.0, 10.0, 5.0, 1.0);
+    ASSERT_NEAR(spin->value(), 5.0, 1e-4);
+
+    double reported = 0.0;
+    spin->on_value_changed.connect([&](double v) { reported = v; });
+
+    spin->step_by(1);
+    ASSERT_NEAR(spin->value(), 6.0, 1e-4);
+    ASSERT_NEAR(reported, 6.0, 1e-4);
+
+    spin->step_by(-3);
+    ASSERT_NEAR(spin->value(), 3.0, 1e-4);
+    ASSERT_NEAR(reported, 3.0, 1e-4);
+
+    // Clamping to min
+    spin->step_by(-10);
+    ASSERT_NEAR(spin->value(), 0.0, 1e-4);
+
+    // Clamping to max
+    spin->step_by(20);
+    ASSERT_NEAR(spin->value(), 10.0, 1e-4);
+}
+
+void test_focus_context_gained_and_lost() {
+    struct RecordingHandler : public coopa::scene::Component, public ITextInputHandler {
+        std::string type_name() const override { return "RecordingHandler"; }
+        int gained = 0, lost = 0;
+        void on_focus_gained() override { ++gained; }
+        void on_focus_lost() override { ++lost; }
+    };
+
+    FocusContext::instance().clear_focus();  // guard against leftover state from another test
+
+    SceneObject a("A");
+    auto* ha = a.add_component<RecordingHandler>();
+    SceneObject b("B");
+    auto* hb = b.add_component<RecordingHandler>();
+
+    FocusContext::instance().request_focus(&a);
+    ASSERT_TRUE(ha->gained == 1 && ha->lost == 0);
+    ASSERT_TRUE(FocusContext::instance().focused() == &a);
+
+    // Re-requesting the same object is a no-op -- no duplicate gained/lost calls.
+    FocusContext::instance().request_focus(&a);
+    ASSERT_TRUE(ha->gained == 1);
+
+    FocusContext::instance().request_focus(&b);
+    ASSERT_TRUE(ha->lost == 1);
+    ASSERT_TRUE(hb->gained == 1 && hb->lost == 0);
+    ASSERT_TRUE(FocusContext::instance().focused() == &b);
+
+    FocusContext::instance().clear_focus();
+    ASSERT_TRUE(hb->lost == 1);
+    ASSERT_TRUE(FocusContext::instance().focused() == nullptr);
+}
+
+// Shared setup for the SpinBox double-click/keyboard-editing tests below: a real
+// UIBuilder-constructed SpinBox (so label_text/value_bg_ are wired exactly like
+// production scenes), laid out once so ValueText/DecBtn/IncBtn have real rects.
+struct SpinBoxTestFixture {
+    std::unique_ptr<SceneObject> canvas_obj;
+    CanvasComponent* canvas = nullptr;
+    SpinBox* spin = nullptr;
+};
+
+static SpinBoxTestFixture make_spinbox_fixture(double min_v, double max_v, double initial, double step, int decimals = 0) {
+    FocusContext::instance().clear_focus();  // guard against leftover state from another test
+
+    SpinBoxTestFixture fx;
+    fx.canvas_obj = std::make_unique<SceneObject>("Canvas");
+    fx.canvas = fx.canvas_obj->add_component<CanvasComponent>();
+    fx.canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    fx.canvas->scaler.scale_factor = 1.0f;
+
+    auto* root = fx.canvas_obj->add_child(std::make_unique<SceneObject>("Root"));
+    root->add_component<RectTransform>()->set_size_delta({400.0f, 200.0f});
+
+    UIBuilder builder(root);
+    fx.spin = builder.add_spinbox("Count", min_v, max_v, initial, step);
+    fx.spin->decimals = decimals;
+    fx.spin->update_visuals();
+
+    fx.canvas->rebuild_layout(400, 200);
+    return fx;
+}
+
+static coopa::gfx::input::KeyEvent make_key_(coopa::gfx::input::Key key) {
+    return coopa::gfx::input::KeyEvent{ key, 0, coopa::gfx::input::KeyAction::Press, coopa::gfx::input::Mods::None };
+}
+
+void test_spinbox_double_click_gated_to_value_text_area() {
+    auto fx = make_spinbox_fixture(0.0, 100.0, 5.0, 1.0);
+
+    auto* value_rt = fx.spin->label_text->owner->get_component<RectTransform>();
+    ASSERT_TRUE(value_rt != nullptr);
+    auto* dec_rt = fx.spin->dec_button->owner->get_component<RectTransform>();
+    ASSERT_TRUE(dec_rt != nullptr);
+
+    // Double-clicking the decrement button's area must never enter edit mode --
+    // it bubbles to this same SpinBox, but the geometry check rejects it.
+    PointerEventData dbl_over_dec;
+    dbl_over_dec.position = dec_rt->rect().center();
+    fx.spin->on_pointer_double_click(dbl_over_dec);
+    ASSERT_TRUE(!fx.spin->editing());
+
+    PointerEventData dbl_over_value;
+    dbl_over_value.position = value_rt->rect().center();
+    fx.spin->on_pointer_double_click(dbl_over_value);
+    ASSERT_TRUE(fx.spin->editing());
+
+    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Escape));  // leave FocusContext clean
+}
+
+void test_spinbox_on_char_filters_non_numeric() {
+    auto fx = make_spinbox_fixture(0.0, 100.0, 5.0, 1.0, /*decimals=*/0);
+    auto* value_rt = fx.spin->label_text->owner->get_component<RectTransform>();
+    PointerEventData dbl;
+    dbl.position = value_rt->rect().center();
+    fx.spin->on_pointer_double_click(dbl);
+    ASSERT_TRUE(fx.spin->editing());
+
+    fx.spin->on_char('a');   // letters are silently ignored
+    fx.spin->on_char('7');
+    fx.spin->on_char('.');   // decimals == 0 -- rejected
+    fx.spin->on_char('2');
+    ASSERT_TRUE(fx.spin->label_text->text == "72");
+
+    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Enter));
+    ASSERT_TRUE(!fx.spin->editing());
+    ASSERT_NEAR(fx.spin->value(), 72.0, 1e-4);
+}
+
+void test_spinbox_on_char_decimal_and_negative_rules() {
+    auto fx = make_spinbox_fixture(-100.0, 100.0, 5.0, 1.0, /*decimals=*/2);
+    auto* value_rt = fx.spin->label_text->owner->get_component<RectTransform>();
+    PointerEventData dbl;
+    dbl.position = value_rt->rect().center();
+    fx.spin->on_pointer_double_click(dbl);
+
+    fx.spin->on_char('-');
+    fx.spin->on_char('1');
+    fx.spin->on_char('2');
+    fx.spin->on_char('-');   // a second '-' mid-buffer is rejected
+    fx.spin->on_char('.');
+    fx.spin->on_char('5');
+    fx.spin->on_char('.');   // a second '.' is rejected
+    ASSERT_TRUE(fx.spin->label_text->text == "-12.5");
+
+    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Escape));  // leave FocusContext clean
+}
+
+void test_spinbox_escape_reverts_without_committing() {
+    auto fx = make_spinbox_fixture(0.0, 100.0, 5.0, 1.0);
+    double reported = -1.0;
+    fx.spin->on_value_changed.connect([&](double v) { reported = v; });
+
+    auto* value_rt = fx.spin->label_text->owner->get_component<RectTransform>();
+    PointerEventData dbl;
+    dbl.position = value_rt->rect().center();
+    fx.spin->on_pointer_double_click(dbl);
+
+    fx.spin->on_char('9');
+    fx.spin->on_char('9');
+    ASSERT_TRUE(fx.spin->label_text->text == "99");
+
+    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Escape));
+    ASSERT_TRUE(!fx.spin->editing());
+    ASSERT_NEAR(fx.spin->value(), 5.0, 1e-4);   // unchanged
+    ASSERT_TRUE(reported < 0.0);                 // on_value_changed never fired
+    ASSERT_TRUE(fx.spin->label_text->text == "5");  // reverted to the committed value's display
+}
+
+void test_spinbox_backspace_and_focus_lost_commits() {
+    auto fx = make_spinbox_fixture(0.0, 100.0, 5.0, 1.0);
+    auto* value_rt = fx.spin->label_text->owner->get_component<RectTransform>();
+    PointerEventData dbl;
+    dbl.position = value_rt->rect().center();
+    fx.spin->on_pointer_double_click(dbl);
+
+    fx.spin->on_char('4');
+    fx.spin->on_char('2');
+    fx.spin->on_char('9');
+    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Backspace));
+    ASSERT_TRUE(fx.spin->label_text->text == "42");
+
+    double reported = -1.0;
+    fx.spin->on_value_changed.connect([&](double v) { reported = v; });
+    fx.spin->on_focus_lost();  // simulates FocusContext blurring it (e.g. a click elsewhere)
+    ASSERT_TRUE(!fx.spin->editing());
+    ASSERT_NEAR(fx.spin->value(), 42.0, 1e-4);
+    ASSERT_NEAR(reported, 42.0, 1e-4);
+}
+
+void test_combobox_selection_and_signals() {
+    SceneObject obj("ComboObj");
+    std::vector<std::string> opts = {"Option A", "Option B", "Option C"};
+    auto* combo = obj.add_component<ComboBox>(opts, 1);
+    ASSERT_TRUE(combo->current_index() == 1);
+    ASSERT_TRUE(combo->current_text() == "Option B");
+
+    int reported_idx = -1;
+    std::string reported_txt;
+    combo->on_selection_changed.connect([&](int idx, const std::string& txt) {
+        reported_idx = idx;
+        reported_txt = txt;
+    });
+
+    combo->set_current_index(2);
+    ASSERT_TRUE(combo->current_index() == 2);
+    ASSERT_TRUE(combo->current_text() == "Option C");
+    ASSERT_TRUE(reported_idx == 2);
+    ASSERT_TRUE(reported_txt == "Option C");
+
+    combo->add_item("Option D");
+    ASSERT_TRUE(combo->items.size() == 4);
+    combo->set_current_index(3);
+    ASSERT_TRUE(combo->current_text() == "Option D");
+}
+
+void test_ui_builder_hierarchy_and_value_getters() {
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+
+    UIBuilder builder(&root);
+    auto settings = builder.vertical_layout("SettingsPanel", 8.0f);
+
+    auto* vol = settings.add_slider("Volume", 0.0f, 100.0f, 75.0f);
+    auto* vsync = settings.add_toggle("VSync", true);
+    auto* fov = settings.add_spinbox("FOV", 60.0, 120.0, 90.0, 1.0);
+    auto* quality = settings.add_dropdown("Quality", {"Low", "Medium", "High", "Ultra"}, 2);
+
+    // Direct widget checks
+    ASSERT_NEAR(vol->value(), 75.0f, 1e-4f);
+    ASSERT_TRUE(vsync->is_on() == true);
+    ASSERT_NEAR(fov->value(), 90.0, 1e-4);
+    ASSERT_TRUE(quality->current_text() == "High");
+
+    // Parent get_value<T> queries
+    ASSERT_NEAR(settings.get_value<float>("Volume"), 75.0f, 1e-4f);
+    ASSERT_TRUE(settings.get_value<bool>("VSync") == true);
+    ASSERT_NEAR(settings.get_value<double>("FOV"), 90.0, 1e-4);
+    ASSERT_TRUE(settings.get_value<std::string>("Quality") == "High");
+    ASSERT_TRUE(settings.get_value<int>("Quality") == 2);
+
+    // Parent set_value mutations
+    settings.set_value("Volume", 42.0f);
+    ASSERT_NEAR(settings.get_value<float>("Volume"), 42.0f, 1e-4f);
+    ASSERT_NEAR(vol->value(), 42.0f, 1e-4f);
+
+    settings.set_value("VSync", false);
+    ASSERT_TRUE(settings.get_value<bool>("VSync") == false);
+    ASSERT_TRUE(!vsync->is_on());
+
+    settings.set_value("FOV", 105.0);
+    ASSERT_NEAR(settings.get_value<double>("FOV"), 105.0, 1e-4);
+
+    settings.set_value("Quality", std::string("Ultra"));
+    ASSERT_TRUE(settings.get_value<std::string>("Quality") == "Ultra");
+    ASSERT_TRUE(quality->current_index() == 3);
+
+    // Settings row shorthand check
+    auto row_slider = settings.add_slider_row("Brightness", 0.0f, 1.0f, 0.8f);
+    ASSERT_NEAR(row_slider->value(), 0.8f, 1e-4f);
+    ASSERT_NEAR(settings.get_value<float>("Brightness"), 0.8f, 1e-4f);
+}
+
+void test_drag_drop_and_inventory_grid() {
+    SceneObject root("InventoryRoot");
+    root.add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+
+    UIBuilder builder(&root);
+    auto* inv = builder.add_inventory_grid("PlayerBag", 2, 2, {40.0f, 40.0f}, {4.0f, 4.0f});
+
+    ASSERT_TRUE(inv->slot_count() == 4);
+
+    InventoryItem potion{ .id = "potion", .name = "Health Potion", .count = 5, .max_stack = 10 };
+    InventoryItem sword{ .id = "sword", .name = "Iron Sword", .count = 1, .max_stack = 1 };
+
+    inv->set_item(0, potion);
+    inv->set_item(2, sword);
+
+    ASSERT_TRUE(inv->get_item(0).id == "potion");
+    ASSERT_TRUE(inv->get_item(0).count == 5);
+    ASSERT_TRUE(inv->get_item(1).empty());
+    ASSERT_TRUE(inv->get_item(2).id == "sword");
+
+    int swap_from = -1, swap_to = -1;
+    inv->on_items_swapped.connect([&](int f, int t) {
+        swap_from = f;
+        swap_to = t;
+    });
+
+    // 1. Move to empty slot: 0 -> 1
+    bool ok = inv->transfer_or_swap_items(0, 1);
+    ASSERT_TRUE(ok);
+    ASSERT_TRUE(inv->get_item(0).empty());
+    ASSERT_TRUE(inv->get_item(1).id == "potion");
+    ASSERT_TRUE(inv->get_item(1).count == 5);
+    ASSERT_TRUE(swap_from == 0 && swap_to == 1);
+
+    // 2. Stack items: add 3 potions in slot 0, then transfer 0 -> 1 (5 + 3 = 8 <= 10)
+    inv->set_item(0, InventoryItem{ .id = "potion", .name = "Health Potion", .count = 3, .max_stack = 10 });
+    ok = inv->transfer_or_swap_items(0, 1);
+    ASSERT_TRUE(ok);
+    ASSERT_TRUE(inv->get_item(0).empty());
+    ASSERT_TRUE(inv->get_item(1).id == "potion");
+    ASSERT_TRUE(inv->get_item(1).count == 8);
+
+    // 3. Swap different items: slot 1 (8 potions) <-> slot 2 (1 sword)
+    ok = inv->transfer_or_swap_items(1, 2);
+    ASSERT_TRUE(ok);
+    ASSERT_TRUE(inv->get_item(1).id == "sword");
+    ASSERT_TRUE(inv->get_item(1).count == 1);
+    ASSERT_TRUE(inv->get_item(2).id == "potion");
+    ASSERT_TRUE(inv->get_item(2).count == 8);
+}
+
+void test_ui_yaml_new_components() {
+    coopa::ui::register_ui_components();
+
+    const std::string yaml = R"(
+format: test
+scene:
+  auto_transform: false
+  root_objects:
+    - name: ControlsRoot
+      components:
+        - type: RectTransform
+          size_delta: { x: 400, y: 300 }
+      children:
+        - name: MySlider
+          components:
+            - type: RectTransform
+            - type: Slider
+              min: 10
+              max: 50
+              step: 5
+              value: 25
+        - name: MyToggle
+          components:
+            - type: RectTransform
+            - type: Toggle
+              is_on: true
+        - name: MySpinBox
+          components:
+            - type: RectTransform
+            - type: SpinBox
+              min: 0
+              max: 100
+              step: 2
+              value: 14
+        - name: MyComboBox
+          components:
+            - type: RectTransform
+            - type: ComboBox
+              items: ["Alpha", "Beta", "Gamma"]
+              selected_index: 1
+        - name: MyGrid
+          components:
+            - type: RectTransform
+            - type: InventoryGrid
+              rows: 3
+              cols: 5
+)";
+
+    std::string path = write_temp_yaml("new_components", yaml);
+    SceneManager mgr;
+    mgr.load_scene(path);
+    auto& scene = mgr.get_active_scene();
+    std::filesystem::remove(path);
+
+    auto* slider_obj = scene.find_object("MySlider");
+    ASSERT_TRUE(slider_obj != nullptr);
+    auto* slider = slider_obj->get_component<Slider>();
+    ASSERT_TRUE(slider != nullptr);
+    ASSERT_NEAR(slider->min_value, 10.0f, 1e-4f);
+    ASSERT_NEAR(slider->max_value, 50.0f, 1e-4f);
+    ASSERT_NEAR(slider->step, 5.0f, 1e-4f);
+    ASSERT_NEAR(slider->value(), 25.0f, 1e-4f);
+
+    auto* toggle_obj = scene.find_object("MyToggle");
+    ASSERT_TRUE(toggle_obj != nullptr);
+    auto* toggle = toggle_obj->get_component<Toggle>();
+    ASSERT_TRUE(toggle != nullptr);
+    ASSERT_TRUE(toggle->is_on() == true);
+
+    auto* spin_obj = scene.find_object("MySpinBox");
+    ASSERT_TRUE(spin_obj != nullptr);
+    auto* spin = spin_obj->get_component<SpinBox>();
+    ASSERT_TRUE(spin != nullptr);
+    ASSERT_NEAR(spin->value(), 14.0, 1e-4);
+
+    auto* combo_obj = scene.find_object("MyComboBox");
+    ASSERT_TRUE(combo_obj != nullptr);
+    auto* combo = combo_obj->get_component<ComboBox>();
+    ASSERT_TRUE(combo != nullptr);
+    ASSERT_TRUE(combo->current_index() == 1);
+    ASSERT_TRUE(combo->current_text() == "Beta");
+
+    auto* grid_obj = scene.find_object("MyGrid");
+    ASSERT_TRUE(grid_obj != nullptr);
+    auto* grid = grid_obj->get_component<InventoryGrid>();
+    ASSERT_TRUE(grid != nullptr);
+    ASSERT_TRUE(grid->rows == 3 && grid->cols == 5);
+    ASSERT_TRUE(grid->slot_count() == 15);
+}
+
+void test_hit_test_all_topmost_first_order() {
+    // A(B(D,E),C), all five sharing one overlapping rect -- hit_test_all must
+    // return the exact reverse of CanvasComponent::emit_'s draw order: children
+    // before their own parent, siblings in reverse array order.
+    SceneObject root("Canvas");
+
+    auto make_target = [](SceneObject& parent, const char* name) -> SceneObject* {
+        auto* obj = parent.add_child(std::make_unique<SceneObject>(name));
+        auto* rt = obj->add_component<RectTransform>();
+        obj->add_component<TestRaycastTarget>();
+        rt->set_anchor_min({0.0f, 0.0f});
+        rt->set_anchor_max({0.0f, 0.0f});
+        rt->set_pivot({0.0f, 0.0f});
+        rt->set_size_delta({100.0f, 100.0f});
+        rt->resolve(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });
+        return obj;
+    };
+
+    auto* a = make_target(root, "A");
+    auto* b = make_target(*a, "B");
+    auto* d = make_target(*b, "D");
+    auto* e = make_target(*b, "E");
+    auto* c = make_target(*a, "C");
+
+    std::vector<RaycastHit> hits;
+    Raycaster::hit_test_all(root, glm::vec2(50.0f, 50.0f), hits);
+
+    ASSERT_TRUE(hits.size() == 5);
+    ASSERT_TRUE(hits[0].object == c);
+    ASSERT_TRUE(hits[1].object == e);
+    ASSERT_TRUE(hits[2].object == d);
+    ASSERT_TRUE(hits[3].object == b);
+    ASSERT_TRUE(hits[4].object == a);
+
+    // hit_test() must still be exactly hit_test_all()'s first element.
+    RaycastHit single = Raycaster::hit_test(root, glm::vec2(50.0f, 50.0f));
+    ASSERT_TRUE(single.object == c);
+}
+
+void test_hittable_false_lets_ancestor_win() {
+    // Reproduces the settings_demo bug shape exactly: a Button-sized object
+    // (160x36) with a child Text whose RectTransform only sets an anchor preset,
+    // leaving size_delta at its 100x100 default (rect.h) -- a label overhanging
+    // its own button by 32px top and bottom.
+    SceneObject obj("Btn");
+    auto* rt = obj.add_component<RectTransform>();
+    rt->set_anchor_min({0.0f, 0.0f});
+    rt->set_anchor_max({0.0f, 0.0f});
+    rt->set_pivot({0.0f, 0.0f});
+    rt->set_size_delta({160.0f, 36.0f});
+    obj.add_component<Image>();
+    obj.add_component<Button>();
+    rt->resolve(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });
+
+    auto* label = obj.add_child(std::make_unique<SceneObject>("Label"));
+    auto* label_rt = label->add_component<RectTransform>();
+    label_rt->set_anchor_min({0.5f, 0.5f});
+    label_rt->set_anchor_max({0.5f, 0.5f});
+    label_rt->set_pivot({0.5f, 0.5f});
+    label->add_component<Text>();
+    label_rt->resolve(rt->rect());
+
+    glm::vec2 inside_both = { 80.0f, 18.0f };  // the Button's own center; also inside the label's 100x100 rect.
+
+    // Baseline: Text (a Graphic) defaults raycast_target=true, so the oversized
+    // Label wins over its own Button ancestor -- this IS the reported bug.
+    RaycastHit before_fix = Raycaster::hit_test(obj, inside_both);
+    ASSERT_TRUE(static_cast<bool>(before_fix));
+    ASSERT_TRUE(before_fix.object == label);
+
+    label_rt->hittable = false;
+    RaycastHit after_fix = Raycaster::hit_test(obj, inside_both);
+    ASSERT_TRUE(static_cast<bool>(after_fix));
+    ASSERT_TRUE(after_fix.object == &obj);
+}
+
+void test_z_order_wins_over_hierarchy_order() {
+    SceneObject root("Canvas");
+
+    // B is added BEFORE A, so hierarchy order alone (later sibling wins) would
+    // make A topmost -- z_order must override that.
+    auto* b = root.add_child(std::make_unique<SceneObject>("B"));
+    auto* rt_b = b->add_component<RectTransform>();
+    b->add_component<TestRaycastTarget>();
+    rt_b->set_anchor_min({0.0f, 0.0f});
+    rt_b->set_anchor_max({0.0f, 0.0f});
+    rt_b->set_pivot({0.0f, 0.0f});
+    rt_b->set_size_delta({100.0f, 100.0f});
+    rt_b->resolve(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });
+
+    auto* a = root.add_child(std::make_unique<SceneObject>("A"));
+    auto* rt_a = a->add_component<RectTransform>();
+    a->add_component<TestRaycastTarget>();
+    rt_a->set_anchor_min({0.0f, 0.0f});
+    rt_a->set_anchor_max({0.0f, 0.0f});
+    rt_a->set_pivot({0.0f, 0.0f});
+    rt_a->set_size_delta({100.0f, 100.0f});
+    rt_a->resolve(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });
+
+    // Baseline, z_order left at its default 0 everywhere: A (added later) wins,
+    // exactly as before this feature existed.
+    RaycastHit baseline = Raycaster::hit_test(root, glm::vec2(50.0f, 50.0f));
+    ASSERT_TRUE(baseline.object == a);
+
+    rt_b->z_order = 1;
+    RaycastHit elevated = Raycaster::hit_test(root, glm::vec2(50.0f, 50.0f));
+    ASSERT_TRUE(elevated.object == b);
+    ASSERT_TRUE(elevated.z_order == 1);
+}
+
+void test_z_order_escapes_ancestor_mask() {
+    // Viewport (0,0)-(100,100) carries a Mask; Popup sits inside Content but its
+    // rect extends past x=100 -- exactly the shape a ComboBox popup takes when
+    // it hangs past its scroll viewport.
+    SceneObject root("Canvas");
+
+    auto* viewport = root.add_child(std::make_unique<SceneObject>("Viewport"));
+    auto* viewport_rt = viewport->add_component<RectTransform>();
+    viewport_rt->set_anchor_min({0.0f, 0.0f});
+    viewport_rt->set_anchor_max({0.0f, 0.0f});
+    viewport_rt->set_pivot({0.0f, 0.0f});
+    viewport_rt->set_size_delta({100.0f, 100.0f});
+    viewport_rt->resolve(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });
+    viewport->add_component<Mask>();
+
+    auto* content = viewport->add_child(std::make_unique<SceneObject>("Content"));
+    auto* content_rt = content->add_component<RectTransform>();
+    content_rt->set_anchor_min({0.0f, 0.0f});
+    content_rt->set_anchor_max({0.0f, 0.0f});
+    content_rt->set_pivot({0.0f, 0.0f});
+    content_rt->set_size_delta({100.0f, 100.0f});
+    content_rt->resolve(viewport_rt->rect());
+
+    auto* popup = content->add_child(std::make_unique<SceneObject>("Popup"));
+    auto* popup_rt = popup->add_component<RectTransform>();
+    popup_rt->set_anchor_min({0.0f, 0.0f});
+    popup_rt->set_anchor_max({0.0f, 0.0f});
+    popup_rt->set_pivot({0.0f, 0.0f});
+    popup_rt->set_anchored_position({120.0f, 0.0f});  // outside Viewport's (0,0)-(100,100) clip
+    popup_rt->set_size_delta({50.0f, 50.0f});
+    popup->add_component<TestRaycastTarget>();
+    popup_rt->resolve(content_rt->rect());
+
+    glm::vec2 point = { 140.0f, 20.0f };  // inside Popup's rect, outside Viewport's clip
+
+    // Baseline: without elevation, the ancestor Mask clips the popup away.
+    RaycastHit clipped = Raycaster::hit_test(root, point);
+    ASSERT_TRUE(!static_cast<bool>(clipped));
+
+    popup_rt->z_order = 1;
+    RaycastHit escaped = Raycaster::hit_test(root, point);
+    ASSERT_TRUE(static_cast<bool>(escaped));
+    ASSERT_TRUE(escaped.object == popup);
+}
+
+void test_event_bubbling_button_click_via_label() {
+    // The topmost hit is the Label (no IPointerHandler at all); down/click must
+    // still bubble up SceneObject::parent() to reach the Button.
+    SceneObject btn_obj("BtnObj");
+    auto* btn_rt = btn_obj.add_component<RectTransform>();
+    btn_rt->set_anchor_min({0.0f, 0.0f});
+    btn_rt->set_anchor_max({0.0f, 0.0f});
+    btn_rt->set_pivot({0.0f, 0.0f});
+    btn_rt->set_size_delta({160.0f, 36.0f});
+    btn_obj.add_component<Image>();
+    auto* button = btn_obj.add_component<Button>();
+    btn_rt->resolve(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });
+
+    auto* label = btn_obj.add_child(std::make_unique<SceneObject>("Label"));
+    auto* label_rt = label->add_component<RectTransform>();
+    label_rt->set_anchor_min({0.5f, 0.5f});
+    label_rt->set_anchor_max({0.5f, 0.5f});
+    label_rt->set_pivot({0.5f, 0.5f});
+    label->add_component<Text>();  // default hittable=true, raycast_target=true -- deliberately NOT fixed here.
+    label_rt->resolve(btn_rt->rect());
+
+    glm::vec2 point = { 80.0f, 18.0f };
+    RaycastHit hit = Raycaster::hit_test(btn_obj, point);
+    ASSERT_TRUE(static_cast<bool>(hit));
+    ASSERT_TRUE(hit.object == label);  // topmost is the Label, exactly as in the real bug.
+
+    int click_count = 0;
+    button->on_click.connect([&] { ++click_count; });
+
+    PointerEventData down;
+    down.position = point;
+    dispatch_chain_for_test(hit.object, down, [](IPointerHandler* h, const PointerEventData& d) { h->on_pointer_down(d); });
+    ASSERT_TRUE(button->pressed());
+
+    PointerEventData click;
+    click.position = point;
+    dispatch_chain_for_test(hit.object, click, [](IPointerHandler* h, const PointerEventData& d) { h->on_pointer_click(d); });
+    ASSERT_TRUE(click_count == 1);
+    ASSERT_TRUE(click.consumed);  // Button consumes its own click.
+}
+
+void test_event_bubbling_scroll_reaches_ancestor_scrollrect() {
+    // A deep Text leaf (Content -> RowText) has no IPointerHandler; scroll must
+    // bubble past it to the ScrollRect on the Viewport two levels up.
+    SceneObject viewport_obj("Viewport");
+    auto* viewport_rt = viewport_obj.add_component<RectTransform>();
+    viewport_rt->set_anchor_min({0.0f, 0.0f});
+    viewport_rt->set_anchor_max({0.0f, 0.0f});
+    viewport_rt->set_pivot({0.0f, 0.0f});
+    viewport_rt->set_size_delta({200.0f, 200.0f});
+    viewport_rt->resolve(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });
+
+    auto* content = viewport_obj.add_child(std::make_unique<SceneObject>("Content"));
+    auto* content_rt = content->add_component<RectTransform>();
+    content_rt->set_size_delta({200.0f, 800.0f});  // taller than the viewport -- scrollable.
+
+    auto* text_obj = content->add_child(std::make_unique<SceneObject>("RowText"));
+    auto* text_rt = text_obj->add_component<RectTransform>();
+    text_obj->add_component<Text>();
+
+    auto* scroll = viewport_obj.add_component<ScrollRect>();
+    scroll->content_name = "Content";
+    scroll->auto_scrollbars = false;
+    viewport_obj.start();  // forces Content's anchors to (0,1)/(0,1), pivot (0,1)
+
+    content_rt->resolve(viewport_rt->rect());
+    text_rt->anchor_preset(AnchorPreset::StretchAll);
+    text_rt->resolve(content_rt->rect());
+
+    glm::vec2 point = viewport_rt->rect().center();
+    RaycastHit hit = Raycaster::hit_test(viewport_obj, point);
+    ASSERT_TRUE(static_cast<bool>(hit));
+    ASSERT_TRUE(hit.object == text_obj);
+
+    float before = content_rt->anchored_position().y;
+    PointerEventData scroll_data;
+    scroll_data.position = point;
+    scroll_data.delta = { 0.0f, -5.0f };
+    dispatch_chain_for_test(hit.object, scroll_data,
+        [](IPointerHandler* h, const PointerEventData& d) { h->on_scroll(d); });
+
+    ASSERT_TRUE(content_rt->anchored_position().y != before);
+    ASSERT_TRUE(scroll_data.consumed);  // ScrollRect consumes its own scroll.
+}
+
+void test_consume_rules_slider_drag_and_up_vs_scrollrect() {
+    // Slider must own down/drag outright (ancestor ScrollRect never sees them);
+    // up must never be consumed, so it still reaches the ScrollRect ancestor and
+    // resets its drag state even when the release is dispatched from the Slider.
+    SceneObject viewport_obj("Viewport");
+    auto* viewport_rt = viewport_obj.add_component<RectTransform>();
+    viewport_rt->set_anchor_min({0.0f, 0.0f});
+    viewport_rt->set_anchor_max({0.0f, 0.0f});
+    viewport_rt->set_pivot({0.0f, 0.0f});
+    viewport_rt->set_size_delta({300.0f, 200.0f});
+    viewport_rt->resolve(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });
+
+    auto* content = viewport_obj.add_child(std::make_unique<SceneObject>("Content"));
+    auto* content_rt = content->add_component<RectTransform>();
+    content_rt->set_size_delta({300.0f, 600.0f});
+
+    auto* slider_obj = content->add_child(std::make_unique<SceneObject>("SliderRow"));
+    auto* slider_rt = slider_obj->add_component<RectTransform>();
+    slider_rt->set_size_delta({200.0f, 20.0f});
+    auto* slider = slider_obj->add_component<Slider>();
+
+    auto* scroll = viewport_obj.add_component<ScrollRect>();
+    scroll->content_name = "Content";
+    scroll->auto_scrollbars = false;
+    scroll->movement_type = MovementType::Elastic;
+    viewport_obj.start();
+
+    content_rt->resolve(viewport_rt->rect());
+    slider_rt->resolve(content_rt->rect());
+
+    float value_before = slider->value();
+    float pos_before = content_rt->anchored_position().y;
+
+    PointerEventData down;
+    down.position = slider_rt->rect().center();
+    dispatch_chain_for_test(slider_obj, down, [](IPointerHandler* h, const PointerEventData& d) { h->on_pointer_down(d); });
+    ASSERT_TRUE(down.consumed);
+
+    PointerEventData drag;
+    drag.position = down.position + glm::vec2(20.0f, 0.0f);
+    drag.delta = { 20.0f, 0.0f };
+    dispatch_chain_for_test(slider_obj, drag, [](IPointerHandler* h, const PointerEventData& d) { h->on_drag(d); });
+    ASSERT_TRUE(drag.consumed);
+    ASSERT_TRUE(slider->value() != value_before);
+    ASSERT_NEAR(content_rt->anchored_position().y, pos_before, 1e-4f);  // ScrollRect never saw the drag.
+
+    // Simulate the ScrollRect having been dragging via some other path (e.g. the
+    // user pressed on bare content before grabbing the slider), then push it past
+    // its clamp limit so an elastic springback is primed.
+    scroll->on_pointer_down(PointerEventData());
+    content_rt->set_anchored_position({0.0f, -50.0f});
+    scroll->update(0.016f);
+    ASSERT_NEAR(content_rt->anchored_position().y, -50.0f, 1e-4f);  // still "dragging" -- no springback yet.
+
+    PointerEventData up;
+    up.position = drag.position;
+    dispatch_chain_for_test(slider_obj, up, [](IPointerHandler* h, const PointerEventData& d) { h->on_pointer_up(d); });
+    ASSERT_TRUE(!up.consumed);  // up is never consumed by design.
+
+    scroll->update(0.016f);
+    ASSERT_TRUE(content_rt->anchored_position().y > -50.0f);  // springback resumed -- ScrollRect's dragging_ was reset.
+}
+
+void test_inventory_slot_drag_drop_via_handlers() {
+    // End-to-end through InventorySlot's real IPointerHandler overrides (exactly
+    // what EventSystem would call) rather than InventoryGrid::transfer_or_swap_items()
+    // directly -- this is what the Bg/Icon/Count hittable=false fix (Phase 1) and
+    // hit_drop_target_'s parent-walk fix (Phase 2) actually protect.
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    auto* root = canvas_obj->add_child(std::make_unique<SceneObject>("InventoryRoot"));
+    root->add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+
+    UIBuilder builder(root);
+    auto* inv = builder.add_inventory_grid("PlayerBag", 2, 2, {40.0f, 40.0f}, {4.0f, 4.0f});
+
+    InventoryItem potion;
+    potion.id = "potion";
+    potion.name = "Health Potion";
+    potion.count = 1;
+    potion.max_stack = 10;
+    inv->set_item(0, potion);
+
+    canvas->rebuild_layout(400, 400);  // resolves every RectTransform, including each slot's Bg/Icon/Count.
+
+    auto* slot0_obj = inv->owner->find_descendant("Slot_0");
+    auto* slot1_obj = inv->owner->find_descendant("Slot_1");
+    ASSERT_TRUE(slot0_obj != nullptr && slot1_obj != nullptr);
+    auto* slot0_rt = slot0_obj->get_component<RectTransform>();
+    auto* slot1_rt = slot1_obj->get_component<RectTransform>();
+
+    // The topmost hit inside a slot must be the slot itself -- its decorative
+    // Bg/Icon/Count children are hittable=false and must not shadow it.
+    glm::vec2 slot0_center = slot0_rt->rect().center();
+    RaycastHit hit0 = Raycaster::hit_test(*canvas_obj, slot0_center);
+    ASSERT_TRUE(static_cast<bool>(hit0));
+    ASSERT_TRUE(hit0.object == slot0_obj);
+
+    PointerEventData down;
+    down.position = slot0_center;
+    dispatch_chain_for_test(slot0_obj, down, [](IPointerHandler* h, const PointerEventData& d) { h->on_pointer_down(d); });
+
+    glm::vec2 slot1_center = slot1_rt->rect().center();
+    PointerEventData drag;
+    drag.position = slot1_center;  // well past the 4px threshold -- starts the drag.
+    dispatch_chain_for_test(slot0_obj, drag, [](IPointerHandler* h, const PointerEventData& d) { h->on_drag(d); });
+    ASSERT_TRUE(drag.consumed);  // InventorySlot must own the gesture once dragging.
+
+    PointerEventData up;
+    up.position = slot1_center;
+    dispatch_chain_for_test(slot0_obj, up, [](IPointerHandler* h, const PointerEventData& d) { h->on_pointer_up(d); });
+
+    ASSERT_TRUE(inv->get_item(0).empty());
+    ASSERT_TRUE(inv->get_item(1).id == "potion");
+}
+
+void test_inventory_drag_ghost_follows_cursor_and_reuses_object() {
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    auto* root = canvas_obj->add_child(std::make_unique<SceneObject>("InventoryRoot"));
+    root->add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+
+    UIBuilder builder(root);
+    auto* inv = builder.add_inventory_grid("PlayerBag", 2, 2, {40.0f, 40.0f}, {4.0f, 4.0f});
+
+    InventoryItem potion;
+    potion.id = "potion_health";
+    potion.name = "Health Potion";
+    potion.count = 1;
+    potion.max_stack = 10;
+    inv->set_item(0, potion);
+
+    InventoryItem sword;
+    sword.id = "sword_iron";
+    sword.name = "Iron Sword";
+    sword.count = 1;
+    sword.max_stack = 1;
+    inv->set_item(2, sword);
+
+    canvas->rebuild_layout(400, 400);
+
+    auto* slot0_obj = inv->owner->find_descendant("Slot_0");
+    auto* slot1_obj = inv->owner->find_descendant("Slot_1");
+    auto* slot2_obj = inv->owner->find_descendant("Slot_2");
+    ASSERT_TRUE(slot0_obj && slot1_obj && slot2_obj);
+    auto* slot0 = slot0_obj->get_component<InventorySlot>();
+    glm::vec2 start_pos = slot0_obj->get_component<RectTransform>()->rect().center();
+    glm::vec2 slot1_center = slot1_obj->get_component<RectTransform>()->rect().center();
+
+    // No ghost exists until a drag actually starts.
+    ASSERT_TRUE(canvas_obj->find_descendant("DragGhost") == nullptr);
+
+    PointerEventData down;
+    down.position = start_pos;
+    slot0->on_pointer_down(down);
+
+    PointerEventData drag;
+    drag.position = start_pos + glm::vec2(60.0f, 0.0f);  // past the 4px threshold -- starts the drag
+    slot0->on_drag(drag);
+
+    auto* ghost_obj = canvas_obj->find_descendant("DragGhost");
+    ASSERT_TRUE(ghost_obj != nullptr);
+    ASSERT_TRUE(ghost_obj->active());
+    auto* ghost_rt = ghost_obj->get_component<RectTransform>();
+    ASSERT_TRUE(!ghost_rt->hittable);  // load-bearing -- see ensure_drag_ghost_'s doc.
+
+    // Position is written straight to the RectTransform's params during on_drag
+    // (matching every other pointer-driven widget); resolving against the canvas
+    // root rect here simulates the next frame's arrange pass having run, exactly
+    // as it would in the real per-frame loop -- see the one-frame-lag note on
+    // ensure_drag_ghost_.
+    ghost_rt->resolve(canvas->root_rect());
+    glm::vec2 ghost_center = ghost_rt->rect().min + ghost_rt->rect().size() * 0.5f;
+    ASSERT_VEC2_NEAR(ghost_center, drag.position, 1.0f);
+
+    // Colored to match the dragged item (same mapping InventorySlot::update_visuals uses).
+    auto* ghost_img = ghost_obj->get_component<Image>();
+    ASSERT_NEAR(ghost_img->color.r, 0.92f, 1e-3f);
+    ASSERT_NEAR(ghost_img->color.g, 0.28f, 1e-3f);
+
+    // Regression guard: move the ghost to sit exactly over the target slot, then
+    // confirm the raycast at that point still resolves to the slot (or its
+    // IDropTarget ancestor), never the ghost itself.
+    PointerEventData drag_over_slot1;
+    drag_over_slot1.position = slot1_center;
+    slot0->on_drag(drag_over_slot1);
+    ghost_rt->resolve(canvas->root_rect());
+
+    RaycastHit hit_at_slot1 = Raycaster::hit_test(*canvas_obj, slot1_center);
+    ASSERT_TRUE(static_cast<bool>(hit_at_slot1));
+    ASSERT_TRUE(hit_at_slot1.object != ghost_obj);
+    bool found_drop_target = false;
+    for (auto* o = hit_at_slot1.object; o != nullptr; o = o->parent()) {
+        if (o->get_component<IDropTarget>()) { found_drop_target = true; break; }
+    }
+    ASSERT_TRUE(found_drop_target);
+
+    PointerEventData up;
+    up.position = slot1_center;
+    slot0->on_pointer_up(up);
+
+    ASSERT_TRUE(!ghost_obj->active());
+    ASSERT_TRUE(inv->get_item(0).empty());
+    ASSERT_TRUE(inv->get_item(1).id == "potion_health");
+
+    // Dragging a DIFFERENT item from a DIFFERENT slot reuses the SAME ghost object,
+    // just recolored -- no duplicate object created per drag.
+    auto* slot2 = slot2_obj->get_component<InventorySlot>();
+    glm::vec2 slot2_pos = slot2_obj->get_component<RectTransform>()->rect().center();
+    PointerEventData down2;
+    down2.position = slot2_pos;
+    slot2->on_pointer_down(down2);
+    PointerEventData drag2;
+    drag2.position = slot2_pos + glm::vec2(0.0f, 60.0f);
+    slot2->on_drag(drag2);
+
+    ASSERT_TRUE(canvas_obj->find_descendant("DragGhost") == ghost_obj);
+    ASSERT_TRUE(ghost_obj->active());
+    ASSERT_NEAR(ghost_img->color.r, 0.70f, 1e-3f);  // sword_iron's color, not potion_health's
+    ASSERT_NEAR(ghost_img->color.g, 0.80f, 1e-3f);
+
+    PointerEventData up2;
+    up2.position = slot2_pos;  // release back onto itself
+    slot2->on_pointer_up(up2);
+    ASSERT_TRUE(!ghost_obj->active());
+}
+
+void test_inventory_hover_tooltip_shows_name_and_tooltip_only_for_filled_slots() {
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    auto* root = canvas_obj->add_child(std::make_unique<SceneObject>("InventoryRoot"));
+    root->add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+
+    UIBuilder builder(root);
+    auto* inv = builder.add_inventory_grid("PlayerBag", 2, 2, {40.0f, 40.0f}, {4.0f, 4.0f});
+
+    InventoryItem sword;
+    sword.id = "sword_iron";
+    sword.name = "Iron Sword";
+    sword.count = 1;
+    sword.max_stack = 1;
+    sword.tooltip = "A sturdy blade.";
+    inv->set_item(0, sword);
+    // Slot_1 stays empty.
+
+    canvas->rebuild_layout(400, 400);
+
+    auto* slot0_obj = inv->owner->find_descendant("Slot_0");
+    auto* slot1_obj = inv->owner->find_descendant("Slot_1");
+    ASSERT_TRUE(slot0_obj && slot1_obj);
+    auto* slot0 = slot0_obj->get_component<InventorySlot>();
+    auto* slot1 = slot1_obj->get_component<InventorySlot>();
+    glm::vec2 pos0 = slot0_obj->get_component<RectTransform>()->rect().center();
+    glm::vec2 pos1 = slot1_obj->get_component<RectTransform>()->rect().center();
+
+    // No tooltip exists until something is actually hovered.
+    ASSERT_TRUE(canvas_obj->find_descendant("HoverTooltip") == nullptr);
+
+    // Hovering an EMPTY slot must not create/show a tooltip at all.
+    PointerEventData enter1;
+    enter1.position = pos1;
+    slot1->on_pointer_enter(enter1);
+    ASSERT_TRUE(canvas_obj->find_descendant("HoverTooltip") == nullptr);
+
+    // Hovering the FILLED slot shows it, positioned near the cursor, naming the
+    // item and including its tooltip line.
+    PointerEventData enter0;
+    enter0.position = pos0;
+    slot0->on_pointer_enter(enter0);
+
+    auto* tip_obj = canvas_obj->find_descendant("HoverTooltip");
+    ASSERT_TRUE(tip_obj != nullptr);
+    ASSERT_TRUE(tip_obj->active());
+    auto* tip_rt = tip_obj->get_component<RectTransform>();
+    ASSERT_TRUE(!tip_rt->hittable);  // load-bearing, same reasoning as the drag ghost.
+    ASSERT_VEC2_NEAR(tip_rt->anchored_position(), pos0 + glm::vec2(14.0f, 14.0f), 1e-3f);
+
+    auto* tip_text = tip_obj->find_descendant("Text")->get_component<Text>();
+    ASSERT_TRUE(tip_text->text.find("Iron Sword") != std::string::npos);
+    ASSERT_TRUE(tip_text->text.find("A sturdy blade.") != std::string::npos);
+
+    // Moving off hides it.
+    PointerEventData exit0;
+    exit0.position = pos0;
+    slot0->on_pointer_exit(exit0);
+    ASSERT_TRUE(!tip_obj->active());
+
+    // Re-entering shows it again, reusing the SAME object (not a duplicate).
+    slot0->on_pointer_enter(enter0);
+    ASSERT_TRUE(canvas_obj->find_descendant("HoverTooltip") == tip_obj);
+    ASSERT_TRUE(tip_obj->active());
+
+    // Pressing down (about to click/drag) hides it immediately, without needing
+    // an explicit exit first.
+    PointerEventData down0;
+    down0.position = pos0;
+    slot0->on_pointer_down(down0);
+    ASSERT_TRUE(!tip_obj->active());
+}
+
+void test_inventory_hover_tooltip_does_not_break_drop_target_raycast() {
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    auto* root = canvas_obj->add_child(std::make_unique<SceneObject>("InventoryRoot"));
+    root->add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+
+    UIBuilder builder(root);
+    auto* inv = builder.add_inventory_grid("PlayerBag", 2, 2, {40.0f, 40.0f}, {4.0f, 4.0f});
+
+    InventoryItem sword;
+    sword.id = "sword_iron";
+    sword.name = "Iron Sword";
+    sword.count = 1;
+    sword.max_stack = 1;
+    inv->set_item(0, sword);
+
+    canvas->rebuild_layout(400, 400);
+
+    auto* slot0_obj = inv->owner->find_descendant("Slot_0");
+    auto* slot1_obj = inv->owner->find_descendant("Slot_1");
+    auto* slot0 = slot0_obj->get_component<InventorySlot>();
+    glm::vec2 pos0 = slot0_obj->get_component<RectTransform>()->rect().center();
+    glm::vec2 pos1 = slot1_obj->get_component<RectTransform>()->rect().center();
+
+    PointerEventData enter0;
+    enter0.position = pos0;
+    slot0->on_pointer_enter(enter0);
+
+    auto* tip_obj = canvas_obj->find_descendant("HoverTooltip");
+    ASSERT_TRUE(tip_obj != nullptr && tip_obj->active());
+
+    // Reposition the tooltip to sit exactly over a DIFFERENT slot than the one
+    // that's actually hovered -- the worst case for accidentally winning a raycast.
+    auto* tip_rt = tip_obj->get_component<RectTransform>();
+    tip_rt->set_anchored_position(pos1 - tip_rt->size_delta() * 0.5f);
+    tip_rt->resolve(canvas->root_rect());
+
+    RaycastHit hit = Raycaster::hit_test(*canvas_obj, pos1);
+    ASSERT_TRUE(static_cast<bool>(hit));
+    ASSERT_TRUE(hit.object != tip_obj);
+    bool found_drop_target = false;
+    for (auto* o = hit.object; o != nullptr; o = o->parent()) {
+        if (o->get_component<IDropTarget>()) { found_drop_target = true; break; }
+    }
+    ASSERT_TRUE(found_drop_target);
+}
+
+void test_scroll_clamp_uses_fresh_size_on_first_layout_pass() {
+    // Before this fix, clamp_position_ read content_rt.rect().size(), which lags
+    // one frame behind a ContentSizeFitter resize; content_rt.size_delta() is
+    // fresh coming out of the SAME frame's measure pass. Verifies scrolling
+    // clamps correctly on the very first layout pass, no second frame needed.
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    auto* viewport = canvas_obj->add_child(std::make_unique<SceneObject>("Viewport"));
+    auto* viewport_rt = viewport->add_component<RectTransform>();
+    viewport_rt->set_size_delta({200.0f, 100.0f});
+    auto* scroll = viewport->add_component<ScrollRect>();
+    scroll->auto_scrollbars = false;
+
+    auto* content = viewport->add_child(std::make_unique<SceneObject>("Content"));
+    content->add_component<RectTransform>();
+    content->add_component<ContentSizeFitter>()->vertical_fit = FitMode::PreferredSize;
+    content->add_component<VerticalLayoutGroup>()->child_force_expand_width = true;
+
+    for (int i = 0; i < 10; ++i) {  // ten 40px rows -> 400px of content, past the 100px viewport.
+        auto* row = content->add_child(std::make_unique<SceneObject>("Row" + std::to_string(i)));
+        row->add_component<RectTransform>();
+        row->add_component<LayoutElement>()->preferred_size = {-1.0f, 40.0f};
+    }
+
+    coopa::scene::Scene scene("ClampFreshnessFixture");
+    scene.add_root_object(std::move(canvas_obj));
+    scene.start();
+
+    canvas->set_viewport(200, 100);
+    scene.late_update(0.016f);  // single frame: measure -> arrange -> emit -> EventSystem::process
+
+    auto* content_rt = content->get_component<RectTransform>();
+    ASSERT_NEAR(content_rt->rect().size().y, 400.0f, 1e-3f);
+
+    PointerEventData scroll_event;
+    scroll_event.delta = {0.0f, -1000.0f};  // scroll far past the content's height
+    scroll->on_scroll(scroll_event);
+
+    float max_y = 400.0f - 100.0f;  // content_h - viewport_h, using THIS frame's fresh size.
+    ASSERT_NEAR(content_rt->anchored_position().y, max_y, 1e-3f);
+}
+
+void test_scrollbar_value_size_and_interaction() {
+    SceneObject track_obj("Track");
+    auto* track_rt = track_obj.add_component<RectTransform>();
+    track_rt->set_anchor_min({0.0f, 0.0f});
+    track_rt->set_anchor_max({0.0f, 0.0f});
+    track_rt->set_pivot({0.0f, 0.0f});
+    track_rt->set_size_delta({20.0f, 200.0f});
+    track_rt->resolve(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });  // rect (0,0)-(20,200)
+
+    auto* sb = track_obj.add_component<Scrollbar>();
+    sb->direction = ScrollbarDirection::Vertical;
+
+    auto* handle_obj = track_obj.add_child(std::make_unique<SceneObject>("Handle"));
+    auto* handle_rt = handle_obj->add_component<RectTransform>();
+    handle_rt->hittable = false;
+    sb->handle_rect = handle_rt;
+
+    // A quarter-length thumb pinned to the top (value 0)...
+    sb->set_size(0.25f);
+    sb->set_value(0.0f, false);
+    handle_rt->resolve(track_rt->rect());
+    ASSERT_NEAR(handle_rt->anchor_min().y, 0.75f, 1e-4f);
+    ASSERT_NEAR(handle_rt->anchor_max().y, 1.0f, 1e-4f);
+
+    // ...and pinned to the bottom (value 1).
+    sb->set_value(1.0f, false);
+    handle_rt->resolve(track_rt->rect());
+    ASSERT_NEAR(handle_rt->anchor_min().y, 0.0f, 1e-4f);
+    ASSERT_NEAR(handle_rt->anchor_max().y, 0.25f, 1e-4f);
+
+    // Reset to the top, then click the bare track at its vertical center --
+    // the handle is nowhere near there, so this is a track-jump, and it must
+    // center the thumb under the click.
+    sb->set_value(0.0f, false);
+
+    int changed_count = 0;
+    float last_value = -1.0f;
+    sb->on_value_changed.connect([&](float v) { ++changed_count; last_value = v; });
+
+    PointerEventData down;
+    down.position = { 10.0f, 100.0f };  // track's vertical center.
+    sb->on_pointer_down(down);
+    ASSERT_TRUE(down.consumed);
+    ASSERT_TRUE(changed_count == 1);
+    ASSERT_NEAR(last_value, 0.5f, 1e-3f);
+    ASSERT_NEAR(sb->value(), 0.5f, 1e-3f);
+
+    // Grab-offset drag: moving 30 canvas units toward the track's top (+y) must
+    // decrease value by exactly 30 / (track_h * (1 - size)) = 0.2, relative to
+    // the grab -- not jump again to the new absolute cursor position.
+    PointerEventData drag;
+    drag.position = { 10.0f, 130.0f };
+    sb->on_drag(drag);
+    ASSERT_TRUE(drag.consumed);
+    ASSERT_NEAR(sb->value(), 0.3f, 1e-3f);
+
+    sb->on_pointer_up(PointerEventData());
+}
+
+void test_scrollbar_hover_press_color_transition() {
+    SceneObject obj("Track");
+    auto* track_rt = obj.add_component<RectTransform>();
+    track_rt->set_anchor_min({0.0f, 0.0f});
+    track_rt->set_anchor_max({0.0f, 0.0f});
+    track_rt->set_pivot({0.0f, 0.0f});
+    track_rt->set_size_delta({20.0f, 200.0f});
+    track_rt->resolve(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });  // rect (0,0)-(20,200)
+
+    auto* sb = obj.add_component<Scrollbar>();
+
+    auto* handle_obj = obj.add_child(std::make_unique<SceneObject>("Handle"));
+    auto* handle_rt = handle_obj->add_component<RectTransform>();
+    handle_rt->hittable = false;
+    auto* handle_img = handle_obj->add_component<Image>();
+    sb->handle_rect = handle_rt;
+
+    sb->handle_colors.fade_duration = 0.0f;
+    sb->handle_colors.normal      = glm::vec4(1.0f, 1.0f, 1.0f, 0.35f);
+    sb->handle_colors.highlighted = glm::vec4(1.0f, 1.0f, 1.0f, 0.55f);
+    sb->handle_colors.pressed     = glm::vec4(1.0f, 1.0f, 1.0f, 0.75f);
+
+    PointerEventData data;
+    sb->update(1.0f);  // resolve_handle_() finds handle_image_ even without start()
+    ASSERT_NEAR(handle_img->color.a, 0.35f, 1e-4f);
+
+    sb->on_pointer_enter(data);
+    sb->update(1.0f);
+    ASSERT_NEAR(handle_img->color.a, 0.55f, 1e-4f);
+
+    data.position = { 10.0f, 100.0f };  // on the bare track, off the (unresolved, zero-rect) handle
+    sb->on_pointer_down(data);          // jumps to the click, then starts the grab-relative drag
+    sb->update(1.0f);
+    ASSERT_NEAR(handle_img->color.a, 0.75f, 1e-4f);
+
+    sb->on_pointer_up(data);
+    sb->on_pointer_exit(data);
+    sb->update(1.0f);
+    ASSERT_NEAR(handle_img->color.a, 0.35f, 1e-4f);
+}
+
+void test_combobox_popup_wins_over_later_row() {
+    // Reproduces the reported bug exactly: a dropdown row followed by another,
+    // taller row in the same VerticalLayoutGroup -- when the popup opens and
+    // hangs below the combo, the later row's rect overlaps it. Before z_order,
+    // the later row (a later sibling) would win the raycast; now the popup must.
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    auto* content = canvas_obj->add_child(std::make_unique<SceneObject>("Content"));
+    content->add_component<RectTransform>()->set_size_delta({300.0f, 800.0f});
+    auto* vgroup = content->add_component<VerticalLayoutGroup>();
+    vgroup->spacing = 4.0f;
+    vgroup->child_force_expand_width = true;
+
+    UIBuilder builder(content);
+    auto* combo = builder.add_dropdown_row("Quality", {"Low", "Medium", "High"}, 0);
+
+    // A later row, tall enough to comfortably cover wherever the 3-item popup lands.
+    auto* later_row = content->add_child(std::make_unique<SceneObject>("LaterRow"));
+    later_row->add_component<RectTransform>();
+    later_row->add_component<LayoutElement>()->preferred_size = {-1.0f, 500.0f};
+    later_row->add_component<Image>();
+
+    canvas->rebuild_layout(300, 800);
+    combo->show_popup();
+    canvas->rebuild_layout(300, 800);  // resolves the now-active Popup/Item_N rects
+
+    auto* popup_obj = combo->owner->find_descendant("Popup");
+    ASSERT_TRUE(popup_obj != nullptr && popup_obj->active());
+    auto* last_item = popup_obj->find_descendant("Item_2");  // deepest into the popup -> furthest from the boundary
+    ASSERT_TRUE(last_item != nullptr);
+    glm::vec2 point = last_item->get_component<RectTransform>()->rect().center();
+
+    auto* later_rt = later_row->get_component<RectTransform>();
+    // Sanity: the point genuinely falls inside the later row's rect -- otherwise
+    // this isn't exercising the occlusion scenario at all.
+    ASSERT_TRUE(contains(later_rt->rect(), point));
+
+    RaycastHit hit = Raycaster::hit_test(*canvas_obj, point);
+    ASSERT_TRUE(static_cast<bool>(hit));
+    bool in_popup_subtree = false;
+    for (auto* o = hit.object; o != nullptr; o = o->parent()) {
+        if (o == popup_obj) { in_popup_subtree = true; break; }
+    }
+    ASSERT_TRUE(in_popup_subtree);
+}
+
+void test_combobox_popup_escapes_ancestor_mask() {
+    // Same dropdown, but its row sits near the bottom of a very short (40px)
+    // masked viewport, so the open popup hangs well past the mask's clip.
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    auto* viewport = canvas_obj->add_child(std::make_unique<SceneObject>("Viewport"));
+    auto* viewport_rt = viewport->add_component<RectTransform>();
+    viewport_rt->set_anchor_min({0.0f, 0.0f});
+    viewport_rt->set_anchor_max({0.0f, 0.0f});
+    viewport_rt->set_pivot({0.0f, 0.0f});
+    viewport_rt->set_size_delta({300.0f, 40.0f});
+    viewport->add_component<Mask>();
+
+    auto* content = viewport->add_child(std::make_unique<SceneObject>("Content"));
+    auto* content_rt = content->add_component<RectTransform>();
+    content_rt->set_anchor_min({0.0f, 1.0f});
+    content_rt->set_anchor_max({0.0f, 1.0f});
+    content_rt->set_pivot({0.0f, 1.0f});
+    content_rt->set_size_delta({300.0f, 800.0f});
+    auto* vgroup = content->add_component<VerticalLayoutGroup>();
+    vgroup->child_force_expand_width = true;
+
+    UIBuilder builder(content);
+    auto* combo = builder.add_dropdown_row("Quality", {"Low", "Medium", "High"}, 0);
+
+    canvas->rebuild_layout(300, 40);
+    combo->show_popup();
+    canvas->rebuild_layout(300, 40);
+
+    auto* popup_obj = combo->owner->find_descendant("Popup");
+    ASSERT_TRUE(popup_obj != nullptr && popup_obj->active());
+    auto* last_item = popup_obj->find_descendant("Item_2");
+    ASSERT_TRUE(last_item != nullptr);
+    glm::vec2 point = last_item->get_component<RectTransform>()->rect().center();
+
+    // Sanity: this point really is outside the (masked) viewport's own clip --
+    // otherwise this isn't testing the escape at all.
+    ASSERT_TRUE(!contains(viewport_rt->rect(), point));
+
+    RaycastHit hit = Raycaster::hit_test(*canvas_obj, point);
+    ASSERT_TRUE(static_cast<bool>(hit));
+    bool in_popup_subtree = false;
+    for (auto* o = hit.object; o != nullptr; o = o->parent()) {
+        if (o == popup_obj) { in_popup_subtree = true; break; }
+    }
+    ASSERT_TRUE(in_popup_subtree);
+}
+
+void test_theme_yaml_loading() {
+    UITheme dark_default = UITheme::builtin_dark();
+
+    UITheme light = load_theme_file(std::string(ROOT_DIR) + "/assets/themes/light.yaml");
+    ASSERT_TRUE(light.panel.background != dark_default.panel.background);
+    ASSERT_TRUE(light.text.primary != dark_default.text.primary);
+    // button_primary's blue is documented as shared between the two built-in themes.
+    ASSERT_NEAR(light.button_primary.normal.r, 0.20f, 1e-4f);
+    ASSERT_NEAR(light.button_primary.normal.g, 0.55f, 1e-4f);
+    ASSERT_NEAR(light.button_primary.normal.b, 0.85f, 1e-4f);
+
+    UITheme dark = load_theme_file(std::string(ROOT_DIR) + "/assets/themes/dark.yaml");
+    ASSERT_NEAR(dark.panel.background.r, dark_default.panel.background.r, 1e-4f);
+    ASSERT_NEAR(dark.text.size_label, dark_default.text.size_label, 1e-4f);
+    ASSERT_NEAR(dark.metrics.row_height, dark_default.metrics.row_height, 1e-4f);
+
+    // A partial theme file (only overriding one field) leaves everything else at
+    // UITheme::builtin_dark()'s value -- load_theme_file() starts from builtin_dark().
+    std::filesystem::create_directories(std::string(ROOT_DIR) + "/output");
+    std::string partial_path = std::string(ROOT_DIR) + "/output/test_partial_theme.yaml";
+    {
+        std::ofstream f(partial_path);
+        f << "text:\n  accent: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }\n";
+    }
+    UITheme partial = load_theme_file(partial_path);
+    ASSERT_NEAR(partial.text.accent.r, 1.0f, 1e-4f);
+    ASSERT_NEAR(partial.text.accent.g, 0.0f, 1e-4f);
+    ASSERT_NEAR(partial.panel.background.r, dark_default.panel.background.r, 1e-4f);
+    ASSERT_NEAR(partial.metrics.row_height, dark_default.metrics.row_height, 1e-4f);
+
+    bool threw = false;
+    try {
+        load_theme_file(std::string(ROOT_DIR) + "/assets/themes/does_not_exist.yaml");
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    ASSERT_TRUE(threw);
+}
+
+void test_theme_library_always_active() {
+    UITheme dark_default = UITheme::builtin_dark();
+
+    ThemeLibrary::instance().clear();
+
+    // No search dir configured at all -- must still return a usable theme.
+    const UITheme& t1 = ThemeLibrary::instance().active();
+    ASSERT_NEAR(t1.panel.background.r, dark_default.panel.background.r, 1e-4f);
+    ASSERT_NEAR(t1.metrics.row_height, dark_default.metrics.row_height, 1e-4f);
+
+    ThemeLibrary::instance().clear();
+
+    // A search dir pointing nowhere real falls back the same way, after warning once.
+    ThemeLibrary::instance().set_search_dir(std::string(ROOT_DIR) + "/assets/does_not_exist_dir");
+    const UITheme& t2 = ThemeLibrary::instance().active();
+    ASSERT_NEAR(t2.panel.background.r, dark_default.panel.background.r, 1e-4f);
+
+    ThemeLibrary::instance().clear();
+
+    // A real search dir resolves dark.yaml and becomes active.
+    ThemeLibrary::instance().set_search_dir(std::string(ROOT_DIR) + "/assets/themes");
+    const UITheme& t3 = ThemeLibrary::instance().active();
+    ASSERT_NEAR(t3.text.size_label, dark_default.text.size_label, 1e-4f);
+
+    // set_active() overrides whatever active() would otherwise have loaded.
+    UITheme custom = UITheme::builtin_light();
+    ThemeLibrary::instance().set_active(custom);
+    const UITheme& t4 = ThemeLibrary::instance().active();
+    ASSERT_NEAR(t4.panel.background.r, custom.panel.background.r, 1e-4f);
+
+    ThemeLibrary::instance().clear();
+}
+
+void test_builder_settings_panel() {
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({1280.0f, 720.0f});
+
+    UITheme theme = UITheme::builtin_dark();
+    UIBuilder builder(&root, &theme);
+
+    // Settings panel: scrolling, sectioned, several row types -- mirrors
+    // test_settings_builder.cpp's build_settings_panel(), at smaller scale.
+    UIBuilder content = builder.scroll_view("SettingsWindow", "Settings", {460.0f, 680.0f});
+    content.add_section_header("Display");
+    content.add_dropdown_row("resolution", {"1280x720", "1920x1080"}, 1);
+    content.add_spinbox_row("width", 640.0, 3840.0, 1920.0, 1.0);
+    content.add_toggle_row("vsync", true);
+    content.add_slider_row("brightness", 0.0f, 2.0f, 1.0f);
+    content.add_section_header("Audio");
+    content.add_slider_row("master_volume", 0.0f, 1.0f, 0.8f);
+    content.add_dropdown_row("difficulty", {"Easy", "Normal", "Hard"}, 1);
+    content.fit_content_height();
+
+    auto* settings_win = root.find_descendant("SettingsWindow");
+    ASSERT_TRUE(settings_win != nullptr);
+    auto* viewport = settings_win->find_descendant("Viewport");
+    ASSERT_TRUE(viewport != nullptr);
+    ASSERT_TRUE(viewport->get_component<Mask>() != nullptr);
+    ASSERT_TRUE(viewport->get_component<ScrollRect>() != nullptr);
+    auto* content_obj = viewport->find_descendant("Content");
+    ASSERT_TRUE(content_obj != nullptr);
+    ASSERT_TRUE(content_obj->get_component<VerticalLayoutGroup>() != nullptr);
+    ASSERT_TRUE(content_obj->children().size() >= 6);
+
+    // Value round-trips through the Content builder.
+    ASSERT_TRUE(content.get_value<std::string>("resolution") == "1920x1080");
+    ASSERT_TRUE(content.get_value<int>("width") == 1920);
+    ASSERT_TRUE(content.get_value<bool>("vsync") == true);
+    ASSERT_NEAR(content.get_value<float>("brightness"), 1.0f, 1e-4f);
+    ASSERT_NEAR(content.get_value<float>("master_volume"), 0.8f, 1e-4f);
+
+    content.set_value("vsync", false);
+    ASSERT_TRUE(content.get_value<bool>("vsync") == false);
+    content.set_value("master_volume", 0.42f);
+    ASSERT_NEAR(content.get_value<float>("master_volume"), 0.42f, 1e-4f);
+    content.set_value<int>("difficulty", 2);
+    ASSERT_TRUE(content.get_value<std::string>("difficulty") == "Hard");
+
+    // A themed card, mirroring StatusCard/InventoryCard.
+    UIBuilder card_body = builder.card("StatusCard", "Live Readout",
+                                       AnchorPreset::TopLeft, {500.0f, -20.0f}, {300.0f, 200.0f});
+    auto* status_card = root.find_descendant("StatusCard");
+    ASSERT_TRUE(status_card != nullptr);
+    ASSERT_TRUE(status_card->find_descendant("Body") != nullptr);
+
+    InventoryGrid* grid = card_body.add_inventory_grid("GridArea", 4, 5, {40.0f, 40.0f}, {4.0f, 4.0f});
+    ASSERT_TRUE(grid->rows == 4 && grid->cols == 5);
+    ASSERT_TRUE(grid->slot_count() == 20);
+
+    // Role-styled action buttons, mirroring ActionPanel.
+    UIBuilder buttons_row = builder.horizontal_layout("ButtonsRow", 16.0f);
+    Button* apply = buttons_row.add_button("Apply", ButtonRole::Primary);
+    Button* reset = buttons_row.add_button("Reset", ButtonRole::Neutral);
+    Button* save  = buttons_row.add_button("Save", ButtonRole::Success);
+    ASSERT_TRUE(apply != nullptr && reset != nullptr && save != nullptr);
+    ASSERT_NEAR(apply->colors.normal.r, theme.button_primary.normal.r, 1e-4f);
+    ASSERT_NEAR(reset->colors.normal.r, theme.button.normal.r, 1e-4f);
+    ASSERT_NEAR(save->colors.normal.r, theme.button_success.normal.r, 1e-4f);
+
+    auto* buttons_row_obj = root.find_descendant("ButtonsRow");
+    ASSERT_TRUE(buttons_row_obj != nullptr);
+    ASSERT_TRUE(buttons_row_obj->children().size() == 3);
+}
+
 int main() {
     std::cout << "===========================================" << std::endl;
     std::cout << "          Running uicoopa Test Suite       " << std::endl;
@@ -1357,6 +2975,7 @@ int main() {
     RUN_TEST(test_layout_element_measure);
     RUN_TEST(test_rect_contains_and_intersect);
     RUN_TEST(test_draw_list_batching);
+    RUN_TEST(test_draw_list_z_order_sorts_batches);
     RUN_TEST(test_nine_slice_geometry);
     RUN_TEST(test_rect_transform_world_corners_identity);
     RUN_TEST(test_text_layout_wrap);
@@ -1380,6 +2999,43 @@ int main() {
     RUN_TEST(test_reactor_set_active_on_signal);
     RUN_TEST(test_reactor_color_on_signal);
     RUN_TEST(test_reactor_text_on_signal);
+
+    RUN_TEST(test_slider_value_mapping_and_stepping);
+    RUN_TEST(test_slider_mask_auto_added_for_handle_clipping);
+    RUN_TEST(test_slider_hover_press_color_transition);
+    RUN_TEST(test_toggle_interaction_and_signals);
+    RUN_TEST(test_toggle_hover_press_color_transition_and_no_side_effects);
+    RUN_TEST(test_spinbox_stepping_and_bounds);
+    RUN_TEST(test_focus_context_gained_and_lost);
+    RUN_TEST(test_spinbox_double_click_gated_to_value_text_area);
+    RUN_TEST(test_spinbox_on_char_filters_non_numeric);
+    RUN_TEST(test_spinbox_on_char_decimal_and_negative_rules);
+    RUN_TEST(test_spinbox_escape_reverts_without_committing);
+    RUN_TEST(test_spinbox_backspace_and_focus_lost_commits);
+    RUN_TEST(test_combobox_selection_and_signals);
+    RUN_TEST(test_ui_builder_hierarchy_and_value_getters);
+    RUN_TEST(test_drag_drop_and_inventory_grid);
+    RUN_TEST(test_ui_yaml_new_components);
+    RUN_TEST(test_hit_test_all_topmost_first_order);
+    RUN_TEST(test_hittable_false_lets_ancestor_win);
+    RUN_TEST(test_z_order_wins_over_hierarchy_order);
+    RUN_TEST(test_z_order_escapes_ancestor_mask);
+    RUN_TEST(test_event_bubbling_button_click_via_label);
+    RUN_TEST(test_event_bubbling_scroll_reaches_ancestor_scrollrect);
+    RUN_TEST(test_consume_rules_slider_drag_and_up_vs_scrollrect);
+    RUN_TEST(test_inventory_slot_drag_drop_via_handlers);
+    RUN_TEST(test_inventory_drag_ghost_follows_cursor_and_reuses_object);
+    RUN_TEST(test_inventory_hover_tooltip_shows_name_and_tooltip_only_for_filled_slots);
+    RUN_TEST(test_inventory_hover_tooltip_does_not_break_drop_target_raycast);
+    RUN_TEST(test_scroll_clamp_uses_fresh_size_on_first_layout_pass);
+    RUN_TEST(test_scrollbar_value_size_and_interaction);
+    RUN_TEST(test_scrollbar_hover_press_color_transition);
+    RUN_TEST(test_combobox_popup_wins_over_later_row);
+    RUN_TEST(test_combobox_popup_escapes_ancestor_mask);
+
+    RUN_TEST(test_theme_yaml_loading);
+    RUN_TEST(test_theme_library_always_active);
+    RUN_TEST(test_builder_settings_panel);
 
     std::cout << "===========================================" << std::endl;
     std::cout << "Tests run: " << g_tests_run << ", Failed: " << g_tests_failed << std::endl;

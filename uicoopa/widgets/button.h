@@ -9,6 +9,7 @@
 #include <uicoopa/ui_component.h>
 #include <uicoopa/input/event_system.h>
 #include <uicoopa/widgets/graphic.h>
+#include <uicoopa/widgets/color_transition.h>
 #include <coopa/event/signal.h>
 #include <coopa/event/event_bus.h>
 #include <coopa/scene/scene.h>
@@ -18,18 +19,6 @@
 
 namespace coopa {
 namespace ui {
-
-/**
- * @struct ColorTransition
- * @brief The four tint colors a Button cycles between, and how fast it fades among them.
- */
-struct ColorTransition {
-    glm::vec4 normal{1.0f, 1.0f, 1.0f, 1.0f};
-    glm::vec4 highlighted{0.92f, 0.92f, 0.92f, 1.0f};
-    glm::vec4 pressed{0.75f, 0.75f, 0.75f, 1.0f};
-    glm::vec4 disabled{0.6f, 0.6f, 0.6f, 0.5f};
-    float     fade_duration = 0.1f; /**< Seconds to fade between states; 0 = snap instantly. */
-};
 
 /**
  * @class Button
@@ -138,6 +127,7 @@ public:
     }
     void on_pointer_click(const PointerEventData& data) override {
         if (!interactable) return;
+        data.consume();
         on_click.emit();
         emit_named_("click", data);
     }

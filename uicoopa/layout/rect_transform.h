@@ -56,6 +56,42 @@ public:
 
     std::string type_name() const override { return "RectTransform"; }
 
+    /**
+     * @brief Whether Raycaster considers this object (and, transitively, still
+     *        recurses into its children) during hit testing.
+     *
+     * Distinct from Graphic::raycast_target: that flag is per-component and only
+     * exists on Graphic-derived widgets, so it cannot silence a whole subtree or
+     * a non-Graphic raycast target (ScrollRect, InventorySlot, ...). Setting this
+     * false on a purely decorative node (a Button's Label, a slider's Track/Fill/
+     * Handle, an inventory slot's Bg/Icon/Count) keeps it from shadowing the
+     * interactive object underneath it. Defaults true so existing scenes are
+     * unaffected.
+     */
+    bool hittable = true;
+
+    /**
+     * @brief Offset from the parent's EFFECTIVE z-order; 0 = inherit unchanged.
+     *
+     * Effective z-order accumulates additively down the tree: effective(child) =
+     * effective(parent) + child.z_order. It is the primary sort key for both
+     * Raycaster::hit_test_all() and CanvasComponent's emit pass — higher sorts on
+     * top of lower — with the existing hierarchy-order rule (reverse-emit order)
+     * as the tiebreak within an equal z-order, so a scene with every z_order left
+     * at 0 behaves byte-for-byte as if this field didn't exist.
+     *
+     * Setting this to a NONZERO value also makes this object's whole subtree
+     * escape any ancestor Mask's clip — for both drawing and hit-testing — as if
+     * it had been reparented directly under the canvas root for clipping
+     * purposes only; its resolved rect() is still computed relative to its real
+     * parent, so it stays exactly where its anchors put it. This is what lets a
+     * ComboBox popup (see UIBuilder::add_dropdown) hang below its row without
+     * being cut off by an ancestor ScrollRect's Mask, and without later rows in
+     * the same VerticalLayoutGroup stealing its clicks. A Mask inside the
+     * escaped subtree still clips its own descendants normally.
+     */
+    int z_order = 0;
+
     // --- Anchors, pivot, position, size ---
 
     void set_anchor_min(const glm::vec2& v) { params_.anchor_min = v; }

@@ -113,8 +113,11 @@ public:
     void rebuild_emit(DrawList& draw_list) {
         if (!owner) return;
         for (auto& child : owner->children()) {
-            if (child->active()) emit_(*child, draw_list);
+            if (child->active()) emit_(*child, draw_list, 0);
         }
+        // Only reorders batch metadata (see DrawList::finalize_z_order()) so this is
+        // a no-op whenever every RectTransform::z_order is left at its default 0.
+        draw_list.finalize_z_order();
     }
 
     /**
@@ -168,12 +171,12 @@ public:
      * Driven automatically by Scene::late_update() — see the class doc for
      * the full per-frame sequence an application drives.
      */
-    void late_update(float /*delta_time*/) override {
+    void late_update(float delta_time) override {
         if (!owner) return;
         rebuild_layout(viewport_w_, viewport_h_);
         draw_list_.begin(root_rect_);
         rebuild_emit(draw_list_);
-        event_system_.process(input_, *owner);
+        event_system_.process(input_, *owner, delta_time);
     }
 
 private:
@@ -214,20 +217,35 @@ private:
         }
     }
 
-    static void emit_(coopa::scene::SceneObject& obj, DrawList& draw_list) {
+    static void emit_(coopa::scene::SceneObject& obj, DrawList& draw_list, int z_order) {
+        auto* rt = obj.get_component<RectTransform>();
+        int own = rt ? rt->z_order : 0;
+        int effective = z_order + own;
+        // A nonzero own z_order escapes every ancestor Mask's clip for this whole
+        // subtree -- see RectTransform::z_order's doc and DrawList::push_canvas_clip().
+        bool escapes_clip = (own != 0);
+        if (escapes_clip) draw_list.push_canvas_clip();
+
+        draw_list.set_z_order(effective);
         for (auto& comp : obj.components()) {
             if (auto* ui = dynamic_cast<UIComponent*>(comp.get())) {
+                draw_list.set_z_order(effective);
                 ui->emit(draw_list);
             }
         }
         for (auto& child : obj.children()) {
-            if (child->active()) emit_(*child, draw_list);
+            if (child->active()) emit_(*child, draw_list, effective);
         }
+        // A descendant may have left the DrawList's current z_order pointing at its
+        // own (deeper) effective value; restore this node's before on_children_emitted.
+        draw_list.set_z_order(effective);
         for (auto& comp : obj.components()) {
             if (auto* ui = dynamic_cast<UIComponent*>(comp.get())) {
                 ui->on_children_emitted(draw_list);
             }
         }
+
+        if (escapes_clip) draw_list.pop_clip();
     }
 
     Rect  root_rect_{};

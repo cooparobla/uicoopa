@@ -58,6 +58,11 @@
 #include <uicoopa/widgets/text.h>
 #include <uicoopa/widgets/button.h>
 #include <uicoopa/widgets/mask.h>
+#include <uicoopa/widgets/slider.h>
+#include <uicoopa/widgets/toggle.h>
+#include <uicoopa/widgets/spinbox.h>
+#include <uicoopa/widgets/combobox.h>
+#include <uicoopa/widgets/inventory_grid.h>
 #include <uicoopa/groups/layout_group.h>
 #include <uicoopa/groups/grid_layout_group.h>
 #include <uicoopa/groups/content_size_fitter.h>
@@ -67,6 +72,8 @@
 #include <uicoopa/reactors/color_on_signal.h>
 #include <uicoopa/reactors/text_on_signal.h>
 #include <uicoopa/reactors/log_on_signal.h>
+#include <uicoopa/builder/ui_theme_yaml.h>
+#include <uicoopa/text/font_defaults.h>
 
 #include <glm/glm.hpp>
 #include <filesystem>
@@ -102,10 +109,17 @@ public:
         return it != sprites_.end() ? it->second : nullptr;
     }
 
-    void register_font(const std::string& name, Font* font) { fonts_[name] = font; }
+    void register_font(const std::string& name, Font* font) {
+        fonts_[name] = font;
+        if (!FontDefaults::font) FontDefaults::font = font;
+    }
     Font* find_font(const std::string& name) const {
         auto it = fonts_.find(name);
         return it != fonts_.end() ? it->second : nullptr;
+    }
+    Font* default_font() const {
+        if (!fonts_.empty()) return fonts_.begin()->second;
+        return nullptr;
     }
 
 private:
@@ -155,11 +169,17 @@ public:
             auto font = std::make_unique<Font>(*device_, *allocator_, *cmd_pool_, resolved);
             Font* raw = font.get();
             fonts_by_path_.emplace(resolved, std::move(font));
+            if (!FontDefaults::font) FontDefaults::font = raw;
             return raw;
         } catch (const std::exception& e) {
             std::cerr << "[uicoopa] Failed to load font '" << resolved << "': " << e.what() << "\n";
             return nullptr;
         }
+    }
+
+    Font* default_font() const {
+        if (!fonts_by_path_.empty()) return fonts_by_path_.begin()->second.get();
+        return nullptr;
     }
 
     /**
@@ -330,8 +350,15 @@ inline void parse_rect_transform(const fkyaml::node& node, RectTransform& rt) {
     if (node.contains("pivot"))             rt.set_pivot(parse_vec2(node.at("pivot"), "x", "y", rt.pivot()));
     if (node.contains("anchored_position")) rt.set_anchored_position(parse_vec2(node.at("anchored_position"), "x", "y", rt.anchored_position()));
     if (node.contains("size_delta"))        rt.set_size_delta(parse_vec2(node.at("size_delta"), "x", "y", rt.size_delta()));
+    if (node.contains("offset_min") || node.contains("offset_max")) {
+        glm::vec2 off_min = node.contains("offset_min") ? parse_vec2(node.at("offset_min"), "x", "y", rt.offset_min()) : rt.offset_min();
+        glm::vec2 off_max = node.contains("offset_max") ? parse_vec2(node.at("offset_max"), "x", "y", rt.offset_max()) : rt.offset_max();
+        set_offsets(Rect{}, rt.params(), off_min, off_max);
+    }
     if (node.contains("rotation"))          rt.set_local_rotation_degrees(node.at("rotation").get_value<float>());
     if (node.contains("scale"))             rt.set_local_scale(parse_vec2(node.at("scale"), "x", "y", rt.local_scale()));
+    if (node.contains("hittable"))          rt.hittable = node.at("hittable").get_value<bool>();
+    if (node.contains("z_order"))           rt.z_order = node.at("z_order").get_value<int>();
 }
 
 inline void parse_layout_group_common(const fkyaml::node& node, LayoutGroupBase& g) {
@@ -461,6 +488,11 @@ inline void register_ui_components() {
             if (c.contains("pressed"))     btn->colors.pressed     = parse_color(c.at("pressed"), btn->colors.pressed);
             if (c.contains("disabled"))    btn->colors.disabled    = parse_color(c.at("disabled"), btn->colors.disabled);
             if (c.contains("fade_duration")) btn->colors.fade_duration = c.at("fade_duration").get_value<float>();
+        } else if (auto* gr = obj.get_component<Graphic>()) {
+            btn->colors.normal = gr->color;
+            btn->colors.highlighted = glm::min(glm::vec4(1.0f), gr->color * 1.25f);
+            btn->colors.pressed = gr->color * 0.8f;
+            btn->colors.disabled = glm::vec4(gr->color.r * 0.5f, gr->color.g * 0.5f, gr->color.b * 0.5f, gr->color.a * 0.5f);
         }
     });
 
@@ -530,6 +562,23 @@ inline void register_ui_components() {
         if (node.contains("inertia"))            sr->inertia            = node.at("inertia").get_value<bool>();
         if (node.contains("deceleration_rate"))  sr->deceleration_rate  = node.at("deceleration_rate").get_value<float>();
         if (node.contains("scroll_sensitivity")) sr->scroll_sensitivity = node.at("scroll_sensitivity").get_value<float>();
+        if (node.contains("vertical_scrollbar"))   sr->vertical_scrollbar_name   = node.at("vertical_scrollbar").get_value<std::string>();
+        if (node.contains("horizontal_scrollbar")) sr->horizontal_scrollbar_name = node.at("horizontal_scrollbar").get_value<std::string>();
+        if (node.contains("auto_scrollbars"))      sr->auto_scrollbars           = node.at("auto_scrollbars").get_value<bool>();
+        if (node.contains("scrollbar_thickness"))  sr->scrollbar_thickness       = node.at("scrollbar_thickness").get_value<float>();
+        if (node.contains("hide_scrollbar_when_unneeded")) sr->hide_scrollbar_when_unneeded = node.at("hide_scrollbar_when_unneeded").get_value<bool>();
+    });
+
+    SceneLoader::register_component_parser("Scrollbar", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
+        auto* sb = obj.add_component<Scrollbar>();
+        if (node.contains("interactable")) sb->interactable = node.at("interactable").get_value<bool>();
+        if (node.contains("handle"))       sb->handle_name  = node.at("handle").get_value<std::string>();
+        if (node.contains("direction")) {
+            std::string d = node.at("direction").get_value<std::string>();
+            sb->direction = (d == "Horizontal") ? ScrollbarDirection::Horizontal : ScrollbarDirection::Vertical;
+        }
+        if (node.contains("size"))  sb->set_size(node.at("size").get_value<float>());
+        if (node.contains("value")) sb->set_value(node.at("value").get_value<float>(), false);
     });
 
     SceneLoader::register_component_parser("SetActiveOnSignal", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
@@ -575,6 +624,88 @@ inline void register_ui_components() {
         parse_signal_reactor_common(node, *r);
         if (node.contains("message")) r->message = node.at("message").get_value<std::string>();
     });
+
+    SceneLoader::register_component_parser("Slider", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
+        auto* s = obj.add_component<Slider>();
+        if (node.contains("interactable")) s->interactable = node.at("interactable").get_value<bool>();
+        if (node.contains("min")) s->min_value = node.at("min").get_value<float>();
+        if (node.contains("max")) s->max_value = node.at("max").get_value<float>();
+        if (node.contains("step")) s->step = node.at("step").get_value<float>();
+        if (node.contains("fill")) s->fill_name = node.at("fill").get_value<std::string>();
+        if (node.contains("handle")) s->handle_name = node.at("handle").get_value<std::string>();
+        if (node.contains("direction")) {
+            std::string d = node.at("direction").get_value<std::string>();
+            if (d == "RightToLeft") s->direction = SliderDirection::RightToLeft;
+            else if (d == "BottomToTop") s->direction = SliderDirection::BottomToTop;
+            else if (d == "TopToBottom") s->direction = SliderDirection::TopToBottom;
+            else s->direction = SliderDirection::LeftToRight;
+        }
+        if (node.contains("value")) s->set_value(node.at("value").get_value<float>(), false);
+    });
+
+    SceneLoader::register_component_parser("Toggle", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
+        auto* t = obj.add_component<Toggle>();
+        if (node.contains("interactable")) t->interactable = node.at("interactable").get_value<bool>();
+        if (node.contains("checkmark")) t->checkmark_name = node.at("checkmark").get_value<std::string>();
+        if (node.contains("hide_when_off")) t->hide_when_off = node.at("hide_when_off").get_value<bool>();
+        if (node.contains("is_on")) t->set_is_on(node.at("is_on").get_value<bool>(), false);
+    });
+
+    SceneLoader::register_component_parser("SpinBox", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
+        auto* sp = obj.add_component<SpinBox>();
+        if (node.contains("interactable")) sp->interactable = node.at("interactable").get_value<bool>();
+        if (node.contains("min")) sp->min_value = node.at("min").get_value<double>();
+        if (node.contains("max")) sp->max_value = node.at("max").get_value<double>();
+        if (node.contains("step")) sp->step = node.at("step").get_value<double>();
+        if (node.contains("decimals")) sp->decimals = node.at("decimals").get_value<int>();
+        if (node.contains("prefix")) sp->prefix = node.at("prefix").get_value<std::string>();
+        if (node.contains("suffix")) sp->suffix = node.at("suffix").get_value<std::string>();
+        if (node.contains("dec_button")) sp->dec_name = node.at("dec_button").get_value<std::string>();
+        if (node.contains("inc_button")) sp->inc_name = node.at("inc_button").get_value<std::string>();
+        if (node.contains("label")) sp->label_name = node.at("label").get_value<std::string>();
+        if (node.contains("value")) sp->set_value(node.at("value").get_value<double>(), false);
+    });
+
+    SceneLoader::register_component_parser("ComboBox", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
+        auto* c = obj.add_component<ComboBox>();
+        if (node.contains("interactable")) c->interactable = node.at("interactable").get_value<bool>();
+        if (node.contains("button")) c->button_name = node.at("button").get_value<std::string>();
+        if (node.contains("label")) c->label_name = node.at("label").get_value<std::string>();
+        if (node.contains("popup")) c->popup_name = node.at("popup").get_value<std::string>();
+        if (node.contains("items") && node.at("items").is_sequence()) {
+            std::vector<std::string> items;
+            for (const auto& item : node.at("items")) {
+                items.push_back(item.get_value<std::string>());
+            }
+            int default_idx = node.contains("selected_index") ? node.at("selected_index").get_value<int>() : 0;
+            c->set_items(items, default_idx);
+        }
+    });
+
+    SceneLoader::register_component_parser("InventoryGrid", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
+        int r = node.contains("rows") ? node.at("rows").get_value<int>() : 4;
+        int c = node.contains("cols") ? node.at("cols").get_value<int>() : 6;
+        obj.add_component<InventoryGrid>(r, c);
+    });
+
+    // Selects the process-wide active theme (see ThemeLibrary) before any sibling/
+    // descendant component parses -- SceneLoader parses an object's components[]
+    // before its children[] (see this file's top comment), so placing !Theme on
+    // a scene's root object (typically the Canvas) makes it active in time for
+    // every UIBuilder-backed component further down the tree.
+    SceneLoader::register_component_parser("Theme", [](const fkyaml::node& node, SceneObject&, const SceneLoader::ParseContext& ctx) {
+        if (!node.contains("source")) return;
+        std::string ref = node.at("source").get_value<std::string>();
+        try {
+            ThemeLibrary::instance().set_active(load_theme_file(ctx.resolve(ref)));
+        } catch (const std::exception& e) {
+            std::cerr << "[uicoopa] Theme: " << e.what() << "\n";
+        }
+    });
+
+    FontDefaults::note_text_size = [](Font* f, uint32_t sz) {
+        UIResourceCache::instance().note_text_atlas_use(f, sz);
+    };
 }
 
 /**

@@ -17,6 +17,7 @@
 #include <uicoopa/render/sprite.h>
 #include <uicoopa/layout/rect.h>
 #include <gfxcoopa/types/texture_view.h>
+#include <algorithm>
 #include <vector>
 #include <array>
 #include <cstdint>
@@ -33,6 +34,7 @@ struct DrawBatch {
     uint32_t    index_count;
     coopa::gfx::TextureView texture_view; /**< Resolved to a descriptor set by UiPass at draw time. */
     Rect        clip;         /**< Canvas-space clip rect; converted to a screen-space scissor by UiPass. */
+    int         z_order = 0;  /**< Effective z-order at emission time; see DrawList::finalize_z_order(). */
 };
 
 /**
@@ -58,6 +60,7 @@ public:
         clip_stack_.clear();
         clip_stack_.push_back(canvas_bounds);
         current_texture_ = default_texture_view_;
+        current_z_order_ = 0;
     }
 
     /** @brief Sets the texture used for untextured/solid-color quads (typically a 1x1 white texel). */
@@ -76,12 +79,37 @@ public:
     /** @brief Pushes a nested clip rect, intersected with the current one (nested masks narrow, never widen). */
     void push_clip(const Rect& r) { clip_stack_.push_back(intersect(clip_stack_.back(), r)); }
 
-    /** @brief Pops the most recent push_clip(); the base canvas clip is never popped. */
+    /**
+     * @brief Pushes the base canvas clip verbatim, ignoring (not intersecting with) the
+     *        current top — lets a RectTransform::z_order-elevated subtree escape any
+     *        ancestor Mask's clip. Must be paired with a matching pop_clip(); a nested
+     *        Mask further inside the escaped subtree still intersects correctly from
+     *        this new base.
+     */
+    void push_canvas_clip() { clip_stack_.push_back(clip_stack_.front()); }
+
+    /** @brief Pops the most recent push_clip()/push_canvas_clip(); the base canvas clip is never popped. */
     void pop_clip() {
         if (clip_stack_.size() > 1) clip_stack_.pop_back();
     }
 
     const Rect& current_clip() const { return clip_stack_.back(); }
+
+    /** @brief Sets the effective z-order for subsequent add_quad()/add_nine_slice() calls. */
+    void set_z_order(int z) { current_z_order_ = z; }
+    int current_z_order() const { return current_z_order_; }
+
+    /**
+     * @brief Stable-sorts batches() by z_order, ascending (higher layers draw last, on
+     *        top). Only reorders batch metadata — each DrawBatch already indexes its own
+     *        first_index/index_count into the untouched vertex/index buffers — so this
+     *        changes draw order without UiPass needing any changes. Called automatically
+     *        by CanvasComponent::rebuild_emit(); safe to call again (idempotent).
+     */
+    void finalize_z_order() {
+        std::stable_sort(batches_.begin(), batches_.end(),
+            [](const DrawBatch& a, const DrawBatch& b) { return a.z_order < b.z_order; });
+    }
 
     /**
      * @brief Appends a single textured quad.
@@ -169,12 +197,14 @@ private:
         const Rect& clip = clip_stack_.back();
         if (batches_.empty() ||
             batches_.back().texture_view != current_texture_ ||
+            batches_.back().z_order != current_z_order_ ||
             !rects_equal_(batches_.back().clip, clip)) {
             DrawBatch b{};
             b.first_index   = static_cast<uint32_t>(indices_.size());
             b.index_count   = 0;
             b.texture_view  = current_texture_;
             b.clip          = clip;
+            b.z_order       = current_z_order_;
             batches_.push_back(b);
         }
     }
@@ -189,6 +219,7 @@ private:
     std::vector<Rect>      clip_stack_{ Rect{} };
     coopa::gfx::TextureView current_texture_;
     coopa::gfx::TextureView default_texture_view_;
+    int                     current_z_order_ = 0;
 };
 
 }  // namespace ui
