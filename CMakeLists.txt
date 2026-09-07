@@ -17,6 +17,24 @@ if(NOT TARGET coopa::gfx)
     add_subdirectory(${GFXCOOPA_DIR} ${CMAKE_CURRENT_BINARY_DIR}/gfxcoopa-build)
 endif()
 
+# --- Optional audio support (sfxcoopa) ---
+# ON by default, but degrades to a no-audio build (rather than a configure
+# failure) if the sibling repo simply isn't checked out. Every audio call
+# site in this repo is guarded by #ifdef UICOOPA_HAS_AUDIO, so both configs
+# build cleanly -- see uicoopa/audio/ui_audio.h's file doc.
+set(SFXCOOPA_DIR "${ROOT_DIR_PARENT}/sfxcoopa")
+option(UICOOPA_WITH_AUDIO "Build uicoopa with sfxcoopa audio support" ON)
+set(UICOOPA_AUDIO_LIBS "")
+if(UICOOPA_WITH_AUDIO AND EXISTS "${SFXCOOPA_DIR}/CMakeLists.txt")
+    if(NOT TARGET coopa::sfx)
+        add_subdirectory(${SFXCOOPA_DIR} ${CMAKE_CURRENT_BINARY_DIR}/sfxcoopa-build)
+    endif()
+    set(UICOOPA_AUDIO_LIBS coopa::sfx)
+    add_compile_definitions(UICOOPA_HAS_AUDIO)
+elseif(UICOOPA_WITH_AUDIO)
+    message(WARNING "UICOOPA_WITH_AUDIO is ON but ${SFXCOOPA_DIR} was not found -- building without audio.")
+endif()
+
 # --- Include directories ---
 include_directories(${CMAKE_SOURCE_DIR}/)                  # uicoopa/
 include_directories(${CMAKE_SOURCE_DIR}/includes/)         # stb_truetype (stb_image/_write now come from gfxcoopa)
@@ -36,7 +54,7 @@ add_definitions(-DSTB_TRUETYPE_IMPLEMENTATION)
 # `uicoopa` is the headless suite ctest runs below — test.cpp, not test_window.cpp,
 # so `ctest`/CI never needs a display.
 add_executable(uicoopa test.cpp)
-target_link_libraries(uicoopa PRIVATE coopa::gfx)
+target_link_libraries(uicoopa PRIVATE coopa::gfx ${UICOOPA_AUDIO_LIBS})
 
 # Windowed interactive demo (RectTransform anchors, layout groups, Button) — separate
 # from the headless `uicoopa` test target so `ctest`/CI never needs a display.
@@ -46,7 +64,7 @@ target_link_libraries(uicoopa_test_window PRIVATE coopa::gfx)
 # Windowed demo: the settings_demo-shaped UI built entirely through UIBuilder
 # (no scene YAML except the theme file) -- see test_settings_builder.cpp.
 add_executable(uicoopa_settings_builder test_settings_builder.cpp)
-target_link_libraries(uicoopa_settings_builder PRIVATE coopa::gfx)
+target_link_libraries(uicoopa_settings_builder PRIVATE coopa::gfx ${UICOOPA_AUDIO_LIBS})
 
 enable_testing()
 add_test(NAME uicoopa_tests COMMAND uicoopa)

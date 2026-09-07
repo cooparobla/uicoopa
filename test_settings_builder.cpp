@@ -21,6 +21,13 @@
  * HOVER_SLOT env hooks as test_window.cpp, for scripted screenshots. EDIT_FIELD=<name>
  * additionally opens keyboard editing on a named TextField (e.g. "player_name") before
  * the render loop starts, so a screenshot can capture its blinking text caret.
+ *
+ * When built with audio support (UICOOPA_HAS_AUDIO, ON by default -- see
+ * CMakeLists.txt's UICOOPA_WITH_AUDIO option), every Button in this demo gets
+ * hover and click sounds via a single UiSoundPlayer on the Canvas object (see
+ * uicoopa/audio/ui_sound_player.h) -- no per-button wiring. Set UI_AUDIO=0 to
+ * skip audio entirely (no device opened, no sounds loaded), or SFX_DEVICE=null
+ * to still exercise the audio path with miniaudio's silent null backend.
  */
 
 // The one raw Vulkan include in this file, for save_screenshot()'s framebuffer
@@ -51,6 +58,12 @@
 #include <uicoopa/builder/ui_builder.h>
 #include <uicoopa/ui_yaml.h>  // UIResourceCache::note_text_atlas_use()/mark_text_atlases()
 #include <uicoopa/render/icon_library.h>
+
+#ifdef UICOOPA_HAS_AUDIO
+#include <uicoopa/audio/sound_library.h>
+#include <uicoopa/audio/ui_audio.h>
+#include <uicoopa/audio/ui_sound_player.h>
+#endif
 
 #include <coopa/asset/asset_manager.h>
 #include <coopa/scene/scene_object.h>
@@ -466,6 +479,24 @@ int main() {
     const UITheme& theme = ThemeLibrary::instance().load(theme_env && theme_env[0] ? theme_env : "dark");
     ThemeLibrary::instance().set_active(theme);
 
+#ifdef UICOOPA_HAS_AUDIO
+    // Declared before `scene` (and set active before scene.start() runs the
+    // UiSoundPlayer attached to the Canvas below) so it outlives every
+    // component that might touch it -- same lifetime discipline this file
+    // already applies to `assets` vs `ctx`. UI_AUDIO=0 skips this whole
+    // block: no device opened, no sounds loaded, UiSoundPlayer's signal
+    // bindings become harmless no-ops (UiAudio::active() stays nullptr).
+    const char* ui_audio_env = std::getenv("UI_AUDIO");
+    const bool audio_enabled = !(ui_audio_env && std::string(ui_audio_env) == "0");
+    std::unique_ptr<UiAudio> audio;
+    if (audio_enabled) {
+        SoundLibrary::instance().set_search_dir(std::string(ROOT_DIR) + "/assets/sounds");
+        SoundLibrary::instance().load_manifest();
+        audio = std::make_unique<UiAudio>();
+        UiAudio::set_active(audio.get());
+    }
+#endif
+
     // --- Build the entire UI tree via UIBuilder -- no scene YAML. ---
     Scene scene("settings_builder_demo");
     auto canvas_obj = std::make_unique<SceneObject>("Canvas");
@@ -473,6 +504,15 @@ int main() {
     canvas->scaler.mode = ScaleMode::ScaleWithScreenSize;
     canvas->scaler.reference_resolution = {1280.0f, 720.0f};
     canvas->scaler.match_width_or_height = 0.5f;
+
+#ifdef UICOOPA_HAS_AUDIO
+    // One UiSoundPlayer on the Canvas gives every Button in this demo (all 24
+    // icon-strip buttons, the 3 action buttons, every combobox header, ...)
+    // hover and click sounds -- it listens on the scene EventBus's wildcard
+    // tier (see button.h's "hover_enter"/"click" emissions), so no individual
+    // widget needs to know audio exists at all.
+    if (audio_enabled) canvas_obj->add_component<UiSoundPlayer>();
+#endif
 
     UIBuilder root(canvas_obj.get(), &theme);
     root.panel("Background")->get_component<Image>()->color = theme.panel.background;
@@ -565,6 +605,10 @@ int main() {
         // startup add_sheet() call above already completed synchronously.
         assets.update(dt);
 
+#ifdef UICOOPA_HAS_AUDIO
+        if (audio) audio->update(dt);
+#endif
+
         refresh_status_card(settings, theme, status);
 
         scene.update(dt);
@@ -600,6 +644,16 @@ int main() {
     save_screenshot(ctx, ui_pass, canvas->draw_list(), final_w, final_h, canvas->scale_factor(), screenshot_path);
 
     std::cout << "[settings_builder] Exiting cleanly.\n";
+
+#ifdef UICOOPA_HAS_AUDIO
+    // UiAudio::active() must stop pointing at `audio` before it's destroyed below --
+    // `scene`'s SceneObjects (specifically the Canvas's UiSoundPlayer) still exist at
+    // this point but nothing signals after this line, so clearing the pointer here
+    // rather than after `scene`'s destruction is enough to avoid a dangling static.
+    UiAudio::set_active(nullptr);
+    audio.reset();
+    SoundLibrary::instance().clear();
+#endif
 
     // Must precede assets going out of scope below (whose destructor calls
     // shutdown(), destroying every SpriteSheet's Texture) and the Device/Allocator
