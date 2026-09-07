@@ -68,6 +68,9 @@
 #include <coopa/asset/asset_manager.h>
 #include <coopa/scene/scene_object.h>
 #include <coopa/scene/scene.h>
+#include <coopa/animation/animator.h>
+#include <coopa/animation/animation_clip.h>
+#include <coopa/animation/animation_system.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -81,6 +84,11 @@
 using namespace coopa::ui;
 using coopa::scene::Scene;
 using coopa::scene::SceneObject;
+using coopa::anim::Animator;
+using coopa::anim::AnimationClip;
+using coopa::anim::AnimationTrack;
+using coopa::anim::Interpolation;
+using coopa::anim::WrapMode;
 
 namespace {
 
@@ -386,8 +394,109 @@ constexpr const char* kDefaultIconNames[] = {
     "gear", "search", "menu", "star", "warning", "info", "lock", "folder",
 };
 
+/**
+ * @brief Attaches an Animator to InfoBanner: a looping idle float/breathe/sway,
+ *        and a one-shot alert flash the action buttons crossfade into.
+ *
+ * Targets are chosen to be layout-group-proof: InfoBanner and InventoryCard
+ * are both direct Canvas children placed via explicit at(AnchorPreset, ...),
+ * never inside a HorizontalLayoutGroup/VerticalLayoutGroup/GridLayoutGroup,
+ * so even anchored_position is safe here (see
+ * uicoopa/ui_yaml.h's register_ui_animated_properties() doc for the
+ * layout-group caveat that makes this choice matter for other objects).
+ * InfoBanner's Image carries neither a Button nor a ColorOnSignal, so its
+ * color is uncontested — animating it here can't race any other per-frame
+ * writer.
+ *
+ * @param canvas_obj The root Canvas object, searched for InfoBanner/InventoryCard by name.
+ * @param theme      Supplies the alert flash's warning/panel colors, so it matches whichever
+ *                    theme (THEME=dark|light) is active.
+ * @return The attached Animator, or nullptr if InfoBanner wasn't found.
+ */
+Animator* build_animations(SceneObject* canvas_obj, const UITheme& theme) {
+    auto* banner = canvas_obj->find_descendant("InfoBanner");
+    if (!banner) return nullptr;
+    bool has_inventory_card = canvas_obj->find_descendant("InventoryCard") != nullptr;
+
+    auto idle = std::make_shared<AnimationClip>();
+    idle->name = "banner_idle";
+    idle->wrap = WrapMode::Loop;
+    idle->set_explicit_length(2.4f);
+
+    // InfoBanner's own anchored_position.y: floats up 14px and back.
+    AnimationTrack float_track;
+    float_track.component_type = "RectTransform";
+    float_track.property = "anchored_position.y";
+    float_track.curve.add_key({0.0f, {-20.0f, 0.0f, 0.0f, 1.0f}, Interpolation::EaseInOut});
+    float_track.curve.add_key({1.2f, {-34.0f, 0.0f, 0.0f, 1.0f}, Interpolation::EaseInOut});
+    float_track.curve.add_key({2.4f, {-20.0f, 0.0f, 0.0f, 1.0f}, Interpolation::EaseInOut});
+    float_track.curve.sort_keys();
+    idle->tracks.push_back(float_track);
+
+    // InfoBanner's own Image.color alpha: a subtle breathe.
+    AnimationTrack breathe_track;
+    breathe_track.component_type = "Image";
+    breathe_track.property = "color.a";
+    breathe_track.curve.add_key({0.0f, {1.00f, 0.0f, 0.0f, 1.0f}, Interpolation::EaseInOut});
+    breathe_track.curve.add_key({1.2f, {0.85f, 0.0f, 0.0f, 1.0f}, Interpolation::EaseInOut});
+    breathe_track.curve.add_key({2.4f, {1.00f, 0.0f, 0.0f, 1.0f}, Interpolation::EaseInOut});
+    breathe_track.curve.sort_keys();
+    idle->tracks.push_back(breathe_track);
+
+    // InventoryCard is a SIBLING of InfoBanner (both direct Canvas children), not a
+    // descendant of it — this track exercises Animator's scene-wide fallback
+    // resolution (owner->find_descendant() fails since it's not a descendant of
+    // InfoBanner, so it falls through to Scene::find_object()).
+    if (has_inventory_card) {
+        AnimationTrack sway_track;
+        sway_track.object_path = "InventoryCard";
+        sway_track.component_type = "RectTransform";
+        sway_track.property = "rotation";
+        sway_track.curve.add_key({0.0f, {-1.5f, 0.0f, 0.0f, 1.0f}, Interpolation::EaseInOut});
+        sway_track.curve.add_key({1.2f, {1.5f, 0.0f, 0.0f, 1.0f}, Interpolation::EaseInOut});
+        sway_track.curve.add_key({2.4f, {-1.5f, 0.0f, 0.0f, 1.0f}, Interpolation::EaseInOut});
+        sway_track.curve.sort_keys();
+        idle->tracks.push_back(sway_track);
+    }
+
+    auto alert = std::make_shared<AnimationClip>();
+    alert->name = "banner_alert";
+    alert->wrap = WrapMode::Once;
+    alert->set_explicit_length(0.8f);
+
+    AnimationTrack scale_track;
+    scale_track.component_type = "RectTransform";
+    scale_track.property = "scale";
+    scale_track.curve.add_key({0.00f, {1.00f, 1.00f, 0.0f, 1.0f}, Interpolation::EaseOut});
+    scale_track.curve.add_key({0.18f, {1.05f, 1.05f, 0.0f, 1.0f}, Interpolation::EaseOut});
+    scale_track.curve.add_key({0.80f, {1.00f, 1.00f, 0.0f, 1.0f}, Interpolation::EaseOut});
+    scale_track.curve.sort_keys();
+    alert->tracks.push_back(scale_track);
+
+    AnimationTrack flash_track;
+    flash_track.component_type = "Image";
+    flash_track.property = "color";
+    const glm::vec4& base = theme.panel.panel_alt;
+    const glm::vec4& warn = theme.text.warning;
+    flash_track.curve.add_key({0.0f, {warn.r, warn.g, warn.b, 1.0f}, Interpolation::EaseOut});
+    flash_track.curve.add_key({0.8f, {base.r, base.g, base.b, 1.0f}, Interpolation::EaseOut});
+    flash_track.curve.sort_keys();
+    alert->tracks.push_back(flash_track);
+
+    auto* animator = banner->add_component<Animator>();
+    animator->add_state("idle", idle);
+    animator->add_state("alert", alert);
+    animator->auto_play = "idle";
+    animator->default_crossfade = 0.12f;
+    // Drift back into the idle loop once the alert flash finishes playing.
+    animator->on_state_finished.connect([animator](const std::string& finished_state) {
+        if (finished_state == "alert") animator->crossfade("idle", 0.25f);
+    });
+    return animator;
+}
+
 /** @brief Builds the ActionPanel: three role-styled buttons that mutate the settings panel live. */
-void build_action_panel(UIBuilder root, UIBuilder settings) {
+void build_action_panel(UIBuilder root, UIBuilder settings, Animator* banner_anim) {
     const UITheme& theme = root.theme();
     UIBuilder body = root.card("ActionPanel", "Inspector Actions & Config Management",
                               AnchorPreset::TopLeft, {500.0f, -550.0f}, {760.0f, 150.0f});
@@ -411,8 +520,9 @@ void build_action_panel(UIBuilder root, UIBuilder settings) {
     UIBuilder row = body.horizontal_layout("ButtonsRow", 16.0f);
     row.at(AnchorPreset::TopLeft, {20.0f, -46.0f}, {720.0f, 40.0f});
 
-    row.add_button("Apply Settings", ButtonRole::Primary, [footer]() {
+    row.add_button("Apply Settings", ButtonRole::Primary, [footer, banner_anim]() {
         footer->text = "Settings applied.";
+        if (banner_anim) banner_anim->crossfade("alert", banner_anim->default_crossfade);
     });
     row.add_button("Reset to Defaults", ButtonRole::Neutral, [settings, footer]() {
         UIBuilder s = settings;  // a fresh, non-const copy -- set_value() isn't a const method.
@@ -521,12 +631,46 @@ int main() {
     build_info_banner(root);
     StatusReadouts status = build_status_card(root);
     build_inventory_card(root);
-    build_action_panel(root, settings);
+    Animator* banner_anim = build_animations(canvas_obj.get(), theme);
+    build_action_panel(root, settings, banner_anim);
+
+    // Makes RectTransform/Graphic fields animatable by name (see
+    // coopa::anim::AnimatedPropertyRegistry) -- this demo builds its UI
+    // imperatively via UIBuilder and never calls register_ui_components(),
+    // so it must call this directly rather than getting it automatically.
+    coopa::ui::register_ui_animated_properties();
 
     SceneObject* canvas_raw = scene.add_root_object(std::move(canvas_obj));
+
+    // Drives banner_anim (and any other Animator added to this scene) at
+    // coopa::scene::UpdatePhase::Animation, which runs inside scene.update()
+    // below, before scene.late_update()'s CanvasComponent layout pass — so
+    // Canvas always measures/arranges/emits the current frame's already-
+    // animated pose. No set_job_engine() call: this demo's handful of tracks
+    // isn't remotely enough to make job dispatch worth it (see
+    // AnimationSystem::set_parallel_threshold()'s doc), so this stays inline.
+    scene.add_system(std::make_unique<coopa::anim::AnimationSystem>(), coopa::scene::UpdatePhase::Animation);
+
     scene.start();  // Runs every widget's start() (SpinBox/ComboBox already start()ed during construction above).
     canvas->set_default_texture(ui_pass.white_view());
     UIResourceCache::instance().mark_text_atlases(ui_pass);
+
+    // ANIM_TIME=<seconds> freezes banner_anim's "idle" pose at an exact time
+    // via sample_at() (seek + apply, no signals fired) before the render loop
+    // starts, so a screenshot is reproducible regardless of real frame timing.
+    // stop() immediately after is what makes it STAY frozen: MAX_FRAMES>1 still
+    // runs several real frames (with real, run-to-run-varying wall-clock dt)
+    // before the screenshot is saved, and a still-playing Animator would drift
+    // by a small, nondeterministic amount over those frames. A stopped
+    // Animator's AnimationSystem pass still re-applies its last sample_time
+    // every frame (advance_() is a no-op when not playing_, but evaluate_()/
+    // apply_() always run), so the seeded pose holds exactly.
+    if (banner_anim) {
+        if (const char* anim_time_env = std::getenv("ANIM_TIME")) {
+            banner_anim->sample_at(std::stof(anim_time_env));
+            banner_anim->stop();
+        }
+    }
 
     if (const char* scroll_env = std::getenv("SCROLL_Y")) {
         float sy = std::stof(scroll_env);

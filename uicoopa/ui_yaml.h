@@ -44,6 +44,7 @@
 #define UICOOPA_UI_YAML_H
 
 #include <coopa/scene/scene_loader.h>
+#include <coopa/animation/animated_property.h>
 #include <fkYAML/node.hpp>
 
 #include <uicoopa/layout/rect_transform.h>
@@ -403,6 +404,60 @@ inline void parse_signal_reactor_common(const fkyaml::node& node, coopa::ui::Sig
 }  // namespace detail
 
 /**
+ * @brief Registers every uicoopa field that coopa::anim::Animator can drive.
+ *
+ * Idempotent (AnimatedPropertyRegistry::add() just overwrites the same key on
+ * a repeat call). Called automatically by both register_ui_components()
+ * overloads below; call it directly from an app that builds its UI
+ * imperatively via UIBuilder and never calls register_ui_components() at all
+ * (e.g. test_settings_builder.cpp, which has no scene YAML but still wants
+ * its UIBuilder-constructed objects animatable).
+ *
+ * NOTE: anchor_min/anchor_max/pivot/anchored_position/size_delta are
+ * OVERWRITTEN EVERY FRAME by LayoutGroupBase::place_child()
+ * (uicoopa/groups/layout_group.h) on any object inside a layout group —
+ * animating them there is a no-op unless that object also carries
+ * LayoutElement{ignore_layout = true}. local_scale, local_rotation_degrees,
+ * and Graphic::color are never touched by layout and are always safe to
+ * animate regardless of layout-group membership.
+ */
+inline void register_ui_animated_properties() {
+    auto& reg = coopa::anim::AnimatedPropertyRegistry::instance();
+
+    reg.register_vec<RectTransform, glm::vec2>("RectTransform", "anchor_min",
+        &RectTransform::anchor_min, &RectTransform::set_anchor_min);
+    reg.register_vec<RectTransform, glm::vec2>("RectTransform", "anchor_max",
+        &RectTransform::anchor_max, &RectTransform::set_anchor_max);
+    reg.register_vec<RectTransform, glm::vec2>("RectTransform", "pivot",
+        &RectTransform::pivot, &RectTransform::set_pivot);
+    reg.register_vec<RectTransform, glm::vec2>("RectTransform", "anchored_position",
+        &RectTransform::anchored_position, &RectTransform::set_anchored_position);
+    reg.register_vec<RectTransform, glm::vec2>("RectTransform", "size_delta",
+        &RectTransform::size_delta, &RectTransform::set_size_delta);
+    reg.register_vec<RectTransform, glm::vec2>("RectTransform", "scale",
+        &RectTransform::local_scale, &RectTransform::set_local_scale);
+    // offset_min/offset_max return BY VALUE (they're derived from parent_rect_ +
+    // params_, not stored directly), hence register_vec_value rather than register_vec.
+    reg.register_vec_value<RectTransform, glm::vec2>("RectTransform", "offset_min",
+        &RectTransform::offset_min, &RectTransform::set_offset_min);
+    reg.register_vec_value<RectTransform, glm::vec2>("RectTransform", "offset_max",
+        &RectTransform::offset_max, &RectTransform::set_offset_max);
+    reg.register_float<RectTransform>("RectTransform", "rotation",
+        &RectTransform::local_rotation_degrees, &RectTransform::set_local_rotation_degrees);
+
+    // Graphic::color is a public member on the abstract base Graphic; its only
+    // two concrete subclasses today are Image and Text (icons render through
+    // Image + IconLibrary's UV lookup rather than a separate Icon type) — so
+    // register it once per concrete type_name() key. AnimatedPropertyRegistry's
+    // cast dynamic_casts to Graphic*, which succeeds for either regardless of
+    // which key resolved it, so a future Graphic subclass just adds one more
+    // string to this list.
+    for (const char* type_name : {"Image", "Text"}) {
+        reg.register_vec_member_as<Graphic, glm::vec4>(type_name, "color", &Graphic::color);
+    }
+}
+
+/**
  * @brief Registers YAML parsers for every uicoopa component that don't need GPU
  *        resource loading — font/sprite YAML references only resolve through
  *        UIResources' name registry. Safe to call with no Vulkan device at all
@@ -719,6 +774,8 @@ inline void register_ui_components() {
     FontDefaults::note_text_size = [](Font* f, uint32_t sz) {
         UIResourceCache::instance().note_text_atlas_use(f, sz);
     };
+
+    register_ui_animated_properties();
 }
 
 /**

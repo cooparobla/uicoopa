@@ -94,6 +94,20 @@ Composition follows a `coopa::scene::SceneObject` tree: every UI node carries a
 libcoopa's `coopa::scene::SceneLoader`, so a scene `.yaml` file can declare UI components
 directly. One-directional bridge only — libcoopa has no dependency on uicoopa.
 
+`register_ui_animated_properties()` — called automatically by
+`register_ui_components()`, and directly by apps (like `test_settings_builder.cpp`)
+that build their UI imperatively and never call `register_ui_components()` at
+all — registers every field below with libcoopa's
+`coopa::anim::AnimatedPropertyRegistry`, so a `coopa::anim::Animator` can drive
+them by name from a clip, exactly as if libcoopa itself defined `RectTransform`:
+
+| Component | Property (registry key) | Type | Notes |
+|---|---|---|---|
+| `RectTransform` | `anchor_min`, `anchor_max`, `pivot`, `anchored_position`, `size_delta`, `scale` | `glm::vec2` | Overwritten every frame on any child of a layout group ([`layout_group.h`](uicoopa/groups/layout_group.h)'s `place_child()`) — unsafe there without `LayoutElement{ignore_layout = true}`. |
+| `RectTransform` | `offset_min`, `offset_max` | `glm::vec2` | Derived from `anchored_position`/`size_delta`; same layout-group caveat. |
+| `RectTransform` | `rotation` | `float` | Never touched by layout — always safe. |
+| `Image`, `Text` | `color` | `glm::vec4` | Inherited from `Graphic`; never touched by layout. Contested by a `Button`'s own color chase or a `ColorOnSignal` if the same object has one — see `coopa/scene/README.md`'s "Update Phases" for why an `Animator` track wins that race deterministically. |
+
 #### `inherit_from` — prefabs and scene variants
 
 Any object node, or the top-level `scene:` block, can carry `inherit_from: <path.yaml>` to
