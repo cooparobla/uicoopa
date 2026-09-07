@@ -71,7 +71,7 @@ public:
  */
 class EventSystem {
 public:
-    static constexpr int kPrimaryButton = 0; /**< coopa::gfx::input::MouseButton::Left. */
+    static constexpr int kPrimaryButton = 0; /**< coopa::input::MouseButton::Left. */
 
     /** @brief Max seconds between two clicks on the same object for the second to count as a double-click. */
     float double_click_interval = 0.35f;

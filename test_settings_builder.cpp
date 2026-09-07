@@ -705,9 +705,9 @@ int main() {
                 // opening the field, for screenshotting the selection highlight.
                 if (const char* select_env = std::getenv("SELECT_LEFT")) {
                     int n = std::atoi(select_env);
-                    coopa::gfx::input::KeyEvent shift_left{
-                        coopa::gfx::input::Key::Left, 0, coopa::gfx::input::KeyAction::Press,
-                        coopa::gfx::input::Mods::Shift};
+                    coopa::input::KeyEvent shift_left{
+                        coopa::input::Key::Left, 0, coopa::input::KeyAction::Press,
+                        coopa::input::Mods::Shift};
                     for (int i = 0; i < n; ++i) field->on_key(shift_left);
                 }
             }
@@ -731,7 +731,7 @@ int main() {
     while (!ctx.should_close()) {
         ctx.poll();
 
-        if (ctx.window().is_key_pressed(coopa::gfx::input::Key::Escape)) {
+        if (ctx.input().key_down(coopa::input::Key::Escape)) {
             ctx.window().set_should_close(true);
         }
 
@@ -740,7 +740,7 @@ int main() {
         if (sw == 0 || sh == 0) continue;  // minimized
 
         canvas->set_viewport(sw, sh);
-        canvas->set_window_input(ctx.window());
+        canvas->set_input(ctx.input());
 
         // Before scene.update()/register_textures() -- finalize_typed() (the only GPU
         // touch a SpriteSheet load makes) runs inside this call, outside any render

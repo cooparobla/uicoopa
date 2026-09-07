@@ -298,7 +298,7 @@ coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env
     while (!ctx.should_close()) {
         ctx.poll(); // window.new_frame() + poll_events() + frame timer update.
 
-        if (ctx.window().is_key_pressed(coopa::gfx::input::Key::Escape)) {
+        if (ctx.input().key_down(coopa::input::Key::Escape)) {
             ctx.window().set_should_close(true);
         }
 
@@ -313,10 +313,10 @@ coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env
 
         // Each canvas converts the SAME window cursor into its own canvas space
         // (correct even across canvases with different scale factors — see
-        // CanvasComponent::set_window_input()'s doc).
+        // CanvasComponent::set_input()'s doc).
         for (auto* c : canvases) {
             c->set_viewport(sw, sh);
-            c->set_window_input(ctx.window());
+            c->set_input(ctx.input());
         }
 
         // Drives Button's own hover/press ColorTransition AND every ColorOnSignal

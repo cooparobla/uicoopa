@@ -7,7 +7,7 @@
 #define UICOOPA_INPUT_FOCUS_H
 
 #include <coopa/scene/scene_object.h>
-#include <gfxcoopa/input/keys.h>
+#include <coopa/input/keys.h>
 
 namespace coopa {
 namespace ui {
@@ -29,7 +29,7 @@ public:
     virtual void on_char(unsigned int codepoint) { (void)codepoint; }
 
     /** @brief A key transition (press/repeat/release) happened this frame. */
-    virtual void on_key(const coopa::gfx::input::KeyEvent& event) { (void)event; }
+    virtual void on_key(const coopa::input::KeyEvent& event) { (void)event; }
 
     /** @brief This object just became the focused object. */
     virtual void on_focus_gained() {}

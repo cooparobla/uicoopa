@@ -2017,12 +2017,12 @@ static SpinBoxTestFixture make_spinbox_fixture(double min_v, double max_v, doubl
     return fx;
 }
 
-static coopa::gfx::input::KeyEvent make_key_(coopa::gfx::input::Key key) {
-    return coopa::gfx::input::KeyEvent{ key, 0, coopa::gfx::input::KeyAction::Press, coopa::gfx::input::Mods::None };
+static coopa::input::KeyEvent make_key_(coopa::input::Key key) {
+    return coopa::input::KeyEvent{ key, 0, coopa::input::KeyAction::Press, coopa::input::Mods::None };
 }
 
-static coopa::gfx::input::KeyEvent make_shift_key_(coopa::gfx::input::Key key) {
-    return coopa::gfx::input::KeyEvent{ key, 0, coopa::gfx::input::KeyAction::Press, coopa::gfx::input::Mods::Shift };
+static coopa::input::KeyEvent make_shift_key_(coopa::input::Key key) {
+    return coopa::input::KeyEvent{ key, 0, coopa::input::KeyAction::Press, coopa::input::Mods::Shift };
 }
 
 void test_spinbox_double_click_gated_to_value_text_area() {
@@ -2045,7 +2045,7 @@ void test_spinbox_double_click_gated_to_value_text_area() {
     fx.spin->on_pointer_double_click(dbl_over_value);
     ASSERT_TRUE(fx.spin->editing());
 
-    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Escape));  // leave FocusContext clean
+    fx.spin->on_key(make_key_(coopa::input::Key::Escape));  // leave FocusContext clean
 }
 
 void test_spinbox_on_char_filters_non_numeric() {
@@ -2062,7 +2062,7 @@ void test_spinbox_on_char_filters_non_numeric() {
     fx.spin->on_char('2');
     ASSERT_TRUE(fx.spin->label_text->text == "72");
 
-    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Enter));
+    fx.spin->on_key(make_key_(coopa::input::Key::Enter));
     ASSERT_TRUE(!fx.spin->editing());
     ASSERT_NEAR(fx.spin->value(), 72.0, 1e-4);
 }
@@ -2083,7 +2083,7 @@ void test_spinbox_on_char_decimal_and_negative_rules() {
     fx.spin->on_char('.');   // a second '.' is rejected
     ASSERT_TRUE(fx.spin->label_text->text == "-12.5");
 
-    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Escape));  // leave FocusContext clean
+    fx.spin->on_key(make_key_(coopa::input::Key::Escape));  // leave FocusContext clean
 }
 
 void test_spinbox_escape_reverts_without_committing() {
@@ -2100,7 +2100,7 @@ void test_spinbox_escape_reverts_without_committing() {
     fx.spin->on_char('9');
     ASSERT_TRUE(fx.spin->label_text->text == "99");
 
-    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Escape));
+    fx.spin->on_key(make_key_(coopa::input::Key::Escape));
     ASSERT_TRUE(!fx.spin->editing());
     ASSERT_NEAR(fx.spin->value(), 5.0, 1e-4);   // unchanged
     ASSERT_TRUE(reported < 0.0);                 // on_value_changed never fired
@@ -2117,7 +2117,7 @@ void test_spinbox_backspace_and_focus_lost_commits() {
     fx.spin->on_char('4');
     fx.spin->on_char('2');
     fx.spin->on_char('9');
-    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Backspace));
+    fx.spin->on_key(make_key_(coopa::input::Key::Backspace));
     ASSERT_TRUE(fx.spin->label_text->text == "42");
 
     double reported = -1.0;
@@ -2181,12 +2181,12 @@ void test_text_field_click_to_edit_commits_and_reverts() {
     fx.field->on_char('!');  // printable ASCII is appended
     ASSERT_TRUE(fx.field->label_text->text == "Alice!");
 
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Backspace));
+    fx.field->on_key(make_key_(coopa::input::Key::Backspace));
     ASSERT_TRUE(fx.field->label_text->text == "Alice");
 
     std::string reported;
     fx.field->on_value_changed.connect([&](const std::string& v) { reported = v; });
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Enter));
+    fx.field->on_key(make_key_(coopa::input::Key::Enter));
     ASSERT_TRUE(!fx.field->editing());
     ASSERT_TRUE(fx.field->text() == "Alice");
     ASSERT_TRUE(reported.empty());  // unchanged value -- set_text()'s changed==false, no emit
@@ -2195,7 +2195,7 @@ void test_text_field_click_to_edit_commits_and_reverts() {
     dbl.position = value_rt->rect().center();
     fx.field->on_pointer_double_click(dbl);
     fx.field->on_char('!');
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Enter));
+    fx.field->on_key(make_key_(coopa::input::Key::Enter));
     ASSERT_TRUE(fx.field->text() == "Alice!");
     ASSERT_TRUE(reported == "Alice!");
 
@@ -2204,7 +2204,7 @@ void test_text_field_click_to_edit_commits_and_reverts() {
     fx.field->on_pointer_double_click(dbl);
     fx.field->on_char('?');
     ASSERT_TRUE(fx.field->label_text->text == "Alice!?");
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Escape));
+    fx.field->on_key(make_key_(coopa::input::Key::Escape));
     ASSERT_TRUE(!fx.field->editing());
     ASSERT_TRUE(fx.field->text() == "Alice!");
     ASSERT_TRUE(fx.field->label_text->text == "Alice!");
@@ -2225,7 +2225,7 @@ void test_text_field_caret_created_and_toggled_by_edit_state() {
     ASSERT_TRUE(caret_obj->get_component<Image>() != nullptr);
     ASSERT_TRUE(caret_obj->active());  // visible immediately on entering edit mode
 
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Enter));
+    fx.field->on_key(make_key_(coopa::input::Key::Enter));
     ASSERT_TRUE(!caret_obj->active());  // hidden once editing ends
 }
 
@@ -2245,7 +2245,7 @@ void test_text_field_caret_blinks_over_time() {
     fx.field->update(0.6f);
     ASSERT_TRUE(caret_obj->active());
 
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Escape));
+    fx.field->on_key(make_key_(coopa::input::Key::Escape));
     fx.field->update(0.6f);
     ASSERT_TRUE(!caret_obj->active());  // no longer editing -- update() is a guarded no-op
 }
@@ -2268,7 +2268,7 @@ void test_spinbox_shares_caret_mechanism_with_text_field() {
     ASSERT_TRUE(caret_obj->get_component<Image>() != nullptr);
     ASSERT_TRUE(caret_obj->active());
 
-    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Escape));
+    fx.spin->on_key(make_key_(coopa::input::Key::Escape));
     ASSERT_TRUE(!caret_obj->active());
 }
 
@@ -2280,23 +2280,23 @@ void test_text_field_left_right_home_end_navigation() {
     fx.field->on_pointer_double_click(dbl);  // cursor starts at the end (5)
 
     // Move left twice to sit between the two 'l's ("Hel|lo"), then insert mid-buffer.
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Left));
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Left));
+    fx.field->on_key(make_key_(coopa::input::Key::Left));
+    fx.field->on_key(make_key_(coopa::input::Key::Left));
     fx.field->on_char('!');
     ASSERT_TRUE(fx.field->label_text->text == "Hel!lo");
 
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Backspace));  // removes the '!' just inserted
+    fx.field->on_key(make_key_(coopa::input::Key::Backspace));  // removes the '!' just inserted
     ASSERT_TRUE(fx.field->label_text->text == "Hello");
 
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Home));
+    fx.field->on_key(make_key_(coopa::input::Key::Home));
     fx.field->on_char('>');
     ASSERT_TRUE(fx.field->label_text->text == ">Hello");
 
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::End));
+    fx.field->on_key(make_key_(coopa::input::Key::End));
     fx.field->on_char('<');
     ASSERT_TRUE(fx.field->label_text->text == ">Hello<");
 
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Escape));  // leave FocusContext clean
+    fx.field->on_key(make_key_(coopa::input::Key::Escape));  // leave FocusContext clean
 }
 
 void test_text_field_shift_selection_delete_and_replace() {
@@ -2307,19 +2307,19 @@ void test_text_field_shift_selection_delete_and_replace() {
     fx.field->on_pointer_double_click(dbl);  // cursor starts at the end (11)
 
     // Shift+Left x5 selects "World" (the last 5 characters).
-    for (int i = 0; i < 5; ++i) fx.field->on_key(make_shift_key_(coopa::gfx::input::Key::Left));
+    for (int i = 0; i < 5; ++i) fx.field->on_key(make_shift_key_(coopa::input::Key::Left));
 
     // Typing over an active selection replaces it, like a normal text editor.
     fx.field->on_char('!');
     ASSERT_TRUE(fx.field->label_text->text == "Hello !");
 
     // Select-all (Home, then Shift+End) and Delete clears the whole buffer at once.
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Home));
-    fx.field->on_key(make_shift_key_(coopa::gfx::input::Key::End));
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Delete));
+    fx.field->on_key(make_key_(coopa::input::Key::Home));
+    fx.field->on_key(make_shift_key_(coopa::input::Key::End));
+    fx.field->on_key(make_key_(coopa::input::Key::Delete));
     ASSERT_TRUE(fx.field->label_text->text.empty());
 
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Escape));
+    fx.field->on_key(make_key_(coopa::input::Key::Escape));
 }
 
 void test_text_field_selection_highlight_shown_instead_of_caret() {
@@ -2336,16 +2336,16 @@ void test_text_field_selection_highlight_shown_instead_of_caret() {
     ASSERT_TRUE(caret_obj->active());        // no selection yet -- caret shown
     ASSERT_TRUE(!selection_obj->active());
 
-    fx.field->on_key(make_shift_key_(coopa::gfx::input::Key::Left));
-    fx.field->on_key(make_shift_key_(coopa::gfx::input::Key::Left));
+    fx.field->on_key(make_shift_key_(coopa::input::Key::Left));
+    fx.field->on_key(make_shift_key_(coopa::input::Key::Left));
     ASSERT_TRUE(!caret_obj->active());       // caret hidden while a selection is active
     ASSERT_TRUE(selection_obj->active());
 
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Left));  // no Shift -- collapses the selection
+    fx.field->on_key(make_key_(coopa::input::Key::Left));  // no Shift -- collapses the selection
     ASSERT_TRUE(caret_obj->active());
     ASSERT_TRUE(!selection_obj->active());
 
-    fx.field->on_key(make_key_(coopa::gfx::input::Key::Escape));
+    fx.field->on_key(make_key_(coopa::input::Key::Escape));
 }
 
 void test_spinbox_negative_sign_via_cursor_navigation() {
@@ -2359,15 +2359,15 @@ void test_spinbox_negative_sign_via_cursor_navigation() {
     fx.spin->on_char('2');
     ASSERT_TRUE(fx.spin->label_text->text == "42");
 
-    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Home));
+    fx.spin->on_key(make_key_(coopa::input::Key::Home));
     fx.spin->on_char('-');  // now allowed: cursor is at position 0
     ASSERT_TRUE(fx.spin->label_text->text == "-42");
 
-    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Right));
+    fx.spin->on_key(make_key_(coopa::input::Key::Right));
     fx.spin->on_char('-');  // no longer at position 0 -- rejected
     ASSERT_TRUE(fx.spin->label_text->text == "-42");
 
-    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Enter));
+    fx.spin->on_key(make_key_(coopa::input::Key::Enter));
     ASSERT_NEAR(fx.spin->value(), -42.0, 1e-4);
 }
 

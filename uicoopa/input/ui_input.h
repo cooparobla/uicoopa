@@ -1,19 +1,20 @@
 /**
  * @file ui_input.h
- * @brief Per-frame mouse/keyboard state in canvas space, built on gfxcoopa's Window.
+ * @brief Per-frame mouse/keyboard state in canvas space, built on a coopa::input::Input.
  *
- * Window (gfxcoopa/presentation/window.h) exposes raw GLFW state: level-triggered
- * button polling, window-space cursor coordinates, and per-frame accumulators for
- * scroll/char/key events. UiInput adds edge detection (pressed/released this frame)
- * and converts the cursor position into canvas pixel space (+Y up, scaled by the
- * canvas's scale_factor) — the space every RectTransform/Raycaster operates in.
+ * coopa::input::Input already provides edge detection (pressed/released this
+ * frame) — see coopa/input/README.md — so UiInput's only remaining job is
+ * converting the window-space cursor position into canvas pixel space (+Y
+ * up, scaled by the canvas's scale_factor), the space every
+ * RectTransform/Raycaster operates in. This file has no windowing-library
+ * dependency at all: it never includes gfxcoopa.
  */
 
 #ifndef UICOOPA_INPUT_UI_INPUT_H
 #define UICOOPA_INPUT_UI_INPUT_H
 
-#include <gfxcoopa/presentation/window.h>
-#include <gfxcoopa/input/keys.h>
+#include <coopa/input/input.h>
+#include <coopa/input/keys.h>
 #include <uicoopa/layout/rect.h>
 #include <glm/glm.hpp>
 #include <vector>
@@ -23,50 +24,47 @@ namespace ui {
 
 /**
  * @class UiInput
- * @brief Converts gfxcoopa::Window's raw per-frame input into canvas-space UI input state.
+ * @brief Converts a coopa::input::Input's per-frame state into canvas-space UI input state.
  *
  * Usage, once per frame, before EventSystem::process():
  * @code
- * window.new_frame();
+ * window.new_frame(dt);
  * window.poll_events();
- * ui_input.update(window, canvas.root_rect(), canvas.scale_factor());
+ * ui_input.update(window.input(), canvas.root_rect(), canvas.scale_factor());
  * @endcode
  */
 class UiInput {
 public:
-    static constexpr int kMaxButtons = static_cast<int>(coopa::gfx::input::MouseButton::Count);
+    static constexpr int kMaxButtons = static_cast<int>(coopa::input::MouseButton::Count);
 
     /**
-     * @param window          Source of raw input state.
+     * @param input           Source of per-frame input state.
      * @param canvas_root_rect The canvas's root_rect(), used to flip the cursor's Y axis.
      * @param scale_factor    The canvas's scale_factor(), converting window pixels to canvas pixels.
      */
-    void update(coopa::gfx::presentation::Window& window, const Rect& canvas_root_rect, float scale_factor) {
-        auto [wx, wy] = window.cursor_position();
+    void update(const coopa::input::Input& input, const Rect& canvas_root_rect, float scale_factor) {
+        glm::vec2 wpos = input.cursor_position();
         float sf = scale_factor > 0.0f ? scale_factor : 1.0f;
 
         // Window coordinates are +Y down from the top-left; canvas space is +Y up from the
         // bottom-left, so the vertical axis both flips and rescales.
         glm::vec2 canvas_pos(
-            static_cast<float>(wx) / sf,
-            canvas_root_rect.size().y - static_cast<float>(wy) / sf);
+            wpos.x / sf,
+            canvas_root_rect.size().y - wpos.y / sf);
 
         delta_ = canvas_pos - position_;
         position_ = canvas_pos;
 
         for (int b = 0; b < kMaxButtons; ++b) {
-            bool now = window.is_mouse_button_pressed(static_cast<coopa::gfx::input::MouseButton>(b));
-            pressed_this_frame_[b]  = now && !prev_buttons_[b];
-            released_this_frame_[b] = !now && prev_buttons_[b];
-            buttons_[b] = now;
-            prev_buttons_[b] = now;
+            auto button = static_cast<coopa::input::MouseButton>(b);
+            buttons_[b] = input.button_down(button);
+            pressed_this_frame_[b] = input.button_pressed(button);
+            released_this_frame_[b] = input.button_released(button);
         }
 
-        auto [sx, sy] = window.scroll_delta();
-        scroll_ = glm::vec2(static_cast<float>(sx), static_cast<float>(sy));
-
-        char_input_ = window.char_input();
-        key_events_ = window.key_events_typed();
+        scroll_ = input.scroll_delta();
+        char_input_ = input.chars();
+        key_events_ = input.key_events();
     }
 
     const glm::vec2& position() const { return position_; }
@@ -84,18 +82,17 @@ public:
     }
 
     const std::vector<unsigned int>& char_input() const { return char_input_; }
-    const std::vector<coopa::gfx::input::KeyEvent>& key_events() const { return key_events_; }
+    const std::vector<coopa::input::KeyEvent>& key_events() const { return key_events_; }
 
 private:
     glm::vec2 position_{0.0f};
     glm::vec2 delta_{0.0f};
     glm::vec2 scroll_{0.0f};
     bool buttons_[kMaxButtons] = {};
-    bool prev_buttons_[kMaxButtons] = {};
     bool pressed_this_frame_[kMaxButtons] = {};
     bool released_this_frame_[kMaxButtons] = {};
     std::vector<unsigned int> char_input_;
-    std::vector<coopa::gfx::input::KeyEvent> key_events_;
+    std::vector<coopa::input::KeyEvent> key_events_;
 };
 
 }  // namespace ui

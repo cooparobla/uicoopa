@@ -48,7 +48,7 @@ namespace ui {
  * scene_mgr.load_scene(path);   // Scene::start() already ran
  * // once per frame, per canvas (usually exactly one):
  * canvas->set_viewport(screen_w, screen_h);
- * canvas->set_window_input(window);
+ * canvas->set_input(window.input());
  * scene_mgr.update(dt);         // Button color fade, any other component behavior
  * scene_mgr.get_active_scene().late_update(dt);  // this canvas's layout + emit + input dispatch
  * ui_pass.draw(cmd, frame, screen_w, screen_h, canvas->scale_factor(), canvas->draw_list());
@@ -123,7 +123,7 @@ public:
     /**
      * @brief Sets this frame's framebuffer size, eagerly recomputing root_rect()/scale_factor().
      *
-     * Call once per frame, before set_window_input() (which needs the current
+     * Call once per frame, before set_input() (which needs the current
      * root_rect()/scale_factor() to convert the cursor into canvas space) and
      * before Scene::late_update() runs.
      *
@@ -140,18 +140,18 @@ public:
     }
 
     /**
-     * @brief Updates this canvas's own UiInput from the window's raw per-frame state.
+     * @brief Updates this canvas's own UiInput from the given per-frame input state.
      *
      * Uses the root_rect()/scale_factor() most recently set by set_viewport(),
-     * so each canvas converts the same window cursor position into its OWN
-     * canvas space — correct even when canvases have different scale factors,
-     * unlike sharing one UiInput across canvases would be.
+     * so each canvas converts the same cursor position into its OWN canvas
+     * space — correct even when canvases have different scale factors, unlike
+     * sharing one UiInput across canvases would be.
      */
-    void set_window_input(coopa::gfx::presentation::Window& window) {
-        input_.update(window, root_rect_, scale_factor_);
+    void set_input(const coopa::input::Input& input) {
+        input_.update(input, root_rect_, scale_factor_);
     }
 
-    /** @brief This canvas's own per-frame pointer/keyboard state, as of the last set_window_input(). */
+    /** @brief This canvas's own per-frame pointer/keyboard state, as of the last set_input(). */
     const UiInput& input() const { return input_; }
 
     /** @brief This canvas's own EventSystem — owns hover/press state across frames. */

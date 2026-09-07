@@ -104,13 +104,13 @@ public:
         refresh_edit_display_();
     }
 
-    void on_key(const coopa::gfx::input::KeyEvent& event) override {
+    void on_key(const coopa::input::KeyEvent& event) override {
         if (!editing_) return;
-        if (event.action == coopa::gfx::input::KeyAction::Release) return;
+        if (event.action == coopa::input::KeyAction::Release) return;
 
-        using coopa::gfx::input::Key;
-        using coopa::gfx::input::Mods;
-        bool shift = coopa::gfx::input::has(event.mods, Mods::Shift);
+        using coopa::input::Key;
+        using coopa::input::Mods;
+        bool shift = coopa::input::has(event.mods, Mods::Shift);
 
         if (event.key == Key::Backspace) {
             if (has_selection_()) {
