@@ -26,6 +26,7 @@
 #include <uicoopa/layout/canvas.h>
 #include <uicoopa/groups/layout_group.h>
 #include <uicoopa/groups/grid_layout_group.h>
+#include <uicoopa/render/sprite.h>
 #include <coopa/scene/scene_object.h>
 #include <memory>
 #include <string>
@@ -221,6 +222,14 @@ public:
         return detail::make_dropdown(ctx_(), name, items, default_index, std::move(on_change));
     }
 
+    /** @brief A free-form editable text field -- click in (double-click, matching SpinBox's
+     *         numeric editor) and type; Enter or clicking away commits, Escape reverts. */
+    TextField* add_text_field(const std::string& name, const std::string& initial_value = "",
+                              std::function<void(const std::string&)> on_change = nullptr) {
+        ensure_node_();
+        return detail::make_text_field(ctx_(), name, initial_value, std::move(on_change));
+    }
+
     /** @brief A label + text-value line, e.g. a live status readout. Returns the value Text. */
     Text* add_status_line(const std::string& text, TextRole role = TextRole::Secondary,
                           const std::string& node_name = "Status") {
@@ -261,6 +270,42 @@ public:
         return detail::make_text_row(ctx_(), label, val, resolve_label_width_(label_width));
     }
 
+    TextField* add_text_field_row(const std::string& label, const std::string& initial_value = "",
+                                  std::function<void(const std::string&)> on_change = nullptr, float label_width = -1.0f) {
+        ensure_node_();
+        return detail::make_text_field_row(ctx_(), label, initial_value, std::move(on_change), resolve_label_width_(label_width));
+    }
+
+    // --- Image / Icon Shorthand ---
+
+    /** @brief A fixed-size Image bound directly to `sprite` (nullptr draws a flat-colored
+     *         placeholder rect -- see Image::emit()'s fallback). */
+    Image* add_image(Sprite* sprite, glm::vec2 size = {32.0f, 32.0f}, glm::vec4 color = {1.0f, 1.0f, 1.0f, 1.0f},
+                     ImageType type = ImageType::Simple, const std::string& node_name = "Image") {
+        ensure_node_();
+        return detail::make_image(ctx_(), sprite, size, color, type, node_name);
+    }
+
+    /**
+     * @brief A fixed-size Image bound to a named icon, resolved through IconLibrary.
+     * @param size <= 0 uses the theme's default icon size (UITheme::icons.size).
+     * @return The Image, or nullptr (creating nothing) if `icon_name` isn't published --
+     *         e.g. no IconLibrary sheet has been loaded. See render/icon_library.h.
+     */
+    Image* add_icon(const std::string& icon_name, float size = -1.0f, glm::vec4 color = {1.0f, 1.0f, 1.0f, 1.0f},
+                    const std::string& node_name = "Icon") {
+        ensure_node_();
+        return detail::make_icon(ctx_(), icon_name, resolve_icon_size_(size), color, node_name);
+    }
+
+    /** @brief An icon-only, square Button with no text label.
+     * @param size <= 0 uses the theme's default icon size (UITheme::icons.size). */
+    Button* add_icon_button(const std::string& icon_name, std::function<void()> on_click = nullptr,
+                            ButtonRole role = ButtonRole::Neutral, float size = -1.0f) {
+        ensure_node_();
+        return detail::make_icon_button(ctx_(), icon_name, resolve_icon_size_(size), role, std::move(on_click));
+    }
+
     // --- Inventory Grid Shorthand ---
 
     InventoryGrid* add_inventory_grid(const std::string& name, int rows, int cols,
@@ -297,6 +342,11 @@ private:
     /** @brief -1 (the public default) means "use the theme's row label width". */
     float resolve_label_width_(float requested) const {
         return requested >= 0.0f ? requested : theme_->metrics.label_width;
+    }
+
+    /** @brief <= 0 (the public default) means "use the theme's default icon size". */
+    float resolve_icon_size_(float requested) const {
+        return requested > 0.0f ? requested : theme_->icons.size;
     }
 };
 

@@ -63,7 +63,9 @@
 #include <uicoopa/input/ui_input.h>
 #include <uicoopa/input/event_system.h>
 #include <uicoopa/ui_yaml.h>
+#include <uicoopa/render/icon_library.h>
 
+#include <coopa/asset/asset_manager.h>
 #include <coopa/scene/scene_object.h>
 #include <coopa/scene/scene_manager.h>
 
@@ -192,6 +194,16 @@ coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env
     UiPass ui_pass(ctx.device(), ctx.allocator(), ctx.command_pool(), ctx.render_pass(),
                   shader_dir + "/ui.vert.spv", shader_dir + "/ui.frag.spv");
 
+    // Declared after ctx so it (and every AssetHandle/Texture it owns) is destroyed
+    // before ctx's Device/Allocator -- see IconLibrary::clear()'s doc, called near
+    // the end of main() before this goes out of scope. Loaded before load_scene()
+    // so a scene.yaml `sprite: <icon_name>` reference resolves on first parse (see
+    // ui_yaml.h's UIResourceCache::sprite_for()).
+    coopa::asset::AssetManager assets;
+    assets.add_search_root(std::string(ROOT_DIR) + "/assets");
+    IconLibrary::instance().configure(assets, ctx.device(), ctx.allocator(), ctx.command_pool());
+    IconLibrary::instance().add_sheet(assets, "icons/icons.yaml");
+
     // --- Load the UI tree from scene.yaml ---
     //
     // register_ui_components() must run before load_scene() so every !RectTransform/
@@ -292,6 +304,10 @@ coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env
 
         float dt = ctx.delta_time();
 
+        // Before register_textures() below -- see the analogous call's comment in
+        // test_settings_builder.cpp's main().
+        assets.update(dt);
+
         auto [sw, sh] = ctx.window().framebuffer_size();
         if (sw == 0 || sh == 0) continue;  // minimized
 
@@ -349,6 +365,7 @@ coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env
     // SceneLoader's parser registry is also static — both would otherwise only be
     // torn down at program exit, after device/allocator (locals above) are already
     // gone. Clear them now, while those are still alive (see ui_yaml.h's clear()).
+    IconLibrary::instance().clear();
     UIResourceCache::instance().clear();
     coopa::scene::SceneLoader::clear_component_parsers();
 

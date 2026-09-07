@@ -38,6 +38,7 @@
 #include <gfxcoopa/engine/util/sampler.h>
 #include <gfxcoopa/presentation/renderer.h>
 #include <gfxcoopa/types/enums.h>
+#include <gfxcoopa/types/sampler_desc.h>
 #include <gfxcoopa/types/texture_view.h>
 
 #include <uicoopa/render/ui_vertex.h>
@@ -121,8 +122,15 @@ public:
 
         pipeline_ = std::make_unique<pipeline::Pipeline>(device, swapchain_pass, desc);
 
-        default_sampler_ = std::make_unique<coopa::gfx::engine::util::Sampler>(
-            coopa::gfx::engine::util::Sampler::linear(device));
+        // Bilinear + clamp-to-edge, not Sampler::linear()'s repeat: this sampler is shared
+        // by every texture UiPass binds (see register_view_()), including sprite-sheet
+        // sub-rects whose UVs never reach 0/1 -- REPEAT risks sampling a neighboring
+        // packed icon/glyph at the seam under bilinear filtering, while CLAMP_TO_EDGE is
+        // a no-op for the full-[0,1] quads (white texture, unsliced whole-texture sprites)
+        // every other caller relies on.
+        coopa::gfx::SamplerDesc default_sampler_desc = coopa::gfx::SamplerDesc::linear_repeat();
+        default_sampler_desc.address = coopa::gfx::AddressMode::ClampToEdge;
+        default_sampler_ = std::make_unique<coopa::gfx::engine::util::Sampler>(device, default_sampler_desc);
 
         white_texture_ = make_white_texture(device, allocator, cmd_pool);
 

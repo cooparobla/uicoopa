@@ -18,7 +18,9 @@
  *
  * Set THEME=light to load assets/themes/light.yaml instead of the default
  * dark.yaml. Same MAX_FRAMES/SCREENSHOT_NAME/SCROLL_Y/OPEN_COMBO/SLIDER_MAX/
- * HOVER_SLOT env hooks as test_window.cpp, for scripted screenshots.
+ * HOVER_SLOT env hooks as test_window.cpp, for scripted screenshots. EDIT_FIELD=<name>
+ * additionally opens keyboard editing on a named TextField (e.g. "player_name") before
+ * the render loop starts, so a screenshot can capture its blinking text caret.
  */
 
 // The one raw Vulkan include in this file, for save_screenshot()'s framebuffer
@@ -48,7 +50,9 @@
 #include <uicoopa/input/event_system.h>
 #include <uicoopa/builder/ui_builder.h>
 #include <uicoopa/ui_yaml.h>  // UIResourceCache::note_text_atlas_use()/mark_text_atlases()
+#include <uicoopa/render/icon_library.h>
 
+#include <coopa/asset/asset_manager.h>
 #include <coopa/scene/scene_object.h>
 #include <coopa/scene/scene.h>
 
@@ -139,6 +143,7 @@ std::string format_float(float v, int decimals = 2) {
  * @brief The live status lines shown on StatusCard -- see build_status_card().
  */
 struct StatusReadouts {
+    Text* player_name   = nullptr;
     Text* resolution    = nullptr;
     Text* vsync         = nullptr;
     Text* quality       = nullptr;
@@ -198,6 +203,7 @@ UIBuilder build_settings_panel(UIBuilder root) {
     content.add_toggle_row("mute_on_focus_loss", true);
 
     content.add_section_header("Gameplay");
+    content.add_text_field_row("player_name", "Player One");
     content.add_dropdown_row("difficulty", {"Easy", "Normal", "Hard", "Nightmare"}, 1);
     content.add_dropdown_row("language", {"English", "Spanish", "French", "German", "Japanese"}, 0);
     content.add_slider_row("mouse_sensitivity", 0.1f, 5.0f, 1.0f, 0.1f);
@@ -223,6 +229,7 @@ UIBuilder build_settings_panel(UIBuilder root) {
     content.add_toggle_row("screen_reader_support", false);
 
     content.add_section_header("Network");
+    content.add_text_field_row("server_address", "127.0.0.1");
     content.add_dropdown_row("region", {"NA-East", "NA-West", "EU", "Asia", "Oceania"}, 0);
     content.add_toggle_row("voice_chat_enabled", true);
     content.add_toggle_row("upnp_enabled", true);
@@ -257,6 +264,7 @@ StatusReadouts build_status_card(UIBuilder root) {
     UIBuilder list = body.vertical_layout("StatusContent", 8.0f, LayoutPadding{10.0f, 10.0f, 10.0f, 10.0f});
 
     StatusReadouts s;
+    s.player_name   = list.add_status_line("Player: ...", TextRole::Accent, "Status_PlayerName");
     s.resolution    = list.add_status_line("Resolution: ...", TextRole::Secondary, "Status_Resolution");
     s.vsync         = list.add_status_line("VSync: ...", TextRole::Success, "Status_VSync");
     s.quality       = list.add_status_line("Quality: ...", TextRole::Accent, "Status_Quality");
@@ -273,6 +281,11 @@ StatusReadouts build_status_card(UIBuilder root) {
 
 /** @brief Recomputes every StatusCard line from the settings panel's current values. */
 void refresh_status_card(UIBuilder settings, const UITheme& theme, StatusReadouts& s) {
+    // get_value<std::string> on a TextField returns the COMMITTED value (TextField::text()),
+    // never a live in-progress edit buffer -- see values.h -- so this never echoes
+    // half-typed input even while the field is mid-edit on any given frame.
+    s.player_name->text = "Player: " + settings.get_value<std::string>("player_name");
+
     int w = settings.get_value<int>("width");
     int h = settings.get_value<int>("height");
     s.resolution->text = "Resolution: " + std::to_string(w) + " x " + std::to_string(h);
@@ -349,6 +362,17 @@ void build_inventory_card(UIBuilder root) {
     footer->owner->get_component<RectTransform>()->set_anchored_position({14.0f, 14.0f});
 }
 
+/** @brief Every default icon name from uicoopa/tools/gen_default_icons.py, for the
+ *         ActionPanel's icon strip below -- visual proof that IconLibrary/SpriteSheet
+ *         actually resolved and rendered the generated sheet (assets/icons/icons.png)
+ *         correctly (orientation, tinting, no bleed between cells). */
+constexpr const char* kDefaultIconNames[] = {
+    "arrow_left", "arrow_right", "arrow_up", "arrow_down",
+    "chevron_left", "chevron_right", "chevron_up", "chevron_down",
+    "caret_up", "caret_down", "check", "cross", "plus", "minus", "dot", "circle",
+    "gear", "search", "menu", "star", "warning", "info", "lock", "folder",
+};
+
 /** @brief Builds the ActionPanel: three role-styled buttons that mutate the settings panel live. */
 void build_action_panel(UIBuilder root, UIBuilder settings) {
     const UITheme& theme = root.theme();
@@ -359,6 +383,17 @@ void build_action_panel(UIBuilder root, UIBuilder settings) {
                                       {700.0f, 20.0f}, "FooterStatus");
     footer->owner->get_component<RectTransform>()->anchor_preset(AnchorPreset::BottomLeft);
     footer->owner->get_component<RectTransform>()->set_anchored_position({20.0f, 14.0f});
+
+    // A row of every default icon, in the gap between the header and the button row
+    // below -- see kDefaultIconNames' doc. A no-op (draws nothing) if no IconLibrary
+    // sheet loaded -- see main()'s icon_library.add_sheet() call.
+    if (IconLibrary::instance().has_icons()) {
+        UIBuilder icon_row = body.horizontal_layout("IconStrip", 6.0f);
+        icon_row.at(AnchorPreset::TopLeft, {20.0f, -6.0f}, {720.0f, 32.0f});
+        for (const char* name : kDefaultIconNames) {
+            icon_row.add_icon(name, 22.0f, theme.text.accent, name);
+        }
+    }
 
     UIBuilder row = body.horizontal_layout("ButtonsRow", 16.0f);
     row.at(AnchorPreset::TopLeft, {20.0f, -46.0f}, {720.0f, 40.0f});
@@ -403,6 +438,14 @@ int main() {
     std::string shader_dir = std::string(ROOT_DIR) + "/assets/shaders";
     UiPass ui_pass(ctx.device(), ctx.allocator(), ctx.command_pool(), ctx.render_pass(),
                   shader_dir + "/ui.vert.spv", shader_dir + "/ui.frag.spv");
+
+    // Declared after ctx so it (and every AssetHandle/Texture it owns) is destroyed
+    // before ctx's Device/Allocator -- see IconLibrary::clear()'s doc for the
+    // explicit teardown call this pairs with, near the end of main().
+    coopa::asset::AssetManager assets;
+    assets.add_search_root(std::string(ROOT_DIR) + "/assets");
+    IconLibrary::instance().configure(assets, ctx.device(), ctx.allocator(), ctx.command_pool());
+    IconLibrary::instance().add_sheet(assets, "icons/icons.yaml");
 
     // Loads the UI font once and installs it as the process-wide fallback, so
     // every apply_font() call in the builder (which every widget factory
@@ -463,6 +506,29 @@ int main() {
             if (auto* slider = slider_obj->get_component<Slider>()) slider->set_value(slider->max_value, false);
         }
     }
+    if (const char* edit_field_env = std::getenv("EDIT_FIELD")) {
+        if (auto* field_obj = canvas_raw->find_descendant(edit_field_env)) {
+            if (auto* field = field_obj->get_component<TextField>()) {
+                auto [init_w, init_h] = ctx.window().framebuffer_size();
+                canvas->set_viewport(init_w, init_h);
+                canvas->rebuild_layout(init_w, init_h);
+                if (auto* value_rt = field->label_text->owner->get_component<RectTransform>()) {
+                    PointerEventData synth;
+                    synth.position = value_rt->rect().center();
+                    field->on_pointer_double_click(synth);
+                }
+                // SELECT_LEFT=<n> additionally simulates n Shift+Left presses after
+                // opening the field, for screenshotting the selection highlight.
+                if (const char* select_env = std::getenv("SELECT_LEFT")) {
+                    int n = std::atoi(select_env);
+                    coopa::gfx::input::KeyEvent shift_left{
+                        coopa::gfx::input::Key::Left, 0, coopa::gfx::input::KeyAction::Press,
+                        coopa::gfx::input::Mods::Shift};
+                    for (int i = 0; i < n; ++i) field->on_key(shift_left);
+                }
+            }
+        }
+    }
     if (const char* hover_slot_env = std::getenv("HOVER_SLOT")) {
         if (auto* slot_obj = canvas_raw->find_descendant(hover_slot_env)) {
             if (auto* slot = slot_obj->get_component<InventorySlot>()) {
@@ -491,6 +557,13 @@ int main() {
 
         canvas->set_viewport(sw, sh);
         canvas->set_window_input(ctx.window());
+
+        // Before scene.update()/register_textures() -- finalize_typed() (the only GPU
+        // touch a SpriteSheet load makes) runs inside this call, outside any render
+        // pass, satisfying register_textures()'s "before begin_frame()" contract by
+        // construction. Only matters for a sheet added later via load_async(); the
+        // startup add_sheet() call above already completed synchronously.
+        assets.update(dt);
 
         refresh_status_card(settings, theme, status);
 
@@ -528,6 +601,10 @@ int main() {
 
     std::cout << "[settings_builder] Exiting cleanly.\n";
 
+    // Must precede assets going out of scope below (whose destructor calls
+    // shutdown(), destroying every SpriteSheet's Texture) and the Device/Allocator
+    // ctx owns -- see IconLibrary::clear()'s doc.
+    IconLibrary::instance().clear();
     UIResourceCache::instance().clear();
     ThemeLibrary::instance().clear();
     // FontDefaults::font points at ui_font, a local about to go out of scope --

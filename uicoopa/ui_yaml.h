@@ -51,6 +51,7 @@
 #include <uicoopa/layout/canvas_scaler.h>
 #include <uicoopa/layout/layout_element.h>
 #include <uicoopa/render/sprite.h>
+#include <uicoopa/render/icon_library.h>
 #include <uicoopa/render/texture_factory.h>
 #include <uicoopa/render/ui_pass.h>
 #include <uicoopa/text/font.h>
@@ -183,22 +184,34 @@ public:
     }
 
     /**
-     * @brief Resolves a sprite reference the same way font_for() does, minting a
-     *        fresh Sprite (default full-UV, no border) over a cached Texture.
+     * @brief Resolves a sprite reference: a UIResources name, an IconLibrary icon name,
+     *        else a path loaded on demand as a fresh whole-texture Sprite.
      *
-     * A fresh Sprite per call (rather than caching by path) because border/type
-     * are per-usage YAML fields the !Image parser applies after this returns —
-     * sharing one Sprite across two differently-bordered Image nodes referencing
-     * the same file would let one clobber the other's border.
-     * @return A newly-minted Sprite wrapping the (cached) texture, or nullptr.
+     * A fresh Sprite per path-loaded call (rather than caching by path) because
+     * border/type are per-usage YAML fields the !Image parser applies after this
+     * returns — sharing one Sprite across two differently-bordered Image nodes
+     * referencing the same file would let one clobber the other's border. An
+     * IconLibrary-published Sprite is returned directly instead (not copied):
+     * icons are meant to be a shared, named resource, and IconLibrary already
+     * keeps that Sprite valid across a hot reload (see icon_library.h).
+     * @return A Sprite for `ref`, or nullptr if nothing resolved it.
      */
     Sprite* sprite_for(const std::string& ref, const coopa::scene::SceneLoader::ParseContext& ctx) {
         if (auto* named = UIResources::instance().find_sprite(ref)) return named;
+        if (auto* icon = IconLibrary::instance().icon(ref)) return icon;
+
         coopa::gfx::engine::data::Texture* tex = texture_for(ref, ctx);
         if (!tex) return nullptr;
 
         auto sprite = std::make_unique<Sprite>();
         sprite->texture = tex;
+        // Whole-texture UV, Y-flipped: DrawList::add_quad() pairs pos.min (canvas
+        // BOTTOM) with uv.min, but texture space has +Y down (image row 0 = top) --
+        // so uv.min must be the texture's bottom row, i.e. v=1. Matches the
+        // convention FontAtlas and SpriteSheet both use (see sprite_sheet.h's
+        // pixel_rect_to_uv()); without this every path-loaded Image renders
+        // vertically flipped.
+        sprite->uv = Rect{ glm::vec2(0.0f, 1.0f), glm::vec2(1.0f, 0.0f) };
         Sprite* raw = sprite.get();
         owned_sprites_.push_back(std::move(sprite));
         return raw;

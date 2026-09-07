@@ -178,11 +178,20 @@ inline SceneObject* make_scroll_view(BuildContext ctx, const std::string& name,
     // ScrollRect::start()'s own auto-create, which would otherwise nest one
     // inside the (masked) Viewport instead. Added AFTER vp_obj so arrange visits
     // Viewport (and ScrollRect::on_rect_changed) first -- see ScrollRect's doc.
+    // When IconLibrary has icons published, reserve a scrollbar_thickness-tall step
+    // button at each end of the column (added as further siblings of sb_obj below) and
+    // inset the track between them -- Scrollbar's own hit-test rect (sb_obj's
+    // RectTransform) is exactly the draggable track area either way, so this needs no
+    // Scrollbar-side change. With no icons published, this is exactly the un-inset
+    // full-column track this always built.
+    bool with_scrollbar_arrows = IconLibrary::instance().has_icons();
+    float track_end_inset = with_scrollbar_arrows ? scrollbar_thickness : 0.0f;
+
     auto sb_obj = std::make_unique<SceneObject>("VerticalScrollbar");
     auto* sb_rt = sb_obj->add_component<RectTransform>();
     sb_rt->anchor_preset(AnchorPreset::StretchAll);
-    sb_rt->set_offset_min({size.x - 4.0f - scrollbar_thickness, 4.0f});
-    sb_rt->set_offset_max({-4.0f, -header_h});
+    sb_rt->set_offset_min({size.x - 4.0f - scrollbar_thickness, 4.0f + track_end_inset});
+    sb_rt->set_offset_max({-4.0f, -(header_h + track_end_inset)});
     sb_obj->add_component<Image>()->color = theme.slider.track;
 
     auto sb_handle_obj = std::make_unique<SceneObject>("Handle");
@@ -209,6 +218,28 @@ inline SceneObject* make_scroll_view(BuildContext ctx, const std::string& name,
     frame_obj->add_child(std::move(header_obj));
     frame_obj->add_child(std::move(vp_obj));
     frame_obj->add_child(std::move(sb_obj));
+
+    // Added last (after sb_obj) so they're emitted -- and drawn -- on top of it, matching
+    // ScrollRect::build_auto_scrollbar_()'s equivalent ordering.
+    if (with_scrollbar_arrows) {
+        static constexpr float kStepSize = 0.1f; // fraction of scrollable range per click
+
+        RectParams up_params;
+        up_params.anchor_min = up_params.anchor_max = {1.0f, 1.0f}; // frame's top-right corner
+        up_params.pivot = {1.0f, 1.0f};
+        up_params.size_delta = {scrollbar_thickness, scrollbar_thickness};
+        up_params.anchored_position = {-4.0f, -header_h};
+        add_icon_step_button(*frame_obj, "chevron_up", up_params,
+                             [sb]() { sb->set_value(sb->value() - kStepSize); });
+
+        RectParams down_params;
+        down_params.anchor_min = down_params.anchor_max = {1.0f, 0.0f}; // frame's bottom-right corner
+        down_params.pivot = {1.0f, 0.0f};
+        down_params.size_delta = {scrollbar_thickness, scrollbar_thickness};
+        down_params.anchored_position = {-4.0f, 4.0f};
+        add_icon_step_button(*frame_obj, "chevron_down", down_params,
+                             [sb]() { sb->set_value(sb->value() + kStepSize); });
+    }
 
     ctx.parent->add_child(std::move(frame_obj));
     return content_raw;

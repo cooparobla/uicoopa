@@ -9,6 +9,7 @@
 #include <uicoopa/widgets/slider.h>
 #include <uicoopa/widgets/toggle.h>
 #include <uicoopa/widgets/spinbox.h>
+#include <uicoopa/widgets/text_field.h>
 #include <uicoopa/widgets/combobox.h>
 #include <uicoopa/widgets/text.h>
 #include <coopa/scene/scene_object.h>
@@ -50,9 +51,14 @@ T get_value(SceneObject* node, const std::string& name) {
         if (auto* t = target->get_component<Toggle>()) return t->is_on();
         throw std::runtime_error("Component on " + name + " is not a Toggle");
     } else if constexpr (std::is_same_v<T, std::string>) {
+        // TextField checked first and returns the COMMITTED value (text()), not
+        // whatever its display Text currently shows -- which, mid-edit, is the live
+        // typing buffer (see TextEditBase::refresh_edit_display_()). A caller polling
+        // every frame (e.g. a status readout) must never echo half-typed input.
+        if (auto* tf = target->get_component<TextField>()) return tf->text();
         if (auto* c = target->get_component<ComboBox>()) return c->current_text();
         if (auto* t = target->get_component<Text>()) return t->text;
-        throw std::runtime_error("Component on " + name + " is not a ComboBox or Text");
+        throw std::runtime_error("Component on " + name + " is not a TextField, ComboBox, or Text");
     } else if constexpr (std::is_same_v<T, int>) {
         if (auto* c = target->get_component<ComboBox>()) return c->current_index();
         if (auto* sp = target->get_component<SpinBox>()) return static_cast<int>(std::round(sp->value()));
@@ -85,7 +91,9 @@ inline void set_value(SceneObject* node, const std::string& name, bool val) {
 
 inline void set_value(SceneObject* node, const std::string& name, const std::string& val) {
     if (auto* target = find_target(node, name)) {
-        if (auto* c = target->get_component<ComboBox>()) {
+        if (auto* tf = target->get_component<TextField>()) {
+            tf->set_text(val);
+        } else if (auto* c = target->get_component<ComboBox>()) {
             for (size_t i = 0; i < c->items.size(); ++i) {
                 if (c->items[i] == val) {
                     c->set_current_index(static_cast<int>(i));

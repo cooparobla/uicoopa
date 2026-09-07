@@ -116,6 +116,26 @@ struct SlotStyle {
     glm::vec4 tooltip_text{0.95f, 0.95f, 0.97f, 1.0f};  /**< InventorySlot's hover tooltip text. */
 };
 
+/** @struct IconStyle
+ *  @brief Default icon size and the icon names used by widget factories that
+ *         can draw a real icon in place of their pre-icon look (see
+ *         builder/detail/widgets.h and groups/scroll_rect.h). Names are
+ *         looked up via IconLibrary (render/icon_library.h) at build time;
+ *         an empty IconLibrary (no sheet loaded) makes every lookup miss and
+ *         each retrofitted widget falls back to its original appearance --
+ *         see each name field's doc for what that fallback looks like. */
+struct IconStyle {
+    float       size = 14.0f; /**< Default rendered icon size, in canvas pixels. */
+    std::string combo_arrow{"chevron_down"};  /**< ComboBox's dropdown indicator; falls back to a "v" Text glyph. */
+    std::string toggle_check{"check"};        /**< Toggle's on-state mark; falls back to a plain tinted square. */
+    std::string spin_inc{"plus"};             /**< SpinBox's increment button; falls back to a "+" Text glyph. */
+    std::string spin_dec{"minus"};            /**< SpinBox's decrement button; falls back to a "-" Text glyph. */
+    std::string scroll_up{"chevron_up"};      /**< Vertical Scrollbar's top step button; omitted (no button) without an icon. */
+    std::string scroll_down{"chevron_down"};  /**< Vertical Scrollbar's bottom step button; omitted without an icon. */
+    std::string scroll_left{"chevron_left"};  /**< Horizontal Scrollbar's left step button; omitted without an icon. */
+    std::string scroll_right{"chevron_right"};/**< Horizontal Scrollbar's right step button; omitted without an icon. */
+};
+
 /** @struct MetricsStyle
  *  @brief Layout metrics shared across the container/row builders. */
 struct MetricsStyle {
@@ -151,6 +171,7 @@ struct UITheme {
     SpinBoxStyle     spinbox;
     ComboBoxStyle    combobox;
     SlotStyle        slot;
+    IconStyle        icons;
     MetricsStyle     metrics;
 
     /** @brief Per-theme font override; falls back to FontDefaults::font when null. */

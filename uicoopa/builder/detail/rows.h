@@ -58,6 +58,12 @@ inline ComboBox* make_dropdown_row(BuildContext ctx, const std::string& label,
     return make_dropdown(begin_row_(ctx, label, label_width), label, items, default_index, std::move(on_change));
 }
 
+inline TextField* make_text_field_row(BuildContext ctx, const std::string& label,
+                                      const std::string& initial_value,
+                                      std::function<void(const std::string&)> on_change, float label_width) {
+    return make_text_field(begin_row_(ctx, label, label_width), label, initial_value, std::move(on_change));
+}
+
 inline Text* make_text_row(BuildContext ctx, const std::string& label, const std::string& val, float label_width) {
     BuildContext row_ctx = begin_row_(ctx, label, label_width);
     Text* val_lbl = make_label(row_ctx, val, ctx.theme->text.size_label, ctx.theme->text.accent, label);

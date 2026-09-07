@@ -11,12 +11,14 @@
 #include <uicoopa/layout/rect_transform.h>
 #include <uicoopa/layout/layout_element.h>
 #include <uicoopa/groups/layout_group.h>
+#include <uicoopa/render/icon_library.h>
 #include <uicoopa/widgets/image.h>
 #include <uicoopa/widgets/text.h>
 #include <uicoopa/widgets/button.h>
 #include <uicoopa/widgets/slider.h>
 #include <uicoopa/widgets/toggle.h>
 #include <uicoopa/widgets/spinbox.h>
+#include <uicoopa/widgets/text_field.h>
 #include <uicoopa/widgets/combobox.h>
 #include <uicoopa/widgets/mask.h>
 #include <algorithm>
@@ -30,6 +32,37 @@ namespace ui {
 namespace detail {
 
 using coopa::scene::SceneObject;
+
+/** @brief A fixed-size Image bound directly to `sprite` (may be null for a flat-colored
+ *         placeholder -- see Image::emit()'s fallback). */
+inline Image* make_image(BuildContext ctx, Sprite* sprite, glm::vec2 size, glm::vec4 color,
+                         ImageType type, const std::string& node_name) {
+    auto child = std::make_unique<SceneObject>(node_name);
+    auto* rt = child->add_component<RectTransform>();
+    rt->anchor_preset(AnchorPreset::MiddleCenter);
+    rt->set_size_delta(size);
+    auto* img = child->add_component<Image>();
+    img->sprite = sprite;
+    img->color = color;
+    img->type = type;
+    auto* raw = img;
+    ctx.parent->add_child(std::move(child));
+    return raw;
+}
+
+/**
+ * @brief A fixed-size Image bound to a named icon, resolved through IconLibrary.
+ * @return The Image, or nullptr (creating nothing) if `icon_name` isn't published --
+ *         e.g. no IconLibrary sheet has been loaded yet. Callers that need a graceful
+ *         fallback (a Text glyph, a plain colored box) should check for null and build
+ *         their own fallback node instead -- see make_toggle()/make_dropdown()'s use.
+ */
+inline Image* make_icon(BuildContext ctx, const std::string& icon_name, float size,
+                        glm::vec4 color, const std::string& node_name = "Icon") {
+    Sprite* sprite = IconLibrary::instance().icon(icon_name);
+    if (!sprite) return nullptr;
+    return make_image(ctx, sprite, {size, size}, color, ImageType::Simple, node_name);
+}
 
 /** @brief A single line of layout-driven text. `font_size <= 0` uses the theme's label size;
  *         an alpha < 0 in `color` uses the theme's primary text color. */
@@ -199,6 +232,10 @@ inline Toggle* make_toggle(BuildContext ctx, const std::string& name, bool initi
     check_rt->hittable = false;  // Decorative -- the Toggle object itself owns the click.
     auto* check_img = check_obj->add_component<Image>();
     check_img->color = theme.toggle.check;
+    // If no IconLibrary sheet is loaded, icon() returns nullptr and check_img->sprite
+    // stays null -- Image::emit() then falls back to exactly the plain tinted square
+    // this looked like before icons existed.
+    check_img->sprite = IconLibrary::instance().icon(theme.icons.toggle_check);
 
     auto* toggle = toggle_obj->add_component<Toggle>(initial_val);
     toggle->checkmark = check_img;
@@ -230,9 +267,10 @@ inline Toggle* make_toggle(BuildContext ctx, const std::string& name, bool initi
     return raw;
 }
 
-/** @brief Private helper for make_spinbox() -- not part of this header's public factory surface. */
+/** @brief Private helper for make_spinbox() -- not part of this header's public factory surface.
+ *         Draws `icon_name` (via IconLibrary) if published, else falls back to a `glyph` Text. */
 inline SceneObject* make_spinbox_step_button_(BuildContext ctx, const std::string& glyph,
-                                              Button** out_btn) {
+                                              const std::string& icon_name, Button** out_btn) {
     const UITheme& theme = *ctx.theme;
     auto obj = std::make_unique<SceneObject>(glyph == "-" ? "DecBtn" : "IncBtn");
     obj->add_component<RectTransform>()->set_size_delta({theme.spinbox.btn_width, theme.spinbox.height});
@@ -244,17 +282,21 @@ inline SceneObject* make_spinbox_step_button_(BuildContext ctx, const std::strin
     btn->colors.pressed = theme.button.press;
     btn->colors.disabled = theme.button.disabled;
 
-    auto txt_obj = std::make_unique<SceneObject>("Txt");
-    auto* txt_rt = txt_obj->add_component<RectTransform>();
-    txt_rt->anchor_preset(AnchorPreset::MiddleCenter);
-    txt_rt->hittable = false;  // Decorative -- the button itself owns the click.
-    auto* txt = txt_obj->add_component<Text>();
-    apply_font(txt, theme.text.size_label, theme.font);
-    txt->text = glyph;
-    txt->color = theme.text.primary;
-    txt->horizontal_align = HorizontalAlign::Center;
-    txt->vertical_align = VerticalAlign::Middle;
-    obj->add_child(std::move(txt_obj));
+    if (!make_icon(ctx.into(obj.get()), icon_name, theme.text.size_label, theme.text.primary, "Icon")) {
+        auto txt_obj = std::make_unique<SceneObject>("Txt");
+        auto* txt_rt = txt_obj->add_component<RectTransform>();
+        txt_rt->anchor_preset(AnchorPreset::MiddleCenter);
+        txt_rt->hittable = false;  // Decorative -- the button itself owns the click.
+        auto* txt = txt_obj->add_component<Text>();
+        apply_font(txt, theme.text.size_label, theme.font);
+        txt->text = glyph;
+        txt->color = theme.text.primary;
+        txt->horizontal_align = HorizontalAlign::Center;
+        txt->vertical_align = VerticalAlign::Middle;
+        obj->add_child(std::move(txt_obj));
+    } else {
+        obj->children().back()->get_component<RectTransform>()->hittable = false;
+    }
 
     *out_btn = btn;
     auto* raw = obj.get();
@@ -275,7 +317,7 @@ inline SpinBox* make_spinbox(BuildContext ctx, const std::string& name,
     hgroup->child_force_expand_height = true;
 
     Button* dec_btn = nullptr;
-    make_spinbox_step_button_(ctx.into(spin_obj.get()), "-", &dec_btn);
+    make_spinbox_step_button_(ctx.into(spin_obj.get()), "-", theme.icons.spin_dec, &dec_btn);
 
     auto val_obj = std::make_unique<SceneObject>("ValueText");
     val_obj->add_component<RectTransform>()->hittable = false;  // SpinBox itself is the raycast target -- see spinbox.h.
@@ -291,7 +333,7 @@ inline SpinBox* make_spinbox(BuildContext ctx, const std::string& name,
     spin_obj->add_child(std::move(val_obj));
 
     Button* inc_btn = nullptr;
-    make_spinbox_step_button_(ctx.into(spin_obj.get()), "+", &inc_btn);
+    make_spinbox_step_button_(ctx.into(spin_obj.get()), "+", theme.icons.spin_inc, &inc_btn);
 
     auto* spin = spin_obj->add_component<SpinBox>(min_val, max_val, initial_val, step);
     spin->dec_button = dec_btn;
@@ -303,6 +345,56 @@ inline SpinBox* make_spinbox(BuildContext ctx, const std::string& name,
 
     auto* raw = spin;
     ctx.parent->add_child(std::move(spin_obj));
+    return raw;
+}
+
+/**
+ * @brief A free-form editable text field. ValueText holds the background Image at the
+ *        field's full bounds (also TextEditBase's double-click hit-rect and edit-mode
+ *        highlight target -- see resolve_edit_bg_()'s parent fallback); the Text itself
+ *        lives on a further-inset child so the first/last glyph isn't flush against the
+ *        box edge, the same left/right padding combobox's Label child already uses.
+ */
+inline TextField* make_text_field(BuildContext ctx, const std::string& name,
+                                  const std::string& initial_value,
+                                  std::function<void(const std::string&)> on_change) {
+    const UITheme& theme = *ctx.theme;
+    auto field_obj = std::make_unique<SceneObject>(name);
+    field_obj->add_component<RectTransform>()->set_size_delta({160.0f, theme.spinbox.height});
+    auto* le = field_obj->add_component<LayoutElement>();
+    le->preferred_size = {160.0f, theme.spinbox.height};
+    le->flexible_size = {1.0f, 0.0f};
+
+    auto val_obj = std::make_unique<SceneObject>("ValueText");
+    auto* val_rt = val_obj->add_component<RectTransform>();
+    val_rt->anchor_preset(AnchorPreset::StretchAll);
+    val_rt->set_size_delta({0.0f, 0.0f});  // fills field_obj exactly -- see rect.h's StretchAll gotcha.
+    val_obj->add_component<Image>()->color = theme.spinbox.bg;
+
+    auto text_obj = std::make_unique<SceneObject>("Text");
+    auto* text_rt = text_obj->add_component<RectTransform>();
+    text_rt->anchor_preset(AnchorPreset::StretchAll);
+    text_rt->set_offset_min({8.0f, 0.0f});
+    text_rt->set_offset_max({-8.0f, 0.0f});
+    text_rt->hittable = false;  // Decorative -- ValueText (the field's own rect) owns the click.
+    auto* readout = text_obj->add_component<Text>();
+    apply_font(readout, theme.text.size_label, theme.font);
+    readout->text = initial_value;
+    readout->color = theme.text.primary;
+    readout->horizontal_align = HorizontalAlign::Left;
+    readout->vertical_align = VerticalAlign::Middle;
+    val_obj->add_child(std::move(text_obj));
+
+    field_obj->add_child(std::move(val_obj));
+
+    auto* field = field_obj->add_component<TextField>(initial_value);
+    field->label_text = readout;
+
+    field->start();
+    if (on_change) field->on_value_changed.connect(std::move(on_change));
+
+    auto* raw = field;
+    ctx.parent->add_child(std::move(field_obj));
     return raw;
 }
 
@@ -343,12 +435,19 @@ inline ComboBox* make_dropdown(BuildContext ctx, const std::string& name,
     arrow_rt->set_size_delta({20.0f, 20.0f});
     arrow_rt->set_anchored_position({-12.0f, 0.0f});
     arrow_rt->hittable = false;
-    auto* arrow_text = arrow_obj->add_component<Text>();
-    apply_font(arrow_text, theme.text.size_small, theme.font);
-    arrow_text->text = "v";
-    arrow_text->color = theme.text.secondary;
-    arrow_text->horizontal_align = HorizontalAlign::Center;
-    arrow_text->vertical_align = VerticalAlign::Middle;
+    if (Sprite* arrow_sprite = IconLibrary::instance().icon(theme.icons.combo_arrow)) {
+        auto* arrow_img = arrow_obj->add_component<Image>();
+        arrow_img->sprite = arrow_sprite;
+        arrow_img->color = theme.text.secondary;
+    } else {
+        // No IconLibrary sheet loaded -- the original "v" glyph.
+        auto* arrow_text = arrow_obj->add_component<Text>();
+        apply_font(arrow_text, theme.text.size_small, theme.font);
+        arrow_text->text = "v";
+        arrow_text->color = theme.text.secondary;
+        arrow_text->horizontal_align = HorizontalAlign::Center;
+        arrow_text->vertical_align = VerticalAlign::Middle;
+    }
 
     auto popup_obj = std::make_unique<SceneObject>("Popup");
     auto* popup_rt = popup_obj->add_component<RectTransform>();
@@ -422,6 +521,37 @@ inline ComboBox* make_dropdown(BuildContext ctx, const std::string& name,
 
     auto* raw = combo;
     ctx.parent->add_child(std::move(combo_obj));
+    return raw;
+}
+
+/** @brief An icon-only, square Button with no text label. Falls back to a Button with
+ *         no visible glyph at all if `icon_name` isn't published -- prefer add_button()
+ *         with a text label when icons aren't guaranteed to be loaded. */
+inline Button* make_icon_button(BuildContext ctx, const std::string& icon_name, float size,
+                                ButtonRole role, std::function<void()> on_click) {
+    const UITheme& theme = *ctx.theme;
+    const ButtonStyle& style = button_style(theme, role);
+    float btn_size = size + theme.metrics.button_padding_x;
+
+    auto obj = std::make_unique<SceneObject>("IconButton");
+    obj->add_component<RectTransform>()->set_size_delta({btn_size, btn_size});
+    auto* le = obj->add_component<LayoutElement>();
+    le->preferred_size = {btn_size, btn_size};
+
+    obj->add_component<Image>()->color = style.normal;
+    auto* btn = obj->add_component<Button>();
+    btn->colors.normal = style.normal;
+    btn->colors.highlighted = style.hover;
+    btn->colors.pressed = style.press;
+    btn->colors.disabled = style.disabled;
+    if (on_click) btn->on_click.connect(std::move(on_click));
+
+    if (Image* icon_img = make_icon(ctx.into(obj.get()), icon_name, size, theme.text.primary)) {
+        icon_img->owner->get_component<RectTransform>()->hittable = false; // Decorative -- the Button owns the click.
+    }
+
+    auto* raw = btn;
+    ctx.parent->add_child(std::move(obj));
     return raw;
 }
 

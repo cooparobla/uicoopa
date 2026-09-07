@@ -4,6 +4,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <fstream>
+#include <sstream>
 #include <filesystem>
 
 #include <glm/glm.hpp>
@@ -19,6 +20,9 @@
 #include <uicoopa/render/draw_list.h>
 #include <uicoopa/render/texture_factory.h>
 #include <uicoopa/render/ui_pass.h>
+#include <uicoopa/render/sprite_sheet.h>
+#include <uicoopa/render/icon_library.h>
+#include <coopa/asset/asset_manager.h>
 #include <uicoopa/widgets/graphic.h>
 #include <uicoopa/widgets/image.h>
 
@@ -467,6 +471,239 @@ void test_nine_slice_geometry() {
     ASSERT_TRUE(dl.batches().size() == 1);
     ASSERT_TRUE(dl.vertices().size() == 4);
     ASSERT_TRUE(dl.indices().size() == 6);
+}
+
+void test_nine_slice_flipped_uv_walks_inward() {
+    // Regression test for draw_list.h's nine_slice_axis_breakpoints(): a Y-flipped UV
+    // range (uv_hi < uv_lo, the FontAtlas/SpriteSheet convention -- see sprite_sheet.h's
+    // pixel_rect_to_uv()) must still walk its border breakpoints INWARD, toward the
+    // interior of the range, not outward past it.
+    std::array<float, 4> pos{}, uv{};
+
+    // Ascending UV range (uv_hi > uv_lo): border walks up from uv_lo, down from uv_hi.
+    nine_slice_axis_breakpoints(0.0f, 100.0f, 10.0f, 10.0f, 0.2f, 0.8f, 0.05f, 0.05f, pos, uv);
+    ASSERT_TRUE(pos[0] == 0.0f && pos[1] == 10.0f && pos[2] == 90.0f && pos[3] == 100.0f);
+    ASSERT_NEAR(uv[0], 0.20f, 1e-6f);
+    ASSERT_NEAR(uv[1], 0.25f, 1e-6f);  // walked inward (up) from 0.2
+    ASSERT_NEAR(uv[2], 0.75f, 1e-6f);  // walked inward (down) from 0.8
+    ASSERT_NEAR(uv[3], 0.80f, 1e-6f);
+
+    // Descending UV range (uv_hi < uv_lo): border must still walk inward -- down from
+    // uv_lo, up from uv_hi -- not outward past [uv_hi, uv_lo].
+    nine_slice_axis_breakpoints(0.0f, 100.0f, 10.0f, 10.0f, 0.8f, 0.2f, 0.05f, 0.05f, pos, uv);
+    ASSERT_NEAR(uv[0], 0.80f, 1e-6f);
+    ASSERT_NEAR(uv[1], 0.75f, 1e-6f);  // walked inward (down) from 0.8
+    ASSERT_NEAR(uv[2], 0.25f, 1e-6f);  // walked inward (up) from 0.2
+    ASSERT_NEAR(uv[3], 0.20f, 1e-6f);
+    // Every inner breakpoint stays within [min(uv_lo,uv_hi), max(uv_lo,uv_hi)].
+    ASSERT_TRUE(uv[1] <= 0.80f && uv[1] >= 0.20f);
+    ASSERT_TRUE(uv[2] <= 0.80f && uv[2] >= 0.20f);
+
+    // Oversized border clamps both inner breakpoints to the midpoint rather than crossing.
+    nine_slice_axis_breakpoints(0.0f, 10.0f, 8.0f, 8.0f, 0.0f, 1.0f, 0.1f, 0.1f, pos, uv);
+    ASSERT_NEAR(pos[1], 5.0f, 1e-6f);
+    ASSERT_NEAR(pos[2], 5.0f, 1e-6f);
+}
+
+void test_sprite_sheet_desc_parsing() {
+    std::string yaml =
+        "image: icons.png\n"
+        "width: 64\n"
+        "height: 32\n"
+        "sprites:\n"
+        "  - { name: a, x: 0, y: 0, w: 32, h: 32 }\n"
+        "  - { name: b, x: 32, y: 0, w: 32, h: 32,\n"
+        "      border: { left: 4, bottom: 4, right: 4, top: 4 } }\n";
+    SpriteSheetDesc desc = parse_sprite_sheet_desc(yaml);
+    ASSERT_TRUE(desc.image == "icons.png");
+    ASSERT_TRUE(desc.width == 64 && desc.height == 32);
+    ASSERT_TRUE(desc.sprites.size() == 2);
+    ASSERT_TRUE(desc.sprites[0].name == "a" && desc.sprites[0].w == 32 && desc.sprites[0].h == 32);
+    ASSERT_TRUE(desc.sprites[1].name == "b" && desc.sprites[1].x == 32);
+    ASSERT_VEC2_NEAR(glm::vec2(desc.sprites[1].border.x, desc.sprites[1].border.y), glm::vec2(4.0f, 4.0f), 1e-6f);
+    ASSERT_TRUE(desc.sprites[0].border == glm::vec4(0.0f)); // no border block -> defaults to zero
+
+    // Missing 'image' key throws.
+    bool threw = false;
+    try { parse_sprite_sheet_desc("sprites:\n  - { name: a, x: 0, y: 0, w: 1, h: 1 }\n"); }
+    catch (const std::runtime_error&) { threw = true; }
+    ASSERT_TRUE(threw);
+
+    // Duplicate sprite name throws.
+    threw = false;
+    try {
+        parse_sprite_sheet_desc(
+            "image: x.png\nsprites:\n"
+            "  - { name: a, x: 0, y: 0, w: 1, h: 1 }\n"
+            "  - { name: a, x: 1, y: 1, w: 1, h: 1 }\n");
+    } catch (const std::runtime_error&) { threw = true; }
+    ASSERT_TRUE(threw);
+}
+
+void test_pixel_rect_to_uv_y_flip() {
+    // Full-texture rect, no inset: exactly {{0,1},{1,0}} -- the FontAtlas/SpriteSheet
+    // Y-flip convention (uv.min pairs with pos.min, canvas-bottom, i.e. the image's
+    // BOTTOM row, which is the LARGER v coordinate since image space is +Y down).
+    Rect full = pixel_rect_to_uv(0, 0, 256, 256, 256, 256);
+    ASSERT_VEC2_NEAR(full.min, glm::vec2(0.0f, 1.0f), 1e-6f);
+    ASSERT_VEC2_NEAR(full.max, glm::vec2(1.0f, 0.0f), 1e-6f);
+    ASSERT_TRUE(full.min.y > full.max.y);
+
+    // One 32px cell in a 256x256 sheet at (0,0): min.y (bottom edge) > max.y (top edge).
+    Rect cell = pixel_rect_to_uv(0, 0, 32, 32, 256, 256);
+    ASSERT_VEC2_NEAR(cell.min, glm::vec2(0.0f, 0.125f), 1e-6f);
+    ASSERT_VEC2_NEAR(cell.max, glm::vec2(0.125f, 0.0f), 1e-6f);
+
+    // Half-texel inset shrinks every edge toward the rect's interior.
+    Rect inset = pixel_rect_to_uv(0, 0, 32, 32, 256, 256, /*half_texel_inset=*/true);
+    float half_texel = 0.5f / 256.0f;
+    ASSERT_NEAR(inset.min.x, 0.0f + half_texel, 1e-6f);
+    ASSERT_NEAR(inset.max.x, 0.125f - half_texel, 1e-6f);
+    ASSERT_NEAR(inset.min.y, 0.125f - half_texel, 1e-6f); // min.y shrinks DOWN (toward max.y)
+    ASSERT_NEAR(inset.max.y, 0.0f + half_texel, 1e-6f);   // max.y shrinks UP (toward min.y)
+}
+
+void test_build_sprite_table_null_texture() {
+    SpriteSheetDesc desc = parse_sprite_sheet_desc(
+        "image: icons.png\nwidth: 64\nheight: 32\nsprites:\n"
+        "  - { name: a, x: 0, y: 0, w: 32, h: 32 }\n"
+        "  - { name: b, x: 32, y: 0, w: 32, h: 32 }\n");
+    auto table = build_sprite_table(desc, /*texture=*/nullptr, 64, 32);
+    ASSERT_TRUE(table.size() == 2);
+    ASSERT_TRUE(table.count("a") == 1 && table.count("b") == 1);
+    ASSERT_TRUE(table.at("a").texture == nullptr);
+    ASSERT_VEC2_NEAR(table.at("a").uv.min, glm::vec2(0.0f, 1.0f), 1e-6f);
+
+    // Pointer stability: taking an address before more lookups stays valid (unordered_map
+    // node-based storage never invalidates references on further lookups/inserts).
+    const Sprite* a_ptr = &table.at("a");
+    (void)table.at("b");
+    ASSERT_TRUE(a_ptr == &table.at("a"));
+
+    // whole_image_desc() -- the "bare PNG, no sidecar YAML" case.
+    SpriteSheetDesc whole = whole_image_desc("logo", 128, 64);
+    ASSERT_TRUE(whole.sprites.size() == 1 && whole.sprites[0].name == "logo");
+    auto whole_table = build_sprite_table(whole, nullptr, 128, 64);
+    ASSERT_VEC2_NEAR(whole_table.at("logo").uv.min, glm::vec2(0.0f, 1.0f), 1e-6f);
+    ASSERT_VEC2_NEAR(whole_table.at("logo").uv.max, glm::vec2(1.0f, 0.0f), 1e-6f);
+}
+
+void test_default_icon_sheet_descriptor_is_valid() {
+    std::string path = std::string(ROOT_DIR) + "/assets/icons/icons.yaml";
+    std::ifstream f(path);
+    ASSERT_TRUE(static_cast<bool>(f));
+    std::stringstream buf;
+    buf << f.rdbuf();
+
+    SpriteSheetDesc desc = parse_sprite_sheet_desc(buf.str());
+    ASSERT_TRUE(desc.image == "icons.png");
+    ASSERT_TRUE(desc.width == 256 && desc.height == 96);
+    ASSERT_TRUE(desc.sprites.size() == 24);
+
+    bool has_arrow_left = false, has_check = false, has_plus = false, has_minus = false,
+         has_star = false, has_gear = false, has_chevron_down = false;
+    for (const auto& e : desc.sprites) {
+        ASSERT_TRUE(e.x + e.w <= desc.width);
+        ASSERT_TRUE(e.y + e.h <= desc.height);
+        if (e.name == "arrow_left")    has_arrow_left = true;
+        if (e.name == "check")         has_check = true;
+        if (e.name == "plus")          has_plus = true;
+        if (e.name == "minus")         has_minus = true;
+        if (e.name == "star")          has_star = true;
+        if (e.name == "gear")          has_gear = true;
+        if (e.name == "chevron_down")  has_chevron_down = true;
+    }
+    ASSERT_TRUE(has_arrow_left && has_check && has_plus && has_minus &&
+               has_star && has_gear && has_chevron_down);
+
+    // No two cells overlap (they're laid out on a grid, but this holds regardless of layout).
+    for (size_t i = 0; i < desc.sprites.size(); ++i) {
+        for (size_t j = i + 1; j < desc.sprites.size(); ++j) {
+            const auto& a = desc.sprites[i];
+            const auto& b = desc.sprites[j];
+            bool disjoint = a.x + a.w <= b.x || b.x + b.w <= a.x ||
+                           a.y + a.h <= b.y || b.y + b.h <= a.y;
+            ASSERT_TRUE(disjoint);
+        }
+    }
+}
+
+/** @brief Headless-safe coopa::asset loader for SpriteSheet: parses the descriptor
+ *         (real filesystem read, real YAML parse) but skips the PNG decode/GPU upload
+ *         entirely -- publishes a SpriteSheet with a null Texture, exactly like
+ *         build_sprite_table(..., nullptr, ...) elsewhere in this file. Lets
+ *         IconLibrary's add_sheet()/icon()/clear() be exercised end-to-end without a
+ *         Device, using the real checked-in assets/icons/icons.yaml. */
+class HeadlessSpriteSheetLoader : public coopa::asset::TypedAssetLoader<SpriteSheet, SpriteSheetDesc> {
+public:
+    std::shared_ptr<SpriteSheetDesc> decode_typed(const coopa::asset::AssetId&,
+                                                  const coopa::asset::LoadContext& ctx) override {
+        std::ifstream f(ctx.resolved_path);
+        if (!f) throw std::runtime_error("HeadlessSpriteSheetLoader: cannot open " + ctx.resolved_path);
+        std::stringstream buf;
+        buf << f.rdbuf();
+        return std::make_shared<SpriteSheetDesc>(parse_sprite_sheet_desc(buf.str()));
+    }
+    std::shared_ptr<SpriteSheet> finalize_typed(std::shared_ptr<SpriteSheetDesc> desc,
+                                                const coopa::asset::AssetId&,
+                                                const coopa::asset::LoadContext&) override {
+        return std::make_shared<SpriteSheet>(nullptr, *desc);
+    }
+    const char* type_name() const override { return "SpriteSheet"; }
+};
+
+void test_icon_library_add_sheet_and_lookup() {
+    coopa::asset::AssetManager assets;
+    assets.add_search_root(std::string(ROOT_DIR) + "/assets");
+    assets.register_loader<SpriteSheet>(std::make_unique<HeadlessSpriteSheetLoader>());
+
+    ASSERT_TRUE(!IconLibrary::instance().has_icons());
+
+    bool ok = IconLibrary::instance().add_sheet(assets, "icons/icons.yaml");
+    ASSERT_TRUE(ok);
+    ASSERT_TRUE(IconLibrary::instance().has_icons());
+    ASSERT_TRUE(IconLibrary::instance().icon("arrow_left") != nullptr);
+    ASSERT_TRUE(IconLibrary::instance().icon("totally_missing_icon") == nullptr);
+
+    // Prefixed publish: same entries also reachable under the prefix, original bare
+    // names untouched.
+    ok = IconLibrary::instance().add_sheet(assets, "icons/icons.yaml", "game/");
+    ASSERT_TRUE(ok);
+    ASSERT_TRUE(IconLibrary::instance().icon("game/arrow_left") != nullptr);
+    ASSERT_TRUE(IconLibrary::instance().icon("arrow_left") != nullptr);
+
+    IconLibrary::instance().clear();
+    ASSERT_TRUE(!IconLibrary::instance().has_icons());
+    ASSERT_TRUE(IconLibrary::instance().icon("arrow_left") == nullptr);
+}
+
+void test_builder_icons_degrade_without_icon_library() {
+    // No IconLibrary sheet loaded in this process (headless suite never touches a real
+    // Device, so nothing could have loaded one) -- every icon-aware widget factory must
+    // fall back to exactly its pre-icon look.
+    ASSERT_TRUE(!IconLibrary::instance().has_icons());
+
+    SceneObject root_obj("Root");
+    root_obj.add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+    UIBuilder root(&root_obj);
+
+    ComboBox* combo = root.add_dropdown("Combo", {"One", "Two"});
+    SceneObject* arrow_obj = combo->owner->find_descendant("Arrow");
+    ASSERT_TRUE(arrow_obj != nullptr);
+    ASSERT_TRUE(arrow_obj->get_component<Text>() != nullptr);   // fallback "v" glyph
+    ASSERT_TRUE(arrow_obj->get_component<Image>() == nullptr);  // not the icon path
+
+    Toggle* toggle = root.add_toggle("Toggle");
+    SceneObject* check_obj = toggle->owner->find_descendant("Checkmark");
+    ASSERT_TRUE(check_obj != nullptr);
+    Image* check_img = check_obj->get_component<Image>();
+    ASSERT_TRUE(check_img != nullptr && check_img->sprite == nullptr); // plain tinted square
+
+    SpinBox* spin = root.add_spinbox("Spin");
+    SceneObject* dec_obj = spin->owner->find_descendant("DecBtn");
+    ASSERT_TRUE(dec_obj != nullptr);
+    SceneObject* dec_txt_obj = dec_obj->find_descendant("Txt");
+    ASSERT_TRUE(dec_txt_obj != nullptr && dec_txt_obj->get_component<Text>() != nullptr);
 }
 
 void test_rect_transform_world_corners_identity() {
@@ -1656,6 +1893,10 @@ static coopa::gfx::input::KeyEvent make_key_(coopa::gfx::input::Key key) {
     return coopa::gfx::input::KeyEvent{ key, 0, coopa::gfx::input::KeyAction::Press, coopa::gfx::input::Mods::None };
 }
 
+static coopa::gfx::input::KeyEvent make_shift_key_(coopa::gfx::input::Key key) {
+    return coopa::gfx::input::KeyEvent{ key, 0, coopa::gfx::input::KeyAction::Press, coopa::gfx::input::Mods::Shift };
+}
+
 void test_spinbox_double_click_gated_to_value_text_area() {
     auto fx = make_spinbox_fixture(0.0, 100.0, 5.0, 1.0);
 
@@ -1757,6 +1998,249 @@ void test_spinbox_backspace_and_focus_lost_commits() {
     ASSERT_TRUE(!fx.spin->editing());
     ASSERT_NEAR(fx.spin->value(), 42.0, 1e-4);
     ASSERT_NEAR(reported, 42.0, 1e-4);
+
+    // Unlike the other SpinBox editing tests (which route through on_key(Escape)/
+    // on_key(Enter), both of which call FocusContext::clear_focus() themselves), this
+    // test calls on_focus_lost() directly -- bypassing FocusContext, which still holds
+    // fx.spin->owner as its focused_ pointer from begin_editing_()'s request_focus()
+    // above. Left uncleared, that pointer would dangle the moment fx (and the whole
+    // SceneObject tree it owns) is destroyed at the end of this function, crashing the
+    // next test whose fixture guards itself with FocusContext::instance().clear_focus().
+    FocusContext::instance().clear_focus();
+}
+
+// Shared setup for the TextField tests below, mirroring SpinBoxTestFixture's shape.
+struct TextFieldTestFixture {
+    std::unique_ptr<SceneObject> canvas_obj;
+    CanvasComponent* canvas = nullptr;
+    TextField* field = nullptr;
+};
+
+static TextFieldTestFixture make_text_field_fixture(const std::string& initial) {
+    FocusContext::instance().clear_focus();  // guard against leftover state from another test
+
+    TextFieldTestFixture fx;
+    fx.canvas_obj = std::make_unique<SceneObject>("Canvas");
+    fx.canvas = fx.canvas_obj->add_component<CanvasComponent>();
+    fx.canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    fx.canvas->scaler.scale_factor = 1.0f;
+
+    auto* root = fx.canvas_obj->add_child(std::make_unique<SceneObject>("Root"));
+    root->add_component<RectTransform>()->set_size_delta({400.0f, 200.0f});
+
+    UIBuilder builder(root);
+    fx.field = builder.add_text_field("Name", initial);
+
+    fx.canvas->rebuild_layout(400, 200);
+    return fx;
+}
+
+void test_text_field_click_to_edit_commits_and_reverts() {
+    auto fx = make_text_field_fixture("Alice");
+    ASSERT_TRUE(fx.field->text() == "Alice");
+
+    auto* value_rt = fx.field->label_text->owner->get_component<RectTransform>();
+    ASSERT_TRUE(value_rt != nullptr);
+
+    PointerEventData dbl;
+    dbl.position = value_rt->rect().center();
+    fx.field->on_pointer_double_click(dbl);
+    ASSERT_TRUE(fx.field->editing());
+    // Prefilled with the current committed text -- unlike SpinBox's empty-buffer default.
+    ASSERT_TRUE(fx.field->label_text->text == "Alice");
+
+    fx.field->on_char(1);    // a control character is rejected
+    fx.field->on_char('!');  // printable ASCII is appended
+    ASSERT_TRUE(fx.field->label_text->text == "Alice!");
+
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Backspace));
+    ASSERT_TRUE(fx.field->label_text->text == "Alice");
+
+    std::string reported;
+    fx.field->on_value_changed.connect([&](const std::string& v) { reported = v; });
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Enter));
+    ASSERT_TRUE(!fx.field->editing());
+    ASSERT_TRUE(fx.field->text() == "Alice");
+    ASSERT_TRUE(reported.empty());  // unchanged value -- set_text()'s changed==false, no emit
+
+    // Edit again and commit an actual change.
+    dbl.position = value_rt->rect().center();
+    fx.field->on_pointer_double_click(dbl);
+    fx.field->on_char('!');
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Enter));
+    ASSERT_TRUE(fx.field->text() == "Alice!");
+    ASSERT_TRUE(reported == "Alice!");
+
+    // Escape reverts without touching the committed value.
+    dbl.position = value_rt->rect().center();
+    fx.field->on_pointer_double_click(dbl);
+    fx.field->on_char('?');
+    ASSERT_TRUE(fx.field->label_text->text == "Alice!?");
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Escape));
+    ASSERT_TRUE(!fx.field->editing());
+    ASSERT_TRUE(fx.field->text() == "Alice!");
+    ASSERT_TRUE(fx.field->label_text->text == "Alice!");
+}
+
+void test_text_field_caret_created_and_toggled_by_edit_state() {
+    auto fx = make_text_field_fixture("Bob");
+    auto* value_obj = fx.field->label_text->owner;
+    ASSERT_TRUE(value_obj->find_descendant("Caret") == nullptr);  // lazily created, not yet
+
+    auto* value_rt = value_obj->get_component<RectTransform>();
+    PointerEventData dbl;
+    dbl.position = value_rt->rect().center();
+    fx.field->on_pointer_double_click(dbl);
+
+    auto* caret_obj = value_obj->find_descendant("Caret");
+    ASSERT_TRUE(caret_obj != nullptr);
+    ASSERT_TRUE(caret_obj->get_component<Image>() != nullptr);
+    ASSERT_TRUE(caret_obj->active());  // visible immediately on entering edit mode
+
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Enter));
+    ASSERT_TRUE(!caret_obj->active());  // hidden once editing ends
+}
+
+void test_text_field_caret_blinks_over_time() {
+    auto fx = make_text_field_fixture("X");
+    auto* value_rt = fx.field->label_text->owner->get_component<RectTransform>();
+    PointerEventData dbl;
+    dbl.position = value_rt->rect().center();
+    fx.field->on_pointer_double_click(dbl);
+
+    auto* caret_obj = fx.field->label_text->owner->find_descendant("Caret");
+    ASSERT_TRUE(caret_obj->active());  // starts visible
+
+    fx.field->update(0.6f);  // past the ~0.5s blink interval
+    ASSERT_TRUE(!caret_obj->active());
+
+    fx.field->update(0.6f);
+    ASSERT_TRUE(caret_obj->active());
+
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Escape));
+    fx.field->update(0.6f);
+    ASSERT_TRUE(!caret_obj->active());  // no longer editing -- update() is a guarded no-op
+}
+
+/**
+ * @brief Proves SpinBox's double-click numeric editor uses the SAME caret mechanism
+ *        as TextField (both derive from TextEditBase) -- not a parallel, caret-less copy.
+ */
+void test_spinbox_shares_caret_mechanism_with_text_field() {
+    auto fx = make_spinbox_fixture(0.0, 100.0, 5.0, 1.0);
+    auto* value_obj = fx.spin->label_text->owner;
+    auto* value_rt = value_obj->get_component<RectTransform>();
+
+    PointerEventData dbl;
+    dbl.position = value_rt->rect().center();
+    fx.spin->on_pointer_double_click(dbl);
+
+    auto* caret_obj = value_obj->find_descendant("Caret");
+    ASSERT_TRUE(caret_obj != nullptr);
+    ASSERT_TRUE(caret_obj->get_component<Image>() != nullptr);
+    ASSERT_TRUE(caret_obj->active());
+
+    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Escape));
+    ASSERT_TRUE(!caret_obj->active());
+}
+
+void test_text_field_left_right_home_end_navigation() {
+    auto fx = make_text_field_fixture("Hello");
+    auto* value_rt = fx.field->label_text->owner->get_component<RectTransform>();
+    PointerEventData dbl;
+    dbl.position = value_rt->rect().center();
+    fx.field->on_pointer_double_click(dbl);  // cursor starts at the end (5)
+
+    // Move left twice to sit between the two 'l's ("Hel|lo"), then insert mid-buffer.
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Left));
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Left));
+    fx.field->on_char('!');
+    ASSERT_TRUE(fx.field->label_text->text == "Hel!lo");
+
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Backspace));  // removes the '!' just inserted
+    ASSERT_TRUE(fx.field->label_text->text == "Hello");
+
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Home));
+    fx.field->on_char('>');
+    ASSERT_TRUE(fx.field->label_text->text == ">Hello");
+
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::End));
+    fx.field->on_char('<');
+    ASSERT_TRUE(fx.field->label_text->text == ">Hello<");
+
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Escape));  // leave FocusContext clean
+}
+
+void test_text_field_shift_selection_delete_and_replace() {
+    auto fx = make_text_field_fixture("Hello World");
+    auto* value_rt = fx.field->label_text->owner->get_component<RectTransform>();
+    PointerEventData dbl;
+    dbl.position = value_rt->rect().center();
+    fx.field->on_pointer_double_click(dbl);  // cursor starts at the end (11)
+
+    // Shift+Left x5 selects "World" (the last 5 characters).
+    for (int i = 0; i < 5; ++i) fx.field->on_key(make_shift_key_(coopa::gfx::input::Key::Left));
+
+    // Typing over an active selection replaces it, like a normal text editor.
+    fx.field->on_char('!');
+    ASSERT_TRUE(fx.field->label_text->text == "Hello !");
+
+    // Select-all (Home, then Shift+End) and Delete clears the whole buffer at once.
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Home));
+    fx.field->on_key(make_shift_key_(coopa::gfx::input::Key::End));
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Delete));
+    ASSERT_TRUE(fx.field->label_text->text.empty());
+
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Escape));
+}
+
+void test_text_field_selection_highlight_shown_instead_of_caret() {
+    auto fx = make_text_field_fixture("Hello");
+    auto* value_obj = fx.field->label_text->owner;
+    auto* value_rt = value_obj->get_component<RectTransform>();
+    PointerEventData dbl;
+    dbl.position = value_rt->rect().center();
+    fx.field->on_pointer_double_click(dbl);
+
+    auto* caret_obj = value_obj->find_descendant("Caret");
+    auto* selection_obj = value_obj->find_descendant("Selection");
+    ASSERT_TRUE(caret_obj != nullptr && selection_obj != nullptr);
+    ASSERT_TRUE(caret_obj->active());        // no selection yet -- caret shown
+    ASSERT_TRUE(!selection_obj->active());
+
+    fx.field->on_key(make_shift_key_(coopa::gfx::input::Key::Left));
+    fx.field->on_key(make_shift_key_(coopa::gfx::input::Key::Left));
+    ASSERT_TRUE(!caret_obj->active());       // caret hidden while a selection is active
+    ASSERT_TRUE(selection_obj->active());
+
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Left));  // no Shift -- collapses the selection
+    ASSERT_TRUE(caret_obj->active());
+    ASSERT_TRUE(!selection_obj->active());
+
+    fx.field->on_key(make_key_(coopa::gfx::input::Key::Escape));
+}
+
+void test_spinbox_negative_sign_via_cursor_navigation() {
+    auto fx = make_spinbox_fixture(-1000.0, 1000.0, 5.0, 1.0);
+    auto* value_rt = fx.spin->label_text->owner->get_component<RectTransform>();
+    PointerEventData dbl;
+    dbl.position = value_rt->rect().center();
+    fx.spin->on_pointer_double_click(dbl);
+
+    fx.spin->on_char('4');
+    fx.spin->on_char('2');
+    ASSERT_TRUE(fx.spin->label_text->text == "42");
+
+    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Home));
+    fx.spin->on_char('-');  // now allowed: cursor is at position 0
+    ASSERT_TRUE(fx.spin->label_text->text == "-42");
+
+    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Right));
+    fx.spin->on_char('-');  // no longer at position 0 -- rejected
+    ASSERT_TRUE(fx.spin->label_text->text == "-42");
+
+    fx.spin->on_key(make_key_(coopa::gfx::input::Key::Enter));
+    ASSERT_NEAR(fx.spin->value(), -42.0, 1e-4);
 }
 
 void test_combobox_selection_and_signals() {
@@ -2977,6 +3461,13 @@ int main() {
     RUN_TEST(test_draw_list_batching);
     RUN_TEST(test_draw_list_z_order_sorts_batches);
     RUN_TEST(test_nine_slice_geometry);
+    RUN_TEST(test_nine_slice_flipped_uv_walks_inward);
+    RUN_TEST(test_sprite_sheet_desc_parsing);
+    RUN_TEST(test_pixel_rect_to_uv_y_flip);
+    RUN_TEST(test_build_sprite_table_null_texture);
+    RUN_TEST(test_default_icon_sheet_descriptor_is_valid);
+    RUN_TEST(test_icon_library_add_sheet_and_lookup);
+    RUN_TEST(test_builder_icons_degrade_without_icon_library);
     RUN_TEST(test_rect_transform_world_corners_identity);
     RUN_TEST(test_text_layout_wrap);
     RUN_TEST(test_raycaster_topmost_wins);
@@ -3012,6 +3503,14 @@ int main() {
     RUN_TEST(test_spinbox_on_char_decimal_and_negative_rules);
     RUN_TEST(test_spinbox_escape_reverts_without_committing);
     RUN_TEST(test_spinbox_backspace_and_focus_lost_commits);
+    RUN_TEST(test_text_field_click_to_edit_commits_and_reverts);
+    RUN_TEST(test_text_field_caret_created_and_toggled_by_edit_state);
+    RUN_TEST(test_text_field_caret_blinks_over_time);
+    RUN_TEST(test_spinbox_shares_caret_mechanism_with_text_field);
+    RUN_TEST(test_text_field_left_right_home_end_navigation);
+    RUN_TEST(test_text_field_shift_selection_delete_and_replace);
+    RUN_TEST(test_text_field_selection_highlight_shown_instead_of_caret);
+    RUN_TEST(test_spinbox_negative_sign_via_cursor_navigation);
     RUN_TEST(test_combobox_selection_and_signals);
     RUN_TEST(test_ui_builder_hierarchy_and_value_getters);
     RUN_TEST(test_drag_drop_and_inventory_grid);

@@ -38,6 +38,46 @@ struct DrawBatch {
 };
 
 /**
+ * @brief Computes the four position/UV breakpoints along one axis of a nine-slice.
+ *
+ * A free function (rather than a DrawList private method) so it's unit-testable with
+ * plain floats -- no Sprite, no Texture, no GPU -- see DrawList::add_nine_slice()'s only
+ * caller of this.
+ *
+ * Clamps the two inner breakpoints to the midpoint if the requested borders would
+ * overlap (destination smaller than the combined border), avoiding inverted/self-
+ * intersecting quads.
+ *
+ * `uv_border_lo`/`uv_border_hi` are always positive magnitudes (a fraction of texture
+ * size); this walks them toward the *interior* of [uv_lo, uv_hi] regardless of which end
+ * is numerically larger, via the sign of (uv_hi - uv_lo). That matters for any atlas
+ * sub-sprite (icons, glyphs) using the FontAtlas Y-flip convention, where
+ * uv.min.y > uv.max.y -- without the sign, `uv_lo + uv_border_lo` would walk outward
+ * instead of inward and invert the slice.
+ *
+ * @param lo,hi Destination rect extent along this axis, in canvas pixels.
+ * @param border_lo,border_hi Nine-slice border, in canvas pixels (same units as lo/hi).
+ * @param uv_lo,uv_hi Source UV extent along this axis; uv_hi may be less than uv_lo.
+ * @param uv_border_lo,uv_border_hi Nine-slice border in UV space (positive magnitudes).
+ * @param pos_out Four position breakpoints: {lo, inner_lo, inner_hi, hi}.
+ * @param uv_out Four UV breakpoints, signed to walk inward from uv_lo/uv_hi.
+ */
+inline void nine_slice_axis_breakpoints(float lo, float hi, float border_lo, float border_hi,
+                                        float uv_lo, float uv_hi, float uv_border_lo, float uv_border_hi,
+                                        std::array<float, 4>& pos_out, std::array<float, 4>& uv_out) {
+    float inner_lo = lo + border_lo;
+    float inner_hi = hi - border_hi;
+    if (inner_lo > inner_hi) {
+        float mid = (lo + hi) * 0.5f;
+        inner_lo = inner_hi = mid;
+    }
+    pos_out = { lo, inner_lo, inner_hi, hi };
+
+    float uv_dir = (uv_hi >= uv_lo) ? 1.0f : -1.0f;
+    uv_out = { uv_lo, uv_lo + uv_dir * uv_border_lo, uv_hi - uv_dir * uv_border_hi, uv_hi };
+}
+
+/**
  * @class DrawList
  * @brief Batches quads and nine-slices into a single indexed vertex/index stream.
  *
@@ -154,10 +194,10 @@ public:
         float border_u_t = tex_h > 0.0f ? sprite.border.w / tex_h : 0.0f;
 
         std::array<float, 4> px{}, uvx{}, py{}, uvy{};
-        nine_slice_axis_(pos.min.x, pos.max.x, sprite.border.x, sprite.border.z,
-                          sprite.uv.min.x, sprite.uv.max.x, border_u_l, border_u_r, px, uvx);
-        nine_slice_axis_(pos.min.y, pos.max.y, sprite.border.y, sprite.border.w,
-                          sprite.uv.min.y, sprite.uv.max.y, border_u_b, border_u_t, py, uvy);
+        nine_slice_axis_breakpoints(pos.min.x, pos.max.x, sprite.border.x, sprite.border.z,
+                                    sprite.uv.min.x, sprite.uv.max.x, border_u_l, border_u_r, px, uvx);
+        nine_slice_axis_breakpoints(pos.min.y, pos.max.y, sprite.border.y, sprite.border.w,
+                                    sprite.uv.min.y, sprite.uv.max.y, border_u_b, border_u_t, py, uvy);
 
         for (int row = 0; row < 3; ++row) {
             for (int col = 0; col < 3; ++col) {
@@ -173,26 +213,6 @@ public:
     const std::vector<DrawBatch>& batches()  const { return batches_; }
 
 private:
-    /**
-     * @brief Computes the four position/UV breakpoints along one axis of a nine-slice.
-     *
-     * Clamps the two inner breakpoints to the midpoint if the requested borders
-     * would overlap (destination smaller than the combined border), avoiding
-     * inverted/self-intersecting quads.
-     */
-    static void nine_slice_axis_(float lo, float hi, float border_lo, float border_hi,
-                                  float uv_lo, float uv_hi, float uv_border_lo, float uv_border_hi,
-                                  std::array<float, 4>& pos_out, std::array<float, 4>& uv_out) {
-        float inner_lo = lo + border_lo;
-        float inner_hi = hi - border_hi;
-        if (inner_lo > inner_hi) {
-            float mid = (lo + hi) * 0.5f;
-            inner_lo = inner_hi = mid;
-        }
-        pos_out = { lo, inner_lo, inner_hi, hi };
-        uv_out  = { uv_lo, uv_lo + uv_border_lo, uv_hi - uv_border_hi, uv_hi };
-    }
-
     void ensure_batch_() {
         const Rect& clip = clip_stack_.back();
         if (batches_.empty() ||

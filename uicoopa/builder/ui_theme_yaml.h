@@ -132,6 +132,19 @@ inline void parse_theme(const fkyaml::node& root, UITheme& out) {
         if (n.contains("tooltip_bg"))   s.tooltip_bg   = parse_theme_color(n.at("tooltip_bg"), s.tooltip_bg);
         if (n.contains("tooltip_text")) s.tooltip_text = parse_theme_color(n.at("tooltip_text"), s.tooltip_text);
     }
+    if (root.contains("icons")) {
+        const auto& n = root.at("icons");
+        auto& s = out.icons;
+        if (n.contains("size"))         s.size         = n.at("size").get_value<float>();
+        if (n.contains("combo_arrow"))  s.combo_arrow  = n.at("combo_arrow").get_value<std::string>();
+        if (n.contains("toggle_check")) s.toggle_check = n.at("toggle_check").get_value<std::string>();
+        if (n.contains("spin_inc"))     s.spin_inc     = n.at("spin_inc").get_value<std::string>();
+        if (n.contains("spin_dec"))     s.spin_dec     = n.at("spin_dec").get_value<std::string>();
+        if (n.contains("scroll_up"))    s.scroll_up    = n.at("scroll_up").get_value<std::string>();
+        if (n.contains("scroll_down"))  s.scroll_down  = n.at("scroll_down").get_value<std::string>();
+        if (n.contains("scroll_left"))  s.scroll_left  = n.at("scroll_left").get_value<std::string>();
+        if (n.contains("scroll_right")) s.scroll_right = n.at("scroll_right").get_value<std::string>();
+    }
     if (root.contains("metrics")) {
         const auto& n = root.at("metrics");
         auto& m = out.metrics;

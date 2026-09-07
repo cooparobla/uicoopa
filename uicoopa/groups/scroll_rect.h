@@ -17,15 +17,62 @@
 #include <uicoopa/input/event_system.h>
 #include <uicoopa/widgets/scrollbar.h>
 #include <uicoopa/widgets/image.h>
+#include <uicoopa/widgets/button.h>
+#include <uicoopa/render/icon_library.h>
 #include <coopa/scene/scene_object.h>
 #include <glm/glm.hpp>
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <string>
 
 namespace coopa {
 namespace ui {
+
+/**
+ * @brief Adds one chevron/arrow step Button as a child of `parent`, at `rect_params`.
+ *        No-op (adds nothing, returns false) if `icon_name` isn't published -- see
+ *        IconLibrary::icon(). Shared by ScrollRect's own auto-built scrollbar
+ *        (build_auto_scrollbar_() below) and UIBuilder::scroll_view()'s hand-rolled one
+ *        (builder/detail/containers.h's make_scroll_view()), so both scrollbar-building
+ *        code paths in uicoopa grow the same step buttons from one implementation.
+ * @param parent Node to add the button under.
+ * @param icon_name Icon to draw, centered with a 1px margin.
+ * @param rect_params Full placement of the button -- caller computes anchors/pivot/
+ *        size_delta/anchored_position for its own layout scheme.
+ * @param on_click Invoked on click.
+ * @return True if the icon resolved and the button was added.
+ */
+inline bool add_icon_step_button(coopa::scene::SceneObject& parent, const char* icon_name,
+                                 const RectParams& rect_params, std::function<void()> on_click) {
+    Sprite* icon_sprite = IconLibrary::instance().icon(icon_name);
+    if (!icon_sprite) return false;
+
+    auto btn_obj = std::make_unique<coopa::scene::SceneObject>("StepButton");
+    auto* btn_rt = btn_obj->add_component<RectTransform>();
+    btn_rt->params() = rect_params;
+
+    btn_obj->add_component<Image>()->color = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+    auto* btn = btn_obj->add_component<Button>();
+    btn->colors.normal      = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
+    btn->colors.highlighted = glm::vec4(1.0f, 1.0f, 1.0f, 0.15f);
+    btn->colors.pressed     = glm::vec4(1.0f, 1.0f, 1.0f, 0.30f);
+    btn->on_click.connect(std::move(on_click));
+
+    auto icon_obj = std::make_unique<coopa::scene::SceneObject>("Icon");
+    auto* icon_rt = icon_obj->add_component<RectTransform>();
+    icon_rt->anchor_preset(AnchorPreset::StretchAll);
+    icon_rt->set_size_delta({-2.0f, -2.0f});
+    icon_rt->hittable = false; // Decorative -- the Button itself owns the click.
+    auto* icon_img = icon_obj->add_component<Image>();
+    icon_img->sprite = icon_sprite;
+    icon_img->color = glm::vec4(1.0f, 1.0f, 1.0f, 0.7f);
+    btn_obj->add_child(std::move(icon_obj));
+
+    parent.add_child(std::move(btn_obj));
+    return true;
+}
 
 /**
  * @enum MovementType
@@ -246,19 +293,47 @@ private:
      * @brief Builds a Scrollbar as the LAST child of this viewport (owner), so it is
      *        emitted after (drawn on top of) content and — being inside the
      *        viewport's own rect — unaffected by a sibling Mask's clip.
+     *
+     * When IconLibrary has at least one icon published, also builds a step-back/
+     * step-forward Button at each end (chevron icons), inside a container that
+     * reserves scrollbar_thickness at each end and insets the actual Scrollbar
+     * track between them -- the Scrollbar component's own hit-test rect (its
+     * owner's RectTransform) is therefore still exactly the draggable area, with
+     * no change to Scrollbar itself. Without any icons published, this builds
+     * exactly what it always has: a bare track + handle, no step buttons.
      */
     Scrollbar* build_auto_scrollbar_(bool vertical_axis) {
         if (!owner) return nullptr;
 
-        auto sb_obj = std::make_unique<coopa::scene::SceneObject>(
+        bool with_arrows = IconLibrary::instance().has_icons();
+
+        auto container_obj = std::make_unique<coopa::scene::SceneObject>(
             vertical_axis ? "VerticalScrollbar" : "HorizontalScrollbar");
-        auto* sb_rt = sb_obj->add_component<RectTransform>();
+        auto* container_rt = container_obj->add_component<RectTransform>();
         if (vertical_axis) {
-            sb_rt->anchor_preset(AnchorPreset::StretchRight);
-            sb_rt->set_size_delta({scrollbar_thickness, 0.0f});
+            container_rt->anchor_preset(AnchorPreset::StretchRight);
+            container_rt->set_size_delta({scrollbar_thickness, 0.0f});
         } else {
-            sb_rt->anchor_preset(AnchorPreset::StretchBottom);
-            sb_rt->set_size_delta({0.0f, scrollbar_thickness});
+            container_rt->anchor_preset(AnchorPreset::StretchBottom);
+            container_rt->set_size_delta({0.0f, scrollbar_thickness});
+        }
+
+        auto sb_obj = std::make_unique<coopa::scene::SceneObject>("Track");
+        auto* sb_rt = sb_obj->add_component<RectTransform>();
+        sb_rt->anchor_preset(AnchorPreset::StretchAll);
+        // anchor_preset() only touches anchor_min/anchor_max/pivot -- size_delta keeps its
+        // RectParams default of {100, 100} (100px LARGER than the fully-stretched parent
+        // rect on each axis, see rect.h's resolve_rect()) until explicitly zeroed here.
+        sb_rt->set_size_delta({0.0f, 0.0f});
+        if (with_arrows) {
+            // Inset the track between the two step buttons this function adds below.
+            if (vertical_axis) {
+                sb_rt->set_offset_min({0.0f, scrollbar_thickness});
+                sb_rt->set_offset_max({0.0f, -scrollbar_thickness});
+            } else {
+                sb_rt->set_offset_min({scrollbar_thickness, 0.0f});
+                sb_rt->set_offset_max({-scrollbar_thickness, 0.0f});
+            }
         }
         sb_obj->add_component<Image>()->color = glm::vec4(0.0f, 0.0f, 0.0f, 0.15f);
 
@@ -279,7 +354,44 @@ private:
         sb->handle_colors.disabled    = glm::vec4(1.0f, 1.0f, 1.0f, 0.15f);
 
         sb_obj->add_child(std::move(handle_obj));
-        owner->add_child(std::move(sb_obj));
+        container_obj->add_child(std::move(sb_obj));
+
+        if (with_arrows) {
+            const char* back_icon    = vertical_axis ? "chevron_up"   : "chevron_left";
+            const char* forward_icon = vertical_axis ? "chevron_down" : "chevron_right";
+            static constexpr float kStepSize = 0.1f; // fraction of scrollable range per click
+
+            // Anchors collapse to a single edge (min == max) along the scrollbar's own axis,
+            // so anchor_rect has zero size there -- size_delta on that axis is then the
+            // button's whole size (see rect.h's resolve_rect()), extended away from the
+            // pivot edge: pivot at the far end from the container's own edge (0/1) pulls
+            // the resolved rect back onto the container instead of off of it.
+            RectParams back_params, forward_params;
+            if (vertical_axis) {
+                back_params.anchor_min = back_params.anchor_max = {0.0f, 1.0f};
+                back_params.pivot = {0.5f, 1.0f};
+                back_params.size_delta = {0.0f, scrollbar_thickness};
+                forward_params.anchor_min = forward_params.anchor_max = {0.0f, 0.0f};
+                forward_params.pivot = {0.5f, 0.0f};
+                forward_params.size_delta = {0.0f, scrollbar_thickness};
+                back_params.anchor_max.x = forward_params.anchor_max.x = 1.0f; // stretch full width
+            } else {
+                back_params.anchor_min = back_params.anchor_max = {0.0f, 0.0f};
+                back_params.pivot = {0.0f, 0.5f};
+                back_params.size_delta = {scrollbar_thickness, 0.0f};
+                forward_params.anchor_min = forward_params.anchor_max = {1.0f, 0.0f};
+                forward_params.pivot = {1.0f, 0.5f};
+                forward_params.size_delta = {scrollbar_thickness, 0.0f};
+                back_params.anchor_max.y = forward_params.anchor_max.y = 1.0f; // stretch full height
+            }
+
+            add_icon_step_button(*container_obj, back_icon, back_params,
+                                 [sb]() { sb->set_value(sb->value() - kStepSize); });
+            add_icon_step_button(*container_obj, forward_icon, forward_params,
+                                 [sb]() { sb->set_value(sb->value() + kStepSize); });
+        }
+
+        owner->add_child(std::move(container_obj));
         return sb;
     }
 
