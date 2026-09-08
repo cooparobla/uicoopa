@@ -23,6 +23,7 @@
 #include <uicoopa/render/sprite_sheet.h>
 #include <uicoopa/render/icon_library.h>
 #include <coopa/asset/asset_manager.h>
+#include <coopa/job/engine.h>
 #include <uicoopa/widgets/graphic.h>
 #include <uicoopa/widgets/image.h>
 
@@ -660,7 +661,10 @@ public:
 };
 
 void test_icon_library_add_sheet_and_lookup() {
-    coopa::asset::AssetManager assets;
+    // Shared engine, not the private fallback pool -- see the demos' own AssetManager
+    // construction sites (test_window.cpp/test_settings_builder.cpp) for the same pattern.
+    coopa::job::JobEngine jobs;
+    coopa::asset::AssetManager assets(&jobs);
     assets.add_search_root(std::string(ROOT_DIR) + "/assets");
     assets.register_loader<SpriteSheet>(std::make_unique<HeadlessSpriteSheetLoader>());
 

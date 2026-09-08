@@ -66,6 +66,7 @@
 #include <uicoopa/render/icon_library.h>
 
 #include <coopa/asset/asset_manager.h>
+#include <coopa/job/engine.h>
 #include <coopa/scene/scene_object.h>
 #include <coopa/scene/scene_manager.h>
 
@@ -200,7 +201,13 @@ coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env
     // the end of main() before this goes out of scope. Loaded before load_scene()
     // so a scene.yaml `sprite: <icon_name>` reference resolves on first parse (see
     // ui_yaml.h's UIResourceCache::sprite_for()).
-    coopa::asset::AssetManager assets;
+    // Shared with AssetManager below so icon/sprite decode runs on a JobEngine the app
+    // actually owns, instead of AssetManager spinning up its own private 2-thread fallback
+    // pool (see AssetManager's ctor doc) -- this demo's handful of sheets is nowhere near
+    // AnimationSystem::parallel_threshold_'s house value of 256, so nothing here dispatches
+    // per-frame work to it; it exists purely so decode() jobs have somewhere to run.
+    coopa::job::JobEngine jobs;
+    coopa::asset::AssetManager assets(&jobs);
     assets.add_search_root(std::string(ROOT_DIR) + "/assets");
     IconLibrary::instance().configure(assets, ctx.device(), ctx.allocator(), ctx.command_pool());
     IconLibrary::instance().add_sheet(assets, "icons/icons.yaml");

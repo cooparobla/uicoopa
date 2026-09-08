@@ -66,6 +66,7 @@
 #endif
 
 #include <coopa/asset/asset_manager.h>
+#include <coopa/job/engine.h>
 #include <coopa/scene/scene_object.h>
 #include <coopa/scene/scene.h>
 #include <coopa/animation/animator.h>
@@ -566,7 +567,14 @@ int main() {
     // Declared after ctx so it (and every AssetHandle/Texture it owns) is destroyed
     // before ctx's Device/Allocator -- see IconLibrary::clear()'s doc for the
     // explicit teardown call this pairs with, near the end of main().
-    coopa::asset::AssetManager assets;
+    //
+    // jobs is shared with AssetManager below so icon/sprite decode runs on a JobEngine
+    // the app actually owns instead of AssetManager's private 2-thread fallback pool (see
+    // AssetManager's ctor doc) -- separate from the "no set_job_engine() call" decision
+    // further down for this demo's AnimationSystem, which is about per-frame animator
+    // dispatch, not asset decode.
+    coopa::job::JobEngine jobs;
+    coopa::asset::AssetManager assets(&jobs);
     assets.add_search_root(std::string(ROOT_DIR) + "/assets");
     IconLibrary::instance().configure(assets, ctx.device(), ctx.allocator(), ctx.command_pool());
     IconLibrary::instance().add_sheet(assets, "icons/icons.yaml");
