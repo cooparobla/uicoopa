@@ -560,7 +560,8 @@ int main() {
 
     std::string shader_dir = std::string(ROOT_DIR) + "/assets/shaders";
     UiPass ui_pass(ctx.device(), ctx.allocator(), ctx.command_pool(), ctx.render_pass(),
-                  shader_dir + "/ui.vert.spv", shader_dir + "/ui.frag.spv");
+                  shader_dir + "/ui.vert.spv", shader_dir + "/ui_quad.frag.spv",
+                  shader_dir + "/ui_text.frag.spv");
 
     // Declared after ctx so it (and every AssetHandle/Texture it owns) is destroyed
     // before ctx's Device/Allocator -- see IconLibrary::clear()'s doc for the

@@ -10,7 +10,7 @@ ICON_LAYOUT, write a coverage function for it, add it to ICON_FUNCS, re-run.
 Each icon is a boolean coverage function evaluated at cell-local pixel
 coordinates (0..CELL, +Y down, matching image space) and rendered white-RGB /
 coverage-alpha with 4x4 supersampling, so uicoopa's Graphic::color can tint
-any icon freely at draw time -- see uicoopa/assets/shaders/ui.frag's
+any icon freely at draw time -- see uicoopa/assets/shaders/ui_quad.frag's
 `texture(tex, uv) * v_color` path. Icons are drawn well inside their cell
 (a several-pixel margin on every side), leaving a transparent gutter -- this
 is what keeps UiPass's clamp-to-edge-sampled bilinear filtering from ever

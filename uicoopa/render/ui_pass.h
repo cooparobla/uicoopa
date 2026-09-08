@@ -2,6 +2,14 @@
  * @file ui_pass.h
  * @brief Composites a DrawList on top of the existing swapchain render pass.
  *
+ * Thin wrapper around gfxcoopa's TexturedQuad2DPass (engine/passes/textured_quad_2d_pass.h)
+ * -- the descriptor layout/pool, TextureView->DescriptorSet cache, streaming vertex/index
+ * buffers, and pipeline-variant machinery are all shared with pixengine's SpritePass now;
+ * this file only owns what's genuinely UI-specific: per-batch clip-rect scissoring, the
+ * canvas-space push constant, and dispatching "is this batch a text atlas?" to the "text"
+ * pipeline variant (see ui_quad.frag/ui_text.frag) instead of the runtime branch this used
+ * to be.
+ *
  * Modeled directly on gfxcoopa/engine/passes/present_pass.h. gfxcoopa's
  * RenderPass always clears its color attachment on load,
  * so a second render pass over the swapchain image would erase the 3D scene —
@@ -19,49 +27,42 @@
 
 #include <memory>
 #include <string>
-#include <vector>
-#include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
 #include <cmath>
-#include <stdexcept>
 
 #include <gfxcoopa/core/device.h>
 #include <gfxcoopa/memory/allocator.h>
-#include <gfxcoopa/memory/buffer.h>
-#include <gfxcoopa/pipeline/pipeline.h>
 #include <gfxcoopa/pipeline/render_pass.h>
-#include <gfxcoopa/pipeline/descriptor.h>
-#include <gfxcoopa/pipeline/shader.h>
 #include <gfxcoopa/command/command_pool.h>
 #include <gfxcoopa/command/command_buffer.h>
-#include <gfxcoopa/engine/util/sampler.h>
-#include <gfxcoopa/presentation/renderer.h>
+#include <gfxcoopa/engine/passes/textured_quad_2d_pass.h>
 #include <gfxcoopa/types/enums.h>
 #include <gfxcoopa/types/sampler_desc.h>
 #include <gfxcoopa/types/texture_view.h>
 
 #include <uicoopa/render/ui_vertex.h>
 #include <uicoopa/render/draw_list.h>
-#include <uicoopa/render/texture_factory.h>
 
 namespace coopa {
 namespace ui {
 
 /**
  * @struct UiPushConstants
- * @brief Matches the `Push` block declared in ui.vert/ui.frag exactly.
+ * @brief Matches the `Push` block declared in ui.vert exactly -- see
+ *        gfx/surface2d/quad_vs.glsl's doc for the scale/offset convention. Shrunk from its
+ *        old {inv_canvas_size, is_text, _pad} shape now that is_text selects a pipeline
+ *        variant instead of riding along in the push block (see ui_quad.frag/ui_text.frag).
  */
 struct UiPushConstants {
-    float inv_canvas_size[2];
-    float is_text;
-    float _pad;
+    float scale[2];
+    float offset[2];
 };
 
 /**
  * @class UiPass
- * @brief Owns the UI graphics pipeline, per-frame streaming geometry buffers,
- *        and the TextureView -> descriptor-set cache for every texture drawn.
+ * @brief Owns the UI graphics pipeline (via TexturedQuad2DPass), per-frame streaming
+ *        geometry buffers, and per-batch clip-rect scissoring.
  *
  * Usage, mirroring blendy's PbrRenderPipeline::render():
  * @code
@@ -74,17 +75,15 @@ struct UiPushConstants {
  */
 class UiPass {
 public:
-    static constexpr uint32_t kFrames          = coopa::gfx::presentation::MAX_FRAMES_IN_FLIGHT;
-    static constexpr uint32_t kInitialMaxVerts = 8192;
-    static constexpr uint32_t kInitialMaxIndices = 12288;
-
     /**
      * @param device          Logical device.
      * @param allocator       VMA allocator.
      * @param cmd_pool        Command pool for the default white texture's one-shot upload.
      * @param swapchain_pass  The SAME render pass Renderer draws the 3D scene into.
-     * @param vert_spv        Path to ui.vert.spv.
-     * @param frag_spv        Path to ui.frag.spv.
+     * @param vert_spv        Path to ui.vert.spv -- shared by both pipeline variants below.
+     * @param quad_frag_spv   Path to ui_quad.frag.spv -- the stock RGBA-sampling variant.
+     * @param text_frag_spv   Path to ui_text.frag.spv -- the R8-coverage variant, bound for
+     *                        batches whose texture was mark_as_text_atlas()'d.
      * @param max_textures    Upper bound on distinct textures drawn in a single frame
      *                        (sprites + font atlases); sizes the descriptor pool.
      */
@@ -93,63 +92,38 @@ public:
            coopa::gfx::command::CommandPool& cmd_pool,
            coopa::gfx::pipeline::RenderPass& swapchain_pass,
            const std::string& vert_spv,
-           const std::string& frag_spv,
+           const std::string& quad_frag_spv,
+           const std::string& text_frag_spv,
            uint32_t max_textures = 256)
-        : device_(device), allocator_(&allocator)
     {
         using namespace coopa::gfx;
+        using namespace coopa::gfx::engine::passes;
 
-        vert_shader_ = std::make_unique<pipeline::Shader>(device, vert_spv, ShaderStage::Vertex);
-        frag_shader_ = std::make_unique<pipeline::Shader>(device, frag_spv, ShaderStage::Fragment);
+        TexturedQuad2DDesc desc;
+        desc.vertex             = UiVertex::layout();
+        desc.vertex_stride      = sizeof(UiVertex);
+        desc.blend_mode         = pipeline::BlendMode::Alpha;
+        desc.push_constant_size = sizeof(UiPushConstants);
+        // Bilinear + clamp-to-edge, not linear_repeat(): this sampler is shared by every
+        // texture UiPass binds (see TexturedQuad2DPass::register_view()), including
+        // sprite-sheet sub-rects whose UVs never reach 0/1 -- REPEAT risks sampling a
+        // neighboring packed icon/glyph at the seam under bilinear filtering, while
+        // CLAMP_TO_EDGE is a no-op for the full-[0,1] quads (white texture, unsliced
+        // whole-texture sprites) every other caller relies on.
+        desc.sampler_desc = coopa::gfx::SamplerDesc::linear_repeat();
+        desc.sampler_desc.address = coopa::gfx::AddressMode::ClampToEdge;
+        desc.fallback_pixel = {255, 255, 255, 255}; // white -- an untextured Graphic reads as "no image"
+        desc.initial_max_verts   = kInitialMaxVerts;
+        desc.initial_max_indices = kInitialMaxIndices;
+        desc.max_textures        = max_textures;
 
-        desc_layout_ = std::make_unique<pipeline::DescriptorSetLayout>(
-            pipeline::DescriptorLayoutBuilder()
-                .combined_sampler(0, ShaderStage::Fragment)
-                .build(device));
-
-        desc_pool_ = std::make_unique<pipeline::DescriptorPool>(
-            pipeline::DescriptorPoolBuilder().add_sets(*desc_layout_, max_textures).build(device));
-
-        pipeline::PipelineDesc desc;
-        desc.shaders = { vert_shader_.get(), frag_shader_.get() };
-        desc.vertex  = UiVertex::layout();
-        desc.descriptor_layouts = { desc_layout_.get() };
-        desc.push_constants = { { ShaderStage::Vertex | ShaderStage::Fragment, 0, sizeof(UiPushConstants) } };
-        desc.raster.cull = CullMode::None;
-        desc.depth.test  = false;
-        desc.depth.write = false;
-        desc.blend.mode  = pipeline::BlendMode::Alpha;
-
-        pipeline_ = std::make_unique<pipeline::Pipeline>(device, swapchain_pass, desc);
-
-        // Bilinear + clamp-to-edge, not Sampler::linear()'s repeat: this sampler is shared
-        // by every texture UiPass binds (see register_view_()), including sprite-sheet
-        // sub-rects whose UVs never reach 0/1 -- REPEAT risks sampling a neighboring
-        // packed icon/glyph at the seam under bilinear filtering, while CLAMP_TO_EDGE is
-        // a no-op for the full-[0,1] quads (white texture, unsliced whole-texture sprites)
-        // every other caller relies on.
-        coopa::gfx::SamplerDesc default_sampler_desc = coopa::gfx::SamplerDesc::linear_repeat();
-        default_sampler_desc.address = coopa::gfx::AddressMode::ClampToEdge;
-        default_sampler_ = std::make_unique<coopa::gfx::engine::util::Sampler>(device, default_sampler_desc);
-
-        white_texture_ = make_white_texture(device, allocator, cmd_pool);
-
-        for (uint32_t i = 0; i < kFrames; ++i) {
-            vbo_[i] = std::make_unique<coopa::gfx::memory::Buffer>(
-                coopa::gfx::memory::Buffer::vertex(device, allocator, kInitialMaxVerts * sizeof(UiVertex)));
-            ibo_[i] = std::make_unique<coopa::gfx::memory::Buffer>(
-                coopa::gfx::memory::Buffer::index(device, allocator, kInitialMaxIndices * sizeof(uint32_t)));
-            vbo_capacity_[i] = kInitialMaxVerts;
-            ibo_capacity_[i] = kInitialMaxIndices;
-        }
-
-        // Register the default white texture up front; it is always present in draw_list's
-        // batches for any untextured quad (see DrawList::set_default_texture).
-        register_view_(white_texture_->view_typed());
+        pass_ = std::make_unique<TexturedQuad2DPass>(
+            device, allocator, cmd_pool, swapchain_pass, vert_spv, quad_frag_spv, desc);
+        pass_->add_variant("text", vert_spv, text_frag_spv);
     }
 
-    /** @brief Returns the default white texture, for callers that need to seed DrawList::set_default_texture(). */
-    coopa::gfx::TextureView white_view() const { return white_texture_->view_typed(); }
+    /** @brief Returns the default white texture's view, for callers that need to seed DrawList::set_default_texture(). */
+    coopa::gfx::TextureView white_view() const { return pass_->fallback_view(); }
 
     /**
      * @brief Resolves every texture referenced by draw_list's batches into a descriptor set.
@@ -160,7 +134,7 @@ public:
      */
     void register_textures(const DrawList& draw_list) {
         for (const DrawBatch& batch : draw_list.batches()) {
-            register_view_(batch.texture_view);
+            pass_->register_view(batch.texture_view);
         }
     }
 
@@ -185,36 +159,42 @@ public:
               const DrawList& draw_list) {
         if (draw_list.indices().empty()) return;
 
-        ensure_capacity_(frame_index, draw_list);
+        pass_->ensure_capacity(frame_index, draw_list.vertices().size(), draw_list.indices().size());
+        pass_->vertex_buffer(frame_index).upload(draw_list.vertices().data(), draw_list.vertices().size() * sizeof(UiVertex));
+        pass_->index_buffer(frame_index).upload(draw_list.indices().data(), draw_list.indices().size() * sizeof(uint32_t));
 
-        vbo_[frame_index]->upload(draw_list.vertices().data(), draw_list.vertices().size() * sizeof(UiVertex));
-        ibo_[frame_index]->upload(draw_list.indices().data(), draw_list.indices().size() * sizeof(uint32_t));
-
-        cmd.bind_pipeline(*pipeline_);
+        pass_->bind(cmd); // stock ("quad") -- rebound to "text" per batch below as needed
         cmd.set_viewport(0.0f, 0.0f, static_cast<float>(screen_w), static_cast<float>(screen_h));
-        cmd.bind_vertex_buffer(*vbo_[frame_index]);
-        cmd.bind_index_buffer(*ibo_[frame_index]);
+        cmd.bind_vertex_buffer(pass_->vertex_buffer(frame_index));
+        cmd.bind_index_buffer(pass_->index_buffer(frame_index));
 
         float canvas_w = scale_factor > 0.0f ? static_cast<float>(screen_w) / scale_factor : static_cast<float>(screen_w);
         float canvas_h = scale_factor > 0.0f ? static_cast<float>(screen_h) / scale_factor : static_cast<float>(screen_h);
 
+        UiPushConstants push{};
+        push.scale[0]  = canvas_w > 0.0f ? (1.0f / canvas_w) * 2.0f : 0.0f;
+        push.scale[1]  = canvas_h > 0.0f ? (1.0f / canvas_h) * 2.0f : 0.0f;
+        push.offset[0] = -1.0f;
+        push.offset[1] = -1.0f;
+        // Scale/offset are per-FRAME (canvas size), not per-batch -- pushed once, unlike the
+        // old is_text-carrying block which had to be re-pushed every batch. The pipeline
+        // bind below is what varies per batch now.
+        cmd.push_constants(coopa::gfx::ShaderStage::Vertex | coopa::gfx::ShaderStage::Fragment, push);
+
+        bool last_is_text = false;
+        bool have_bound = true; // "quad" bound just above
+
         for (const DrawBatch& batch : draw_list.batches()) {
             if (batch.index_count == 0) continue;
 
-            auto it = descriptor_cache_.find(batch.texture_view);
-            if (it == descriptor_cache_.end()) {
-                // Not registered before begin_frame(); draw with the white texture rather
-                // than crash — a missing register_textures() call is a caller bug, not
-                // something that should corrupt the frame.
-                it = descriptor_cache_.find(white_texture_->view_typed());
+            bool is_text = is_text_view_(batch.texture_view);
+            if (!have_bound || is_text != last_is_text) {
+                pass_->bind(cmd, is_text ? "text" : "");
+                last_is_text = is_text;
+                have_bound = true;
             }
-            cmd.bind_descriptor_set(*it->second);
 
-            UiPushConstants push{};
-            push.inv_canvas_size[0] = canvas_w > 0.0f ? 1.0f / canvas_w : 0.0f;
-            push.inv_canvas_size[1] = canvas_h > 0.0f ? 1.0f / canvas_h : 0.0f;
-            push.is_text = (batch.texture_view != white_texture_->view_typed() && is_text_view_(batch.texture_view)) ? 1.0f : 0.0f;
-            cmd.push_constants(coopa::gfx::ShaderStage::Vertex | coopa::gfx::ShaderStage::Fragment, push);
+            cmd.bind_descriptor_set(pass_->descriptor_set_for(batch.texture_view));
 
             ScreenScissor scissor = to_screen_scissor_(batch.clip, screen_w, screen_h, scale_factor);
             cmd.set_scissor(scissor.x, scissor.y, scissor.w, scissor.h);
@@ -224,8 +204,9 @@ public:
     }
 
     /**
-     * @brief Marks a texture view as an R8 coverage atlas (glyph atlas), so draw() samples
-     *        it as alpha coverage rather than a full RGBA color.
+     * @brief Marks a texture view as an R8 coverage atlas (glyph atlas), so draw() binds
+     *        the "text" pipeline variant for batches using it rather than sampling it as a
+     *        full RGBA color.
      *
      * Called by FontAtlas when it registers its texture; unmarked views are treated as
      * ordinary RGBA sprites.
@@ -233,42 +214,11 @@ public:
     void mark_as_text_atlas(coopa::gfx::TextureView view) { text_views_.insert(view); }
 
 private:
-    void register_view_(coopa::gfx::TextureView view) {
-        if (descriptor_cache_.count(view)) return;
-        auto set = std::make_unique<coopa::gfx::pipeline::DescriptorSet>(device_, *desc_pool_, *desc_layout_);
-        set->bind_image(0, view, *default_sampler_);
-        descriptor_cache_[view] = std::move(set);
-    }
+    static constexpr uint32_t kInitialMaxVerts   = 8192;
+    static constexpr uint32_t kInitialMaxIndices = 12288;
 
-    bool is_text_view_(coopa::gfx::TextureView view) const { return text_views_.count(view) != 0; }
-
-    void ensure_capacity_(uint32_t frame_index, const DrawList& draw_list) {
-        // Buffers are host-visible/persistently-mapped (Buffer::vertex/index); growing means
-        // replacing the unique_ptr, which is safe here because draw() always re-uploads the
-        // full vertex/index stream every frame (no partial updates to preserve).
-        size_t needed_verts = draw_list.vertices().size();
-        size_t needed_indices = draw_list.indices().size();
-        if (needed_verts > vbo_capacity_[frame_index]) {
-            size_t new_capacity = std::max(needed_verts, static_cast<size_t>(vbo_capacity_[frame_index]) * 2);
-            vbo_[frame_index].reset();  // must be destroyed before the allocator creates the replacement
-            vbo_[frame_index] = std::make_unique<coopa::gfx::memory::Buffer>(
-                coopa::gfx::memory::Buffer::vertex(device_, allocator_ref_(), new_capacity * sizeof(UiVertex)));
-            vbo_capacity_[frame_index] = static_cast<uint32_t>(new_capacity);
-        }
-        if (needed_indices > ibo_capacity_[frame_index]) {
-            size_t new_capacity = std::max(needed_indices, static_cast<size_t>(ibo_capacity_[frame_index]) * 2);
-            ibo_[frame_index].reset();
-            ibo_[frame_index] = std::make_unique<coopa::gfx::memory::Buffer>(
-                coopa::gfx::memory::Buffer::index(device_, allocator_ref_(), new_capacity * sizeof(uint32_t)));
-            ibo_capacity_[frame_index] = static_cast<uint32_t>(new_capacity);
-        }
-    }
-
-    coopa::gfx::memory::Allocator& allocator_ref_() {
-        if (!allocator_) {
-            throw std::runtime_error("[uicoopa] UiPass geometry buffer grew before an Allocator was captured.");
-        }
-        return *allocator_;
+    bool is_text_view_(coopa::gfx::TextureView view) const {
+        return view != pass_->fallback_view() && text_views_.count(view) != 0;
     }
 
     /** @brief A clamped, screen-pixel scissor rect. */
@@ -293,24 +243,8 @@ private:
         };
     }
 
-    coopa::gfx::core::Device& device_;
-    coopa::gfx::memory::Allocator* allocator_ = nullptr;
-
-    std::unique_ptr<coopa::gfx::pipeline::Shader>              vert_shader_;
-    std::unique_ptr<coopa::gfx::pipeline::Shader>              frag_shader_;
-    std::unique_ptr<coopa::gfx::pipeline::DescriptorSetLayout> desc_layout_;
-    std::unique_ptr<coopa::gfx::pipeline::DescriptorPool>      desc_pool_;
-    std::unique_ptr<coopa::gfx::pipeline::Pipeline>            pipeline_;
-    std::unique_ptr<coopa::gfx::engine::util::Sampler>         default_sampler_;
-    std::unique_ptr<coopa::gfx::engine::data::Texture>         white_texture_;
-
-    std::unordered_map<coopa::gfx::TextureView, std::unique_ptr<coopa::gfx::pipeline::DescriptorSet>> descriptor_cache_;
+    std::unique_ptr<coopa::gfx::engine::passes::TexturedQuad2DPass> pass_;
     std::unordered_set<coopa::gfx::TextureView> text_views_;
-
-    std::unique_ptr<coopa::gfx::memory::Buffer> vbo_[kFrames];
-    std::unique_ptr<coopa::gfx::memory::Buffer> ibo_[kFrames];
-    uint32_t vbo_capacity_[kFrames] = {};
-    uint32_t ibo_capacity_[kFrames] = {};
 };
 
 }  // namespace ui

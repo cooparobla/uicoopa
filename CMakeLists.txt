@@ -50,21 +50,35 @@ include_directories(${CMAKE_BINARY_DIR}/configuration)
 # to uicoopa) ---
 add_definitions(-DSTB_TRUETYPE_IMPLEMENTATION)
 
+# --- Shader compilation ---
+# Previously relied entirely on cbuild --vulkan (checked-in .spv, plain `glslc <file> -o
+# <file>.spv`, no -I). That stops working the moment a uicoopa shader #includes
+# <gfx/surface2d/...> from gfxcoopa's shared 2D quad backbone -- gfx_add_shader_target()
+# (owned by gfxcoopa, see its own file doc) always adds gfxcoopa's assets/shaders/ to the
+# -I search path and tracks .glsl body dependencies via glslc -MD depfiles, which cbuild's
+# plain invocation does neither of. .glslc_flags (already present, for cbuild) keeps that
+# path working too.
+include(${GFXCOOPA_DIR}/cmake/GfxShaders.cmake)
+gfx_add_shader_target(uicoopa_shaders SHADER_DIR "${CMAKE_SOURCE_DIR}/assets/shaders")
+
 # --- Add executables ---
 # `uicoopa` is the headless suite ctest runs below — test.cpp, not test_window.cpp,
 # so `ctest`/CI never needs a display.
 add_executable(uicoopa test.cpp)
 target_link_libraries(uicoopa PRIVATE coopa::gfx ${UICOOPA_AUDIO_LIBS})
+add_dependencies(uicoopa uicoopa_shaders)
 
 # Windowed interactive demo (RectTransform anchors, layout groups, Button) — separate
 # from the headless `uicoopa` test target so `ctest`/CI never needs a display.
 add_executable(uicoopa_test_window test_window.cpp)
 target_link_libraries(uicoopa_test_window PRIVATE coopa::gfx)
+add_dependencies(uicoopa_test_window uicoopa_shaders)
 
 # Windowed demo: the settings_demo-shaped UI built entirely through UIBuilder
 # (no scene YAML except the theme file) -- see test_settings_builder.cpp.
 add_executable(uicoopa_settings_builder test_settings_builder.cpp)
 target_link_libraries(uicoopa_settings_builder PRIVATE coopa::gfx ${UICOOPA_AUDIO_LIBS})
+add_dependencies(uicoopa_settings_builder uicoopa_shaders)
 
 enable_testing()
 add_test(NAME uicoopa_tests COMMAND uicoopa)
