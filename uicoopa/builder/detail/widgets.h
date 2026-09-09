@@ -7,6 +7,7 @@
 #define UICOOPA_BUILDER_DETAIL_WIDGETS_H
 
 #include <uicoopa/builder/detail/build_context.h>
+#include <uicoopa/builder/detail/text_style.h>
 #include <uicoopa/text/font_defaults.h>
 #include <uicoopa/layout/rect_transform.h>
 #include <uicoopa/layout/layout_element.h>
@@ -21,6 +22,7 @@
 #include <uicoopa/widgets/text_field.h>
 #include <uicoopa/widgets/combobox.h>
 #include <uicoopa/widgets/mask.h>
+#include <uicoopa/builder/detail/selectables.h>
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -70,13 +72,22 @@ inline Text* make_label(BuildContext ctx, const std::string& text, float font_si
                         glm::vec4 color, const std::string& node_name) {
     const UITheme& theme = *ctx.theme;
     auto child = std::make_unique<SceneObject>(node_name);
-    child->add_component<RectTransform>()->anchor_preset(AnchorPreset::StretchAll);
+    auto* rt = child->add_component<RectTransform>();
+    rt->anchor_preset(AnchorPreset::StretchAll);
+    // StretchAll's anchors alone don't zero size_delta (RectParams defaults it to
+    // 100x100 -- see rect.h), so without this a label placed directly under a
+    // non-LayoutGroup parent (e.g. a UIBuilder::split_rows() section with
+    // SectionFlow::None) renders 50px past that parent's edges on every side.
+    // Every existing caller happens to sit inside a LayoutGroup, which overwrites
+    // the child rect anyway and masks this -- see make_vertical_layout()'s
+    // identical comment for the general form of this gotcha.
+    rt->set_size_delta({0.0f, 0.0f});
 
-    float size = (font_size > 0.0f) ? font_size : theme.text.size_label;
+    float size = (font_size > 0.0f) ? font_size : font_role_size(theme, FontRole::Label);
     glm::vec4 col = (color.a >= 0.0f) ? color : theme.text.primary;
 
     auto* txt = child->add_component<Text>();
-    apply_font(txt, size, theme.font);
+    apply_role_font(txt, theme, FontRole::Label, font_size);
     txt->text = text;
     txt->color = col;
     txt->horizontal_align = HorizontalAlign::Left;
@@ -100,7 +111,7 @@ inline Text* make_paragraph(BuildContext ctx, const std::string& name, const std
     if (size_delta.x > 0.0f) rt->set_size_delta(size_delta);
 
     auto* txt = child->add_component<Text>();
-    apply_font(txt, font_size > 0.0f ? font_size : theme.text.size_small, theme.font);
+    apply_role_font(txt, theme, FontRole::Body, font_size);
     txt->text = text;
     txt->color = (color.a >= 0.0f) ? color : theme.text.secondary;
     txt->horizontal_align = HorizontalAlign::Left;
@@ -122,8 +133,7 @@ inline Button* make_button(BuildContext ctx, const std::string& label, ButtonRol
     // rendered Text itself lays out with, so this can never disagree with what's drawn.
     // Falls back to just the minimum width when no font is loaded yet (e.g. headless
     // tests, which never assert on button width).
-    Font* label_font = theme.font ? theme.font : FontDefaults::font;
-    float text_w = label_font ? label_font->measure(label, static_cast<uint32_t>(theme.text.size_label)).x : 0.0f;
+    float text_w = measure_role_text(theme, FontRole::Label, label).x;
     float width = std::max(theme.metrics.button_min_width, text_w + 2.0f * theme.metrics.button_padding_x);
 
     auto child = std::make_unique<SceneObject>("Button_" + label);
@@ -144,7 +154,7 @@ inline Button* make_button(BuildContext ctx, const std::string& label, ButtonRol
     txt_child_rt->set_size_delta({width, theme.metrics.row_height});
     txt_child_rt->hittable = false;  // Purely decorative -- must not shadow the Button beneath it.
     auto* txt = txt_child->add_component<Text>();
-    apply_font(txt, theme.text.size_label, theme.font);
+    apply_role_font(txt, theme, FontRole::Label);
     txt->text = label;
     txt->color = theme.text.primary;
     txt->horizontal_align = HorizontalAlign::Center;
@@ -152,6 +162,8 @@ inline Button* make_button(BuildContext ctx, const std::string& label, ButtonRol
     child->add_child(std::move(txt_child));
 
     if (on_click) btn->on_click.connect(std::move(on_click));
+
+    if (ctx.builds_gamepad()) attach_selectable(child.get(), btn);
 
     auto* raw = btn;
     ctx.parent->add_child(std::move(child));
@@ -210,6 +222,8 @@ inline Slider* make_slider(BuildContext ctx, const std::string& name,
     slider->set_value(initial_val, false);
     if (on_change) slider->on_value_changed.connect(std::move(on_change));
 
+    if (ctx.builds_gamepad()) attach_selectable(slider_obj.get(), slider);
+
     auto* raw = slider;
     ctx.parent->add_child(std::move(slider_obj));
     return raw;
@@ -254,13 +268,15 @@ inline Toggle* make_toggle(BuildContext ctx, const std::string& name, bool initi
         lbl_rt->set_anchored_position({theme.toggle.size + 8.0f, 0.0f});
         lbl_rt->hittable = false;
         auto* txt = lbl_obj->add_component<Text>();
-        apply_font(txt, theme.text.size_label, theme.font);
+        apply_role_font(txt, theme, FontRole::Label);
         txt->text = label;
         txt->color = theme.text.primary;
         toggle_obj->add_child(std::move(lbl_obj));
     }
 
     if (on_change) toggle->on_value_changed.connect(std::move(on_change));
+
+    if (ctx.builds_gamepad()) attach_selectable(toggle_obj.get(), toggle);
 
     auto* raw = toggle;
     ctx.parent->add_child(std::move(toggle_obj));
@@ -288,7 +304,7 @@ inline SceneObject* make_spinbox_step_button_(BuildContext ctx, const std::strin
         txt_rt->anchor_preset(AnchorPreset::MiddleCenter);
         txt_rt->hittable = false;  // Decorative -- the button itself owns the click.
         auto* txt = txt_obj->add_component<Text>();
-        apply_font(txt, theme.text.size_label, theme.font);
+        apply_role_font(txt, theme, FontRole::Label);
         txt->text = glyph;
         txt->color = theme.text.primary;
         txt->horizontal_align = HorizontalAlign::Center;
@@ -326,7 +342,7 @@ inline SpinBox* make_spinbox(BuildContext ctx, const std::string& name,
     val_le->preferred_size = {50.0f, theme.spinbox.height};
     val_obj->add_component<Image>()->color = theme.spinbox.bg;
     auto* readout = val_obj->add_component<Text>();
-    apply_font(readout, theme.text.size_label, theme.font);
+    apply_role_font(readout, theme, FontRole::Numeric);
     readout->color = theme.text.primary;
     readout->horizontal_align = HorizontalAlign::Center;
     readout->vertical_align = VerticalAlign::Middle;
@@ -339,9 +355,12 @@ inline SpinBox* make_spinbox(BuildContext ctx, const std::string& name,
     spin->dec_button = dec_btn;
     spin->inc_button = inc_btn;
     spin->label_text = readout;
+    spin->selection_color = theme.text.selection;
 
     spin->start();
     if (on_change) spin->on_value_changed.connect(std::move(on_change));
+
+    if (ctx.builds_gamepad()) attach_selectable(spin_obj.get(), spin);
 
     auto* raw = spin;
     ctx.parent->add_child(std::move(spin_obj));
@@ -378,7 +397,7 @@ inline TextField* make_text_field(BuildContext ctx, const std::string& name,
     text_rt->set_offset_max({-8.0f, 0.0f});
     text_rt->hittable = false;  // Decorative -- ValueText (the field's own rect) owns the click.
     auto* readout = text_obj->add_component<Text>();
-    apply_font(readout, theme.text.size_label, theme.font);
+    apply_role_font(readout, theme, FontRole::Label);
     readout->text = initial_value;
     readout->color = theme.text.primary;
     readout->horizontal_align = HorizontalAlign::Left;
@@ -389,9 +408,12 @@ inline TextField* make_text_field(BuildContext ctx, const std::string& name,
 
     auto* field = field_obj->add_component<TextField>(initial_value);
     field->label_text = readout;
+    field->selection_color = theme.text.selection;
 
     field->start();
     if (on_change) field->on_value_changed.connect(std::move(on_change));
+
+    if (ctx.builds_gamepad()) attach_selectable(field_obj.get(), field);
 
     auto* raw = field;
     ctx.parent->add_child(std::move(field_obj));
@@ -423,7 +445,7 @@ inline ComboBox* make_dropdown(BuildContext ctx, const std::string& name,
     txt_rt->set_offset_max({-28.0f, 0.0f});
     txt_rt->hittable = false;  // Decorative -- the combo's own Button owns the click.
     auto* label_text = txt_obj->add_component<Text>();
-    apply_font(label_text, theme.text.size_label, theme.font);
+    apply_role_font(label_text, theme, FontRole::Label);
     label_text->color = theme.text.primary;
     label_text->overflow = TextOverflow::Overflow;
     label_text->horizontal_align = HorizontalAlign::Left;
@@ -442,7 +464,7 @@ inline ComboBox* make_dropdown(BuildContext ctx, const std::string& name,
     } else {
         // No IconLibrary sheet loaded -- the original "v" glyph.
         auto* arrow_text = arrow_obj->add_component<Text>();
-        apply_font(arrow_text, theme.text.size_small, theme.font);
+        apply_role_font(arrow_text, theme, FontRole::Caption);
         arrow_text->text = "v";
         arrow_text->color = theme.text.secondary;
         arrow_text->horizontal_align = HorizontalAlign::Center;
@@ -479,6 +501,8 @@ inline ComboBox* make_dropdown(BuildContext ctx, const std::string& name,
     combo->label_text = label_text;
     combo->popup_panel = popup_obj.get();
 
+    if (ctx.builds_gamepad()) attach_selectable(combo_obj.get(), combo);
+
     for (int i = 0; i < static_cast<int>(items.size()); ++i) {
         auto item_obj = std::make_unique<SceneObject>("Item_" + std::to_string(i));
         auto* item_rt = item_obj->add_component<RectTransform>();
@@ -500,7 +524,7 @@ inline ComboBox* make_dropdown(BuildContext ctx, const std::string& name,
         opt_txt_rt->set_offset_max({-8.0f, 0.0f});
         opt_txt_rt->hittable = false;  // Decorative -- the item's own Button owns the click.
         auto* opt_txt = opt_txt_obj->add_component<Text>();
-        apply_font(opt_txt, theme.text.size_label, theme.font);
+        apply_role_font(opt_txt, theme, FontRole::Label);
         opt_txt->text = items[i];
         opt_txt->color = theme.text.primary;
         opt_txt->horizontal_align = HorizontalAlign::Left;
@@ -508,6 +532,11 @@ inline ComboBox* make_dropdown(BuildContext ctx, const std::string& name,
         item_obj->add_child(std::move(opt_txt_obj));
 
         opt_btn->on_click.connect([combo, i]() { combo->set_current_index(i); });
+
+        // Deliberately NOT the plain Button attach_selectable() overload -- see
+        // attach_combo_item_selectable()'s own doc for why committing a choice
+        // needs more than just firing on_click.
+        if (ctx.builds_gamepad()) attach_combo_item_selectable(item_obj.get(), combo, i);
 
         popup_obj->add_child(std::move(item_obj));
     }
@@ -549,6 +578,8 @@ inline Button* make_icon_button(BuildContext ctx, const std::string& icon_name, 
     if (Image* icon_img = make_icon(ctx.into(obj.get()), icon_name, size, theme.text.primary)) {
         icon_img->owner->get_component<RectTransform>()->hittable = false; // Decorative -- the Button owns the click.
     }
+
+    if (ctx.builds_gamepad()) attach_selectable(obj.get(), btn);
 
     auto* raw = btn;
     ctx.parent->add_child(std::move(obj));

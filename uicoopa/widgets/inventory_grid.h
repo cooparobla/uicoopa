@@ -1,6 +1,9 @@
 /**
  * @file inventory_grid.h
- * @brief Grid-based inventory widget with slot management and drag-and-drop item transfer/swapping.
+ * @brief Grid-based inventory widget with slot management and drag-and-drop item
+ *        transfer/swapping, plus a gamepad-driven pick-place equivalent
+ *        (InventoryGrid::pick_place_confirm(), wired from
+ *        builder/detail/selectables.h's InventorySlot adapter).
  */
 
 #ifndef UICOOPA_WIDGETS_INVENTORY_GRID_H
@@ -129,6 +132,18 @@ public:
         }
     }
 
+    /** @brief Dims this slot's icon and highlights its border to mark it as the
+     *         gamepad "held" slot mid pick-place (InventoryGrid::pick_place_confirm()) --
+     *         the same visual treatment on_drag_started()/on_drag_ended() already use
+     *         for a mouse drag, applied here with no actual DragDropContext drag
+     *         underway. Un-marking just re-runs update_visuals() from the grid's
+     *         current item, exactly like on_drag_ended()'s own restore. Defined
+     *         out-of-line, below InventoryGrid, since the false branch needs
+     *         InventoryGrid::get_item() and only a forward declaration is visible
+     *         here (mirrors can_drag()/on_drag_started() and the rest of this
+     *         class's other InventoryGrid-touching methods). */
+    void set_picked_up(bool picked_up);
+
 private:
     glm::vec2 press_pos_{0.0f};
     bool      dragging_this_ = false;
@@ -248,6 +263,57 @@ public:
         on_slot_changed.emit(to_slot, items_[to_slot]);
         on_items_swapped.emit(from_slot, to_slot);
         return true;
+    }
+
+    /** @brief The slot currently held by a gamepad pick-place gesture, or -1. */
+    int held_slot() const { return held_slot_; }
+    bool is_holding() const { return held_slot_ >= 0; }
+
+    /**
+     * @brief Gamepad equivalent of a mouse drag-and-drop, confirmed one slot at a
+     *        time instead of held-and-released: the first Confirm on a non-empty
+     *        slot "picks it up" (dims its icon, highlights its border -- see
+     *        InventorySlot::set_picked_up()); a second Confirm on a DIFFERENT slot
+     *        places it there via transfer_or_swap_items() (so stacking/swapping
+     *        behaves identically to a mouse drop); a second Confirm on the SAME
+     *        slot cancels, same as cancel_pick_place().
+     * @return true if the press was consumed (an empty slot with nothing held
+     *         returns false, so callers can leave the input unconsumed).
+     */
+    bool pick_place_confirm(int index) {
+        if (index < 0 || index >= slot_count()) return false;
+
+        if (held_slot_ < 0) {
+            if (get_item(index).empty()) return false;
+            held_slot_ = index;
+            if (index < static_cast<int>(slots_.size()) && slots_[index]) {
+                slots_[index]->set_picked_up(true);
+            }
+            return true;
+        }
+
+        if (held_slot_ == index) {
+            cancel_pick_place();
+            return true;
+        }
+
+        int from = held_slot_;
+        // Clear before transfer_or_swap_items() so ITS update_slot_visuals() calls
+        // restore ordinary visuals rather than re-applying the held dim.
+        held_slot_ = -1;
+        transfer_or_swap_items(from, index);
+        return true;
+    }
+
+    /** @brief Releases the held slot (if any) without moving its item, restoring
+     *         its normal visuals. */
+    void cancel_pick_place() {
+        if (held_slot_ < 0) return;
+        int slot = held_slot_;
+        held_slot_ = -1;
+        if (slot < static_cast<int>(slots_.size()) && slots_[slot]) {
+            slots_[slot]->set_picked_up(false);
+        }
     }
 
     void register_slot(int index, InventorySlot* slot) {
@@ -415,12 +481,22 @@ private:
 
     std::vector<InventoryItem> items_;
     std::vector<InventorySlot*> slots_;
+    int held_slot_ = -1;  // See held_slot()/is_holding()/pick_place_confirm().
 };
 
 // --- InventorySlot inline implementations ---
 
 inline bool InventorySlot::can_drag() const {
     return grid && !grid->get_item(slot_index).empty();
+}
+
+inline void InventorySlot::set_picked_up(bool picked_up) {
+    if (picked_up) {
+        if (icon_image) icon_image->color.a = 0.35f;
+        if (border_image) border_image->color = hover_border;
+    } else if (grid) {
+        update_visuals(grid->get_item(slot_index));
+    }
 }
 
 inline void InventorySlot::on_pointer_enter(const PointerEventData& data) {
@@ -470,6 +546,11 @@ inline DragPayload InventorySlot::get_drag_payload() {
 }
 
 inline void InventorySlot::on_drag_started() {
+    // A mouse drag always takes precedence over a pending gamepad pick-place --
+    // release whatever's held (restoring its visuals) so the two gestures can
+    // never fight over the same slot's dimmed/highlighted state.
+    if (grid) grid->cancel_pick_place();
+
     if (icon_image) {
         icon_image->color.a = 0.35f;
     }

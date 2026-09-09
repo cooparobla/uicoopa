@@ -1,15 +1,22 @@
 /**
  * @file test_settings_builder.cpp
- * @brief Windowed demo: the settings_demo-shaped UI (a scrolling settings
+ * @brief Windowed demo: the settings_demo-shaped UI (a tabbed settings
  *        inspector, an info banner, a live status readout, an inventory
- *        grid, and an action bar), built entirely through UIBuilder --
- *        zero scene YAML except the theme file loaded via ThemeLibrary.
+ *        grid, and an action bar with a modal confirm dialog), built
+ *        entirely through UIBuilder -- zero scene YAML except the theme
+ *        file loaded via ThemeLibrary.
  *
  * Proves the builder split (uicoopa/builder/ui_builder.h + detail/*.h) is
  * expressive enough to stand up a real, multi-panel UI without hand-rolling
  * a single SceneObject outside the Canvas root, and that a theme YAML file
  * (assets/themes/dark.yaml or light.yaml, chosen via THEME=) drives every
- * color in the demo -- nothing here hardcodes a color literal.
+ * color in the demo -- nothing here hardcodes a color literal. It also
+ * exercises the split/dialog/tab additions end to end: build_settings_panel()
+ * groups its seven sections into a UIBuilder::tab_view() instead of a flat
+ * scroll list, build_action_panel()/build_info_banner()/build_inventory_card()
+ * replace hand-computed anchored-position offsets with UIBuilder::split_rows()/
+ * split_columns(), and the Reset button now opens a UIBuilder::dialog()
+ * (DialogMode::Modal) confirmation instead of resetting immediately.
  *
  * Unlike a YAML scene, this demo is genuinely interactive: the StatusCard's
  * nine readouts are recomputed every frame from the settings panel's live
@@ -17,8 +24,10 @@
  * into it (via UIBuilder::set_value()) and update a footer line.
  *
  * Set THEME=light to load assets/themes/light.yaml instead of the default
- * dark.yaml. Same MAX_FRAMES/SCREENSHOT_NAME/SCROLL_Y/OPEN_COMBO/SLIDER_MAX/
- * HOVER_SLOT env hooks as test_window.cpp, for scripted screenshots. EDIT_FIELD=<name>
+ * dark.yaml. Same MAX_FRAMES/SCREENSHOT_NAME/OPEN_COMBO/SLIDER_MAX/
+ * HOVER_SLOT env hooks as test_window.cpp, for scripted screenshots, plus
+ * SELECT_TAB=<index> (selects a page of the settings tab bar) and
+ * OPEN_DIALOG=<name> (opens the "ResetConfirm" modal) below. EDIT_FIELD=<name>
  * additionally opens keyboard editing on a named TextField (e.g. "player_name") before
  * the render loop starts, so a screenshot can capture its blinking text caret.
  *
@@ -180,103 +189,125 @@ struct StatusReadouts {
 };
 
 /**
- * @brief Builds the scrolling settings inspector (SettingsWindow) with seven
- *        generic sections -- Display, Graphics, Audio, Gameplay, Controls,
- *        Accessibility, Network -- entirely via UIBuilder's row helpers.
- *        Returns the Content builder so StatusReadouts can later read back
- *        from it by name.
+ * @brief Builds the settings inspector (SettingsWindow): a titled card whose
+ *        body is a UIBuilder::tab_view() with seven pages -- Display,
+ *        Graphics, Audio, Gameplay, Controls, Accessibility, Network --
+ *        each populated entirely via UIBuilder's row helpers. Replaces the
+ *        old single 52-row scroll list (add_section_header() strips with no
+ *        real grouping) with a real tabbed layout; every row still fits its
+ *        page without scrolling once split this way.
+ * @return The card's Body builder, so StatusReadouts and the env-var hooks
+ *         below can keep reading back by name -- UIBuilder::get_value()
+ *         searches the whole subtree regardless of which tab is selected
+ *         (SceneObject::find_descendant() doesn't skip inactive nodes), so
+ *         hidden pages' values stay live even while their tab isn't shown.
  */
 UIBuilder build_settings_panel(UIBuilder root) {
-    UIBuilder content = root.scroll_view("SettingsWindow", "uicoopa Settings Inspector",
-                                         {460.0f, 680.0f}, AnchorPreset::TopLeft, {20.0f, -20.0f});
+    UIBuilder frame = root.card("SettingsWindow", "uicoopa Settings Inspector",
+                                AnchorPreset::TopLeft, {20.0f, -20.0f}, {460.0f, 680.0f});
 
-    content.add_section_header("Display");
-    content.add_dropdown_row("resolution", {"1280x720", "1600x900", "1920x1080", "2560x1440"}, 2);
-    content.add_spinbox_row("width", 640.0, 3840.0, 1920.0, 1.0);
-    content.add_spinbox_row("height", 360.0, 2160.0, 1080.0, 1.0);
-    content.add_dropdown_row("window_mode", {"Windowed", "Borderless", "Fullscreen"}, 2);
-    content.add_toggle_row("vsync", true);
-    content.add_toggle_row("fullscreen", false);
-    content.add_slider_row("brightness", 0.0f, 2.0f, 1.0f, 0.05f);
-    content.add_slider_row("ui_scale", 0.75f, 1.5f, 1.0f, 0.05f);
+    TabSet tabs = frame.tab_view("SettingsTabs", {
+        "Display", "Graphics", "Audio", "Gameplay", "Controls", "Accessibility", "Network"
+    });
 
-    content.add_section_header("Graphics");
-    content.add_dropdown_row("quality", {"Low", "Medium", "High", "Ultra"}, 2);
-    content.add_dropdown_row("texture_quality", {"Low", "Medium", "High"}, 2);
-    content.add_dropdown_row("anisotropic_filtering", {"Off", "2x", "4x", "8x", "16x"}, 3);
-    content.add_dropdown_row("anti_aliasing", {"Off", "FXAA", "TAA", "MSAA 4x"}, 2);
-    content.add_slider_row("render_scale", 0.5f, 2.0f, 1.0f, 0.05f);
-    content.add_slider_row("shadow_distance", 10.0f, 500.0f, 150.0f, 5.0f);
-    content.add_slider_row("ao_strength", 0.0f, 1.0f, 0.6f, 0.05f);
-    content.add_toggle_row("bloom_enabled", true);
-    content.add_toggle_row("ssao_enabled", true);
-    content.add_toggle_row("ssr_enabled", false);
-    content.add_toggle_row("motion_blur", false);
-    content.add_toggle_row("vignette", true);
-    content.add_toggle_row("film_grain", false);
+    UIBuilder display = tabs["Display"];
+    display.add_dropdown_row("resolution", {"1280x720", "1600x900", "1920x1080", "2560x1440"}, 2);
+    display.add_spinbox_row("width", 640.0, 3840.0, 1920.0, 1.0);
+    display.add_spinbox_row("height", 360.0, 2160.0, 1080.0, 1.0);
+    display.add_dropdown_row("window_mode", {"Windowed", "Borderless", "Fullscreen"}, 2);
+    display.add_toggle_row("vsync", true);
+    display.add_toggle_row("fullscreen", false);
+    display.add_slider_row("brightness", 0.0f, 2.0f, 1.0f, 0.05f);
+    display.add_slider_row("ui_scale", 0.75f, 1.5f, 1.0f, 0.05f);
 
-    content.add_section_header("Audio");
-    content.add_slider_row("master_volume", 0.0f, 1.0f, 0.8f);
-    content.add_slider_row("music_volume", 0.0f, 1.0f, 0.6f);
-    content.add_slider_row("sfx_volume", 0.0f, 1.0f, 0.9f);
-    content.add_slider_row("voice_volume", 0.0f, 1.0f, 0.75f);
-    content.add_slider_row("ambient_volume", 0.0f, 1.0f, 0.5f);
-    content.add_dropdown_row("audio_output", {"Default", "Speakers", "Headphones"}, 0);
-    content.add_toggle_row("mute_on_focus_loss", true);
+    UIBuilder graphics = tabs["Graphics"];
+    graphics.add_dropdown_row("quality", {"Low", "Medium", "High", "Ultra"}, 2);
+    graphics.add_dropdown_row("texture_quality", {"Low", "Medium", "High"}, 2);
+    graphics.add_dropdown_row("anisotropic_filtering", {"Off", "2x", "4x", "8x", "16x"}, 3);
+    graphics.add_dropdown_row("anti_aliasing", {"Off", "FXAA", "TAA", "MSAA 4x"}, 2);
+    graphics.add_slider_row("render_scale", 0.5f, 2.0f, 1.0f, 0.05f);
+    graphics.add_slider_row("shadow_distance", 10.0f, 500.0f, 150.0f, 5.0f);
+    graphics.add_slider_row("ao_strength", 0.0f, 1.0f, 0.6f, 0.05f);
+    graphics.add_toggle_row("bloom_enabled", true);
+    graphics.add_toggle_row("ssao_enabled", true);
+    graphics.add_toggle_row("ssr_enabled", false);
+    graphics.add_toggle_row("motion_blur", false);
+    graphics.add_toggle_row("vignette", true);
+    graphics.add_toggle_row("film_grain", false);
 
-    content.add_section_header("Gameplay");
-    content.add_text_field_row("player_name", "Player One");
-    content.add_dropdown_row("difficulty", {"Easy", "Normal", "Hard", "Nightmare"}, 1);
-    content.add_dropdown_row("language", {"English", "Spanish", "French", "German", "Japanese"}, 0);
-    content.add_slider_row("mouse_sensitivity", 0.1f, 5.0f, 1.0f, 0.1f);
-    content.add_toggle_row("camera_shake", true);
-    content.add_toggle_row("aim_assist", false);
-    content.add_toggle_row("subtitles", true);
-    content.add_toggle_row("autosave", true);
-    content.add_spinbox_row("autosave_interval_min", 1.0, 30.0, 5.0, 1.0);
-    content.add_toggle_row("hardcore_mode", false);
+    UIBuilder audio = tabs["Audio"];
+    audio.add_slider_row("master_volume", 0.0f, 1.0f, 0.8f);
+    audio.add_slider_row("music_volume", 0.0f, 1.0f, 0.6f);
+    audio.add_slider_row("sfx_volume", 0.0f, 1.0f, 0.9f);
+    audio.add_slider_row("voice_volume", 0.0f, 1.0f, 0.75f);
+    audio.add_slider_row("ambient_volume", 0.0f, 1.0f, 0.5f);
+    audio.add_dropdown_row("audio_output", {"Default", "Speakers", "Headphones"}, 0);
+    audio.add_toggle_row("mute_on_focus_loss", true);
 
-    content.add_section_header("Controls");
-    content.add_toggle_row("invert_y", false);
-    content.add_toggle_row("mouse_acceleration", false);
-    content.add_toggle_row("controller_vibration", true);
-    content.add_slider_row("gamepad_deadzone", 0.0f, 0.5f, 0.15f, 0.01f);
-    content.add_spinbox_row("key_repeat_delay_ms", 100.0, 1000.0, 300.0, 25.0);
+    UIBuilder gameplay = tabs["Gameplay"];
+    gameplay.add_text_field_row("player_name", "Player One");
+    gameplay.add_dropdown_row("difficulty", {"Easy", "Normal", "Hard", "Nightmare"}, 1);
+    gameplay.add_dropdown_row("language", {"English", "Spanish", "French", "German", "Japanese"}, 0);
+    gameplay.add_slider_row("mouse_sensitivity", 0.1f, 5.0f, 1.0f, 0.1f);
+    gameplay.add_toggle_row("camera_shake", true);
+    gameplay.add_toggle_row("aim_assist", false);
+    gameplay.add_toggle_row("subtitles", true);
+    gameplay.add_toggle_row("autosave", true);
+    gameplay.add_spinbox_row("autosave_interval_min", 1.0, 30.0, 5.0, 1.0);
+    gameplay.add_toggle_row("hardcore_mode", false);
 
-    content.add_section_header("Accessibility");
-    content.add_dropdown_row("colorblind_mode", {"Off", "Protanopia", "Deuteranopia", "Tritanopia"}, 0);
-    content.add_slider_row("text_size", 0.75f, 2.0f, 1.0f, 0.05f);
-    content.add_toggle_row("high_contrast_ui", false);
-    content.add_toggle_row("reduce_motion", false);
-    content.add_toggle_row("screen_reader_support", false);
+    UIBuilder controls = tabs["Controls"];
+    controls.add_toggle_row("invert_y", false);
+    controls.add_toggle_row("mouse_acceleration", false);
+    controls.add_toggle_row("controller_vibration", true);
+    controls.add_slider_row("gamepad_deadzone", 0.0f, 0.5f, 0.15f, 0.01f);
+    controls.add_spinbox_row("key_repeat_delay_ms", 100.0, 1000.0, 300.0, 25.0);
 
-    content.add_section_header("Network");
-    content.add_text_field_row("server_address", "127.0.0.1");
-    content.add_dropdown_row("region", {"NA-East", "NA-West", "EU", "Asia", "Oceania"}, 0);
-    content.add_toggle_row("voice_chat_enabled", true);
-    content.add_toggle_row("upnp_enabled", true);
-    content.add_spinbox_row("max_ping_ms", 20.0, 300.0, 120.0, 5.0);
-    content.add_spinbox_row("bandwidth_limit_mbps", 1.0, 1000.0, 100.0, 1.0);
+    UIBuilder accessibility = tabs["Accessibility"];
+    accessibility.add_dropdown_row("colorblind_mode", {"Off", "Protanopia", "Deuteranopia", "Tritanopia"}, 0);
+    accessibility.add_slider_row("text_size", 0.75f, 2.0f, 1.0f, 0.05f);
+    accessibility.add_toggle_row("high_contrast_ui", false);
+    accessibility.add_toggle_row("reduce_motion", false);
+    accessibility.add_toggle_row("screen_reader_support", false);
 
-    content.fit_content_height();
-    return content;
+    UIBuilder network = tabs["Network"];
+    network.add_text_field_row("server_address", "127.0.0.1");
+    network.add_dropdown_row("region", {"NA-East", "NA-West", "EU", "Asia", "Oceania"}, 0);
+    network.add_toggle_row("voice_chat_enabled", true);
+    network.add_toggle_row("upnp_enabled", true);
+    network.add_spinbox_row("max_ping_ms", 20.0, 300.0, 120.0, 5.0);
+    network.add_spinbox_row("bandwidth_limit_mbps", 1.0, 1000.0, 100.0, 1.0);
+
+    return frame;
 }
 
-/** @brief Builds the InfoBanner: an accent title over a wrapped subtitle paragraph. */
+/**
+ * @brief Builds the InfoBanner: an accent title over a wrapped subtitle paragraph.
+ *
+ * Split into two split_rows() sections (title, subtitle) instead of two free-
+ * positioned add_paragraph() calls each followed by a manual
+ * `->owner->get_component<RectTransform>()->set_anchored_position(...)` reach-through --
+ * each paragraph now just sits at its own section's default TopLeft origin.
+ */
 void build_info_banner(UIBuilder root) {
     const UITheme& theme = root.theme();
-    UIBuilder banner = root.panel("InfoBanner").at(AnchorPreset::TopLeft, {500.0f, -20.0f}, {760.0f, 100.0f});
-    banner->get_component<Image>()->color = theme.panel.panel_alt;
+    constexpr float kBannerWidth = 760.0f;
+    constexpr float kPad = 16.0f;
 
-    Text* title = banner.add_paragraph("uicoopa Settings Builder Demo", theme.text.size_title,
-                                       theme.text.accent, {720.0f, 28.0f}, "BannerTitle");
-    title->owner->get_component<RectTransform>()->set_anchored_position({16.0f, -14.0f});
+    UIBuilder banner = root.panel("InfoBanner").at(AnchorPreset::TopLeft, {500.0f, -20.0f}, {kBannerWidth, 100.0f});
+    banner.with_background(theme.panel.panel_alt);
 
-    Text* subtitle = banner.add_paragraph(
+    SectionSet rows = banner.split_rows({
+        {"Title", 1.0f, 32.0f, SectionFlow::None},
+        {"Subtitle", 1.0f, 46.0f, SectionFlow::None},
+    }, 2.0f, LayoutPadding{kPad, kPad, 8.0f, 8.0f});
+
+    rows["Title"].add_paragraph("uicoopa Settings Builder Demo", theme.text.size_title,
+                                theme.text.accent, {kBannerWidth - 2.0f * kPad, 28.0f}, "BannerTitle");
+    rows["Subtitle"].add_paragraph(
         "Every panel on this screen is built by UIBuilder calls in test_settings_builder.cpp --\n"
         "no scene YAML. The theme (colors, sizes, metrics) loads from assets/themes/*.yaml.",
-        theme.text.size_small, theme.text.secondary, {720.0f, 42.0f}, "BannerSubtitle");
-    subtitle->owner->get_component<RectTransform>()->set_anchored_position({16.0f, -46.0f});
+        theme.text.size_small, theme.text.secondary, {kBannerWidth - 2.0f * kPad, 42.0f}, "BannerSubtitle");
 }
 
 /** @brief Builds the StatusCard shell and its nine (initially blank) readout lines. */
@@ -341,19 +372,29 @@ void refresh_status_card(UIBuilder settings, const UITheme& theme, StatusReadout
     s.autosave->color = autosave ? theme.text.success : theme.text.warning;
 }
 
-/** @brief Builds the InventoryCard: description, a 4x5 grid with sample items, and a footer. */
+/**
+ * @brief Builds the InventoryCard: description, a 4x5 grid with sample items, and a footer.
+ *
+ * Split into three split_rows() sections instead of three free-positioned children each
+ * followed by a manual RectTransform reach-through -- see build_info_banner()'s doc for
+ * the same pattern.
+ */
 void build_inventory_card(UIBuilder root) {
     const UITheme& theme = root.theme();
     UIBuilder body = root.card("InventoryCard", "Inventory Grid System",
                               AnchorPreset::TopLeft, {940.0f, -135.0f}, {320.0f, 395.0f});
 
-    Text* desc = body.add_paragraph("Interactive 4x5 grid built with UIBuilder.\nSupports slot selection & drag-and-drop.",
-                                    theme.text.size_small, theme.text.secondary, {284.0f, 36.0f}, "InvDesc");
-    desc->owner->get_component<RectTransform>()->set_anchored_position({14.0f, -10.0f});
+    SectionSet rows = body.split_rows({
+        {"Desc", 1.0f, 36.0f, SectionFlow::None},
+        {"Grid", 1.0f, 222.0f, SectionFlow::None},
+        {"Footer", 1.0f, 0.0f, SectionFlow::None},  // size 0 -> weighted, fills what's left.
+    }, 6.0f, LayoutPadding{14.0f, 14.0f, 10.0f, 10.0f});
 
-    InventoryGrid* grid = body.add_inventory_grid("GridArea", 4, 5, {48.0f, 48.0f}, {6.0f, 6.0f});
+    rows["Desc"].add_paragraph("Interactive 4x5 grid built with UIBuilder.\nSupports slot selection & drag-and-drop.",
+                               theme.text.size_small, theme.text.secondary, {292.0f, 36.0f}, "InvDesc");
+
+    InventoryGrid* grid = rows["Grid"].add_inventory_grid("GridArea", 4, 5, {48.0f, 48.0f}, {6.0f, 6.0f});
     grid->owner->get_component<RectTransform>()->anchor_preset(AnchorPreset::TopLeft);
-    grid->owner->get_component<RectTransform>()->set_anchored_position({18.0f, -56.0f});
 
     std::vector<InventoryItem> items;
     // Each item sets its own icon tint (InventoryItem::color) rather than relying on
@@ -369,7 +410,7 @@ void build_inventory_card(UIBuilder root) {
     gold.max_stack = 999; gold.color = {0.98f, 0.82f, 0.22f, 0.95f}; items.push_back(gold);
     InventoryItem map; map.id = "ancient_map"; map.name = "Ancient Map"; map.count = 1;
     map.max_stack = 1; map.tooltip = "Marks a distant, unexplored region."; map.color = {0.90f, 0.20f, 0.55f, 0.95f}; items.push_back(map);
-    detail::set_items(grid, items);
+    body.set_items(grid, items);  // UIBuilder facade for detail::set_items() -- no detail:: reach-through needed.
 
     // Demonstrates theme.slot.selected: tint slot 0's border to show it "selected".
     if (auto* slot_obj = grid->owner->find_descendant("Slot_0")) {
@@ -378,10 +419,8 @@ void build_inventory_card(UIBuilder root) {
         }
     }
 
-    Text* footer = body.add_paragraph("Slots: 20  |  Capacity: 5/20", theme.text.size_small,
-                                      theme.text.secondary, {290.0f, 20.0f}, "InvFooter");
-    footer->owner->get_component<RectTransform>()->anchor_preset(AnchorPreset::BottomLeft);
-    footer->owner->get_component<RectTransform>()->set_anchored_position({14.0f, 14.0f});
+    rows["Footer"].add_paragraph("Slots: 20  |  Capacity: 5/20", theme.text.size_small,
+                                 theme.text.secondary, {292.0f, 20.0f}, "InvFooter");
 }
 
 /** @brief Every default icon name from uicoopa/tools/gen_default_icons.py, for the
@@ -496,46 +535,64 @@ Animator* build_animations(SceneObject* canvas_obj, const UITheme& theme) {
     return animator;
 }
 
-/** @brief Builds the ActionPanel: three role-styled buttons that mutate the settings panel live. */
+/**
+ * @brief Builds the ActionPanel: an icon strip, three role-styled buttons that mutate
+ *        the settings panel live, and a footer status line -- plus a Modal confirm
+ *        dialog the Reset button opens instead of resetting immediately.
+ *
+ * The icon strip / button row / footer used to be two hand-positioned
+ * horizontal_layout() children (`at(TopLeft, {20,-6}, {720,32})` then
+ * `{20,-46},{720,40}`, with widths restated as `760 - 2*20` literals) plus a free-
+ * positioned footer paragraph. split_rows() replaces all three with one call, and
+ * add_icon_row()/add_action_bar() replace their respective hand-rolled loops.
+ */
 void build_action_panel(UIBuilder root, UIBuilder settings, Animator* banner_anim) {
     const UITheme& theme = root.theme();
     UIBuilder body = root.card("ActionPanel", "Inspector Actions & Config Management",
                               AnchorPreset::TopLeft, {500.0f, -550.0f}, {760.0f, 150.0f});
 
-    Text* footer = body.add_paragraph("Ready.", theme.text.size_small, theme.text.secondary,
-                                      {700.0f, 20.0f}, "FooterStatus");
-    footer->owner->get_component<RectTransform>()->anchor_preset(AnchorPreset::BottomLeft);
-    footer->owner->get_component<RectTransform>()->set_anchored_position({20.0f, 14.0f});
+    SectionSet rows = body.split_rows({
+        {"IconStrip", 1.0f, 32.0f, SectionFlow::None},
+        {"Buttons",   1.0f, 40.0f, SectionFlow::None},
+        {"Footer",    1.0f, 0.0f,  SectionFlow::None},  // size 0 -> weighted, fills what's left.
+    }, 8.0f, LayoutPadding{20.0f, 20.0f, 10.0f, 10.0f});
 
-    // A row of every default icon, in the gap between the header and the button row
-    // below -- see kDefaultIconNames' doc. A no-op (draws nothing) if no IconLibrary
-    // sheet loaded -- see main()'s icon_library.add_sheet() call.
-    if (IconLibrary::instance().has_icons()) {
-        UIBuilder icon_row = body.horizontal_layout("IconStrip", 6.0f);
-        icon_row.at(AnchorPreset::TopLeft, {20.0f, -6.0f}, {720.0f, 32.0f});
-        for (const char* name : kDefaultIconNames) {
-            icon_row.add_icon(name, 22.0f, theme.text.accent, name);
-        }
-    }
+    // add_icon_row() needs no IconLibrary::has_icons() guard -- add_icon() already
+    // draws nothing (and creates nothing) for an unresolved name, see its own doc.
+    std::vector<std::string> icon_names(kDefaultIconNames,
+                                        kDefaultIconNames + sizeof(kDefaultIconNames) / sizeof(kDefaultIconNames[0]));
+    rows["IconStrip"].add_icon_row(icon_names, 22.0f, theme.text.accent, 6.0f, "Icons");
 
-    UIBuilder row = body.horizontal_layout("ButtonsRow", 16.0f);
-    row.at(AnchorPreset::TopLeft, {20.0f, -46.0f}, {720.0f, 40.0f});
+    Text* footer = rows["Footer"].add_paragraph("Ready.", theme.text.size_small, theme.text.secondary,
+                                                {700.0f, 20.0f}, "FooterStatus");
 
-    row.add_button("Apply Settings", ButtonRole::Primary, [footer, banner_anim]() {
-        footer->text = "Settings applied.";
-        if (banner_anim) banner_anim->crossfade("alert", banner_anim->default_crossfade);
-    });
-    row.add_button("Reset to Defaults", ButtonRole::Neutral, [settings, footer]() {
+    // A Modal confirm dialog for the destructive Reset action. Built (and left) active
+    // -- see DialogMode::Modal's doc -- until root's ancestor Scene::start() call
+    // (in main(), below) applies its initial closed state via its Dialog component.
+    DialogHandle confirm = root.dialog("ResetConfirm", "Reset to Defaults?",
+                                       {360.0f, 170.0f}, DialogMode::Modal);
+    confirm.body().add_paragraph(
+        "This resets vsync, master volume, difficulty, and autosave\nback to their default values.",
+        theme.text.size_small, theme.text.secondary, {320.0f, 40.0f}, "ResetConfirmBody");
+    confirm.add_action("Cancel", ButtonRole::Neutral, [confirm]() { confirm.hide(); });
+    confirm.add_action("Reset", ButtonRole::Primary, [confirm, settings, footer]() {
         UIBuilder s = settings;  // a fresh, non-const copy -- set_value() isn't a const method.
         s.set_value("vsync", true);
         s.set_value("master_volume", 0.8f);
         s.set_value<int>("difficulty", 1);
         s.set_value("autosave", true);
         footer->text = "Reset to defaults.";
+        confirm.hide();
     });
-    row.add_button("Save Profile", ButtonRole::Success, [footer]() {
-        footer->text = "Profile saved.";
-    });
+
+    rows["Buttons"].add_action_bar({
+        {"Apply Settings", ButtonRole::Primary, [footer, banner_anim]() {
+            footer->text = "Settings applied.";
+            if (banner_anim) banner_anim->crossfade("alert", banner_anim->default_crossfade);
+        }},
+        {"Reset to Defaults", ButtonRole::Neutral, [confirm]() { confirm.show(); }},
+        {"Save Profile", ButtonRole::Success, [footer]() { footer->text = "Profile saved."; }},
+    }, 16.0f, "ButtonsRow");
 }
 
 }  // namespace
@@ -544,9 +601,10 @@ int main() {
     std::cout << "==========================================================\n";
     std::cout << "  uicoopa_settings_builder\n";
     std::cout << "  The former settings_demo scene, built entirely through\n";
-    std::cout << "  UIBuilder -- no scene YAML except the theme file. Scroll\n";
-    std::cout << "  the settings panel, drag inventory items, click the\n";
-    std::cout << "  action buttons. Set THEME=light to try the light theme.\n";
+    std::cout << "  UIBuilder -- no scene YAML except the theme file. Switch\n";
+    std::cout << "  settings tabs, drag inventory items, click the action\n";
+    std::cout << "  buttons -- Reset opens a confirm dialog. Set THEME=light\n";
+    std::cout << "  to try the light theme.\n";
     std::cout << "  Press ESC to quit.\n";
     std::cout << "==========================================================\n\n";
 
@@ -578,6 +636,7 @@ int main() {
     assets.add_search_root(std::string(ROOT_DIR) + "/assets");
     IconLibrary::instance().configure(assets, ctx.device(), ctx.allocator(), ctx.command_pool());
     IconLibrary::instance().add_sheet(assets, "icons/icons.yaml");
+    IconLibrary::instance().add_sheet(assets, "icons/cursors.yaml");
 
     // Loads the UI font once and installs it as the process-wide fallback, so
     // every apply_font() call in the builder (which every widget factory
@@ -588,6 +647,15 @@ int main() {
     FontDefaults::font = &ui_font;
     FontDefaults::note_text_size = [](Font* f, uint32_t sz) {
         UIResourceCache::instance().note_text_atlas_use(f, sz);
+    };
+    // Lets ThemeLibrary's per-role fonts (title/heading/body/label/caption/numeric,
+    // and the legacy font_path) actually load -- see ui_theme_yaml.h's
+    // resolve_theme_fonts(), called from load() below. configure() is needed even
+    // though this demo never calls register_ui_components() (it builds UI
+    // imperatively): font_for_path() no-ops without a Device/Allocator/CommandPool.
+    UIResourceCache::instance().configure(ctx.device(), ctx.allocator(), ctx.command_pool());
+    FontDefaults::resolve_font = [](const std::string& path) {
+        return UIResourceCache::instance().font_for_path(path);
     };
 
     // The UI always has at least one theme loaded (see ThemeLibrary::active()'s
@@ -643,6 +711,11 @@ int main() {
     Animator* banner_anim = build_animations(canvas_obj.get(), theme);
     build_action_panel(root, settings, banner_anim);
 
+    // Replaces the OS pointer with a themed, auto-switching cursor sprite --
+    // must run before canvas_obj is moved into the scene below (add_child()
+    // above attaches "Cursor" directly to it while it's still ours to reach).
+    root.enable_cursor(ctx.input());
+
     // Makes RectTransform/Graphic fields animatable by name (see
     // coopa::anim::AnimatedPropertyRegistry) -- this demo builds its UI
     // imperatively via UIBuilder and never calls register_ui_components(),
@@ -660,7 +733,13 @@ int main() {
     // AnimationSystem::set_parallel_threshold()'s doc), so this stays inline.
     scene.add_system(std::make_unique<coopa::anim::AnimationSystem>(), coopa::scene::UpdatePhase::Animation);
 
-    scene.start();  // Runs every widget's start() (SpinBox/ComboBox already start()ed during construction above).
+    // Runs every widget's start() (SpinBox/ComboBox already start()ed during
+    // construction above) -- also the single point where SettingsTabs' TabView and
+    // ResetConfirm's Dialog apply their initial visibility (page 0 selected, dialog
+    // closed): both are built (and left) active so this one call reaches every row/
+    // action added to them above, however deeply nested or currently hidden -- see
+    // widgets/tab_view.h's TabView::start() and widgets/dialog.h's Dialog::start().
+    scene.start();
     canvas->set_default_texture(ui_pass.white_view());
     UIResourceCache::instance().mark_text_atlases(ui_pass);
 
@@ -681,12 +760,34 @@ int main() {
         }
     }
 
-    if (const char* scroll_env = std::getenv("SCROLL_Y")) {
-        float sy = std::stof(scroll_env);
-        if (auto* content_obj = canvas_raw->find_descendant("Content")) {
-            if (auto* crt = content_obj->get_component<RectTransform>()) {
-                crt->set_anchored_position({crt->anchored_position().x, sy});
-            }
+    // CURSOR_POS=<x>,<y> pins the (now OS-hidden, see enable_cursor() above) real
+    // pointer to a fixed window-pixel position, so a screenshot can show the themed
+    // cursor overlay reacting to a known, reproducible hover target (e.g. a button)
+    // instead of wherever the test happened to launch. Re-applied every frame (see
+    // the render loop below, right after ctx.poll()) rather than once here -- some
+    // windowing backends re-report a real (unmoving) pointer position on every
+    // poll(), which would otherwise silently undo a one-shot warp before the first
+    // frame even renders.
+    bool has_cursor_pos = false;
+    float cursor_pos_x = 0.0f, cursor_pos_y = 0.0f;
+    if (const char* cursor_pos_env = std::getenv("CURSOR_POS")) {
+        has_cursor_pos = std::sscanf(cursor_pos_env, "%f,%f", &cursor_pos_x, &cursor_pos_y) == 2;
+    }
+
+    // SELECT_TAB=<index> picks a page of the settings tab bar for the screenshot --
+    // the tab-bar counterpart to test_window.cpp's OPEN_DIALOG=1.
+    if (const char* select_tab_env = std::getenv("SELECT_TAB")) {
+        if (auto* tabs_obj = canvas_raw->find_descendant("SettingsTabs")) {
+            if (auto* tabs = tabs_obj->get_component<TabView>()) tabs->select(std::atoi(select_tab_env));
+        }
+    }
+    // OPEN_DIALOG=<name> force-opens a built dialog (e.g. "ResetConfirm") regardless
+    // of the closed state scene.start() just applied to it -- test_window.cpp's
+    // OPEN_DIALOG=1 does the same for its single hand-authored YAML dialog; this one
+    // is name-addressed since a UIBuilder demo may build more than one.
+    if (const char* open_dialog_env = std::getenv("OPEN_DIALOG")) {
+        if (auto* dialog_obj = canvas_raw->find_descendant(open_dialog_env)) {
+            dialog_obj->set_active(true);
         }
     }
     if (const char* combo_env = std::getenv("OPEN_COMBO")) {
@@ -739,6 +840,7 @@ int main() {
 
     while (!ctx.should_close()) {
         ctx.poll();
+        if (has_cursor_pos) ctx.input().set_cursor_position(cursor_pos_x, cursor_pos_y);
 
         if (ctx.input().key_down(coopa::input::Key::Escape)) {
             ctx.window().set_should_close(true);
@@ -812,13 +914,23 @@ int main() {
     // shutdown(), destroying every SpriteSheet's Texture) and the Device/Allocator
     // ctx owns -- see IconLibrary::clear()'s doc.
     IconLibrary::instance().clear();
-    UIResourceCache::instance().clear();
+    // ThemeLibrary first: its cached UITheme::font/FontRoleStyle::font pointers are
+    // non-owning references into UIResourceCache's fonts_by_path_ -- clearing that
+    // cache first would leave them dangling for whatever instant separates the two
+    // calls (harmless today since nothing renders between them, but this ordering
+    // is the one that's never wrong).
     ThemeLibrary::instance().clear();
+    UIResourceCache::instance().clear();
     // FontDefaults::font points at ui_font, a local about to go out of scope --
     // drop the reference now rather than leave a dangling static past this
     // function's end (mirrors the explicit clear() calls above).
     FontDefaults::font = nullptr;
     FontDefaults::note_text_size = nullptr;
+    FontDefaults::resolve_font = nullptr;
+
+    // Restores the OS pointer enable_cursor() hid -- courtesy cleanup, not
+    // load-bearing (the process is exiting either way).
+    ctx.input().set_cursor_mode(coopa::input::CursorMode::Normal);
 
     return 0;
 }

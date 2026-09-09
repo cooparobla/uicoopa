@@ -7,6 +7,7 @@
 #define UICOOPA_BUILDER_DETAIL_CONTAINERS_H
 
 #include <uicoopa/builder/detail/build_context.h>
+#include <uicoopa/builder/detail/text_style.h>
 #include <uicoopa/text/font_defaults.h>
 #include <uicoopa/layout/rect_transform.h>
 #include <uicoopa/layout/layout_element.h>
@@ -16,6 +17,9 @@
 #include <uicoopa/widgets/image.h>
 #include <uicoopa/widgets/text.h>
 #include <uicoopa/widgets/mask.h>
+#include <uicoopa/widgets/scrollbar.h>
+#include <uicoopa/render/icon_library.h>
+#include <uicoopa/ui_component.h>
 #include <memory>
 #include <string>
 
@@ -132,7 +136,7 @@ inline SceneObject* make_scroll_view(BuildContext ctx, const std::string& name,
     title_rt->set_offset_min({12.0f, 0.0f});
     title_rt->set_offset_max({-12.0f, 0.0f});
     auto* title_txt = title_obj->add_component<Text>();
-    apply_font(title_txt, theme.text.size_label + 2.0f, theme.font);
+    apply_role_font(title_txt, theme, FontRole::Heading);
     title_txt->text = title;
     title_txt->color = theme.text.accent;
     title_txt->horizontal_align = HorizontalAlign::Left;
@@ -229,7 +233,7 @@ inline SceneObject* make_scroll_view(BuildContext ctx, const std::string& name,
         up_params.pivot = {1.0f, 1.0f};
         up_params.size_delta = {scrollbar_thickness, scrollbar_thickness};
         up_params.anchored_position = {-4.0f, -header_h};
-        add_icon_step_button(*frame_obj, "chevron_up", up_params,
+        add_icon_step_button(*frame_obj, theme.icons.scroll_up.c_str(), up_params,
                              [sb]() { sb->set_value(sb->value() - kStepSize); });
 
         RectParams down_params;
@@ -237,7 +241,7 @@ inline SceneObject* make_scroll_view(BuildContext ctx, const std::string& name,
         down_params.pivot = {1.0f, 0.0f};
         down_params.size_delta = {scrollbar_thickness, scrollbar_thickness};
         down_params.anchored_position = {-4.0f, 4.0f};
-        add_icon_step_button(*frame_obj, "chevron_down", down_params,
+        add_icon_step_button(*frame_obj, theme.icons.scroll_down.c_str(), down_params,
                              [sb]() { sb->set_value(sb->value() + kStepSize); });
     }
 
@@ -276,7 +280,7 @@ inline SceneObject* make_card(BuildContext ctx, const std::string& name, const s
     title_rt->set_offset_min({14.0f, 0.0f});
     title_rt->set_offset_max({-12.0f, 0.0f});
     auto* title_txt = title_obj->add_component<Text>();
-    apply_font(title_txt, theme.text.size_label, theme.font);
+    apply_role_font(title_txt, theme, FontRole::Heading);
     title_txt->text = title;
     title_txt->color = theme.text.primary;
     title_txt->horizontal_align = HorizontalAlign::Left;
@@ -321,7 +325,7 @@ inline Text* make_section_header(BuildContext ctx, const std::string& title) {
     txt_rt->hittable = false;
 
     auto* txt = txt_obj->add_component<Text>();
-    apply_font(txt, theme.text.size_label, theme.font);
+    apply_role_font(txt, theme, FontRole::Heading);
     txt->text = title;
     txt->color = theme.text.accent;
     txt->horizontal_align = HorizontalAlign::Left;
@@ -364,6 +368,55 @@ inline void fit_content_height(SceneObject* node, const UITheme& theme) {
     }
 
     rt->set_size_delta({rt->size_delta().x, total_h});
+}
+
+/** @brief Sizes `node`'s own RectTransform to fit its active children's widths + spacing --
+ *         the width counterpart to fit_content_height(), for a HorizontalLayoutGroup node. */
+inline void fit_content_width(SceneObject* node, const UITheme& theme) {
+    auto* rt = node->get_component<RectTransform>();
+    if (!rt) return;
+
+    float total_w = 0.0f;
+    float spacing = theme.metrics.row_spacing;
+    if (auto* hg = node->get_component<HorizontalLayoutGroup>()) {
+        spacing = hg->spacing;
+        total_w += hg->padding.horizontal();
+    }
+
+    bool first = true;
+    for (const auto& child : node->children()) {
+        if (!child->active()) continue;
+        auto* crt = child->get_component<RectTransform>();
+        if (!crt) continue;
+        float child_w = crt->size_delta().x;
+        if (auto* cle = child->get_component<LayoutElement>()) {
+            if (cle->preferred_size.x > 0.0f) child_w = cle->preferred_size.x;
+        }
+        if (child_w <= 0.0f) child_w = theme.metrics.row_height;
+
+        if (!first) total_w += spacing;
+        total_w += child_w;
+        first = false;
+    }
+
+    rt->set_size_delta({total_w, rt->size_delta().y});
+}
+
+/**
+ * @brief Anchors and positions a component's own node -- the free function equivalent of
+ *        UIBuilder::at(), for the common "add_paragraph()/add_image()/... then reposition
+ *        it" pattern that would otherwise reach through `->owner->get_component<RectTransform>()`.
+ * @return The same node's RectTransform, in case the caller wants to chain further mutation.
+ */
+inline RectTransform* place(UIComponent* component, AnchorPreset preset, glm::vec2 anchored_pos,
+                            glm::vec2 size = {0.0f, 0.0f}) {
+    if (!component || !component->owner) return nullptr;
+    auto* rt = component->owner->get_component<RectTransform>();
+    if (!rt) return nullptr;
+    rt->anchor_preset(preset);
+    rt->set_anchored_position(anchored_pos);
+    if (size.x > 0.0f || size.y > 0.0f) rt->set_size_delta(size);
+    return rt;
 }
 
 }  // namespace detail

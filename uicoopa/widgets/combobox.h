@@ -20,6 +20,31 @@
 namespace coopa {
 namespace ui {
 
+namespace detail_combobox {
+/**
+ * @brief Runs SceneObject::start() over a subtree that is meant to end up hidden.
+ *
+ * SceneObject::start() early-returns on `!active_`, so a popup built already
+ * hidden would leave every widget inside it unwired -- including each item's
+ * gamepad Selectable (builder/detail/selectables.h), whose ONLY registration
+ * path with NavigationContext is its own start(). This briefly activates the
+ * subtree, starts it, then restores whatever active() flag it had. Safe to
+ * call again later (every widget start() in this library is idempotent).
+ * Identical in shape to detail_tabview::start_hidden_subtree() (tab_view.h) --
+ * whose own doc comment already names this exact ComboBox popup case as
+ * something that would be left unwired without it -- kept as its own local
+ * duplicate for the same reason that one is: so uicoopa/widgets/ has no
+ * dependency on uicoopa/builder/.
+ */
+inline void start_hidden_subtree(coopa::scene::SceneObject* obj) {
+    if (!obj) return;
+    bool was_active = obj->active();
+    obj->set_active(true);
+    obj->start();
+    obj->set_active(was_active);
+}
+}  // namespace detail_combobox
+
 /**
  * @class ComboBox
  * @brief Dropdown selection component displaying the active option and toggling a choice list.
@@ -145,6 +170,14 @@ public:
                 toggle_popup();
             });
         }
+
+        // The popup is built active (so ITS OWN children resolve/wire normally
+        // the ordinary way) and is about to be hidden below -- but this node's
+        // own components (this ComboBox included) start() before its CHILDREN
+        // do, so hiding it here would otherwise race ahead of the popup's own
+        // start() cascade ever running at all. See detail_combobox::
+        // start_hidden_subtree()'s doc for exactly what that would silently break.
+        detail_combobox::start_hidden_subtree(popup_panel);
 
         hide_popup();
         update_label();

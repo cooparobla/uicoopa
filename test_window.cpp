@@ -64,6 +64,7 @@
 #include <uicoopa/input/event_system.h>
 #include <uicoopa/ui_yaml.h>
 #include <uicoopa/render/icon_library.h>
+#include <uicoopa/builder/detail/cursor.h>
 
 #include <coopa/asset/asset_manager.h>
 #include <coopa/job/engine.h>
@@ -211,6 +212,7 @@ coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env
     assets.add_search_root(std::string(ROOT_DIR) + "/assets");
     IconLibrary::instance().configure(assets, ctx.device(), ctx.allocator(), ctx.command_pool());
     IconLibrary::instance().add_sheet(assets, "icons/icons.yaml");
+    IconLibrary::instance().add_sheet(assets, "icons/cursors.yaml");
 
     // --- Load the UI tree from scene.yaml ---
     //
@@ -244,6 +246,12 @@ coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env
         throw std::runtime_error("Scene has no Canvas component");
     }
     canvas->set_default_texture(ui_pass.white_view());
+
+    // Replaces the OS pointer with a themed, auto-switching cursor sprite. This
+    // demo has no UIBuilder in scope (its UI comes from scene YAML), hence the
+    // free-function form -- see builder/detail/cursor.h. Reads whatever theme any
+    // scene !Theme node already made active, falling back to builtin_dark().
+    coopa::ui::enable_cursor(canvas_obj, &ThemeLibrary::instance().active(), ctx.input());
 
     // Optional modal dialog / button handling for test_window scene
     auto* button_obj = scene.find_object("ButtonPanel");
@@ -374,8 +382,17 @@ coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env
     // torn down at program exit, after device/allocator (locals above) are already
     // gone. Clear them now, while those are still alive (see ui_yaml.h's clear()).
     IconLibrary::instance().clear();
+    // Any !Theme scene node loaded a UITheme whose per-role Font* pointers are
+    // non-owning references into UIResourceCache -- drop those before the Fonts
+    // themselves are destroyed below (see test_settings_builder.cpp's teardown
+    // comment for why this ordering, not the reverse, is the one that's never wrong).
+    ThemeLibrary::instance().clear();
     UIResourceCache::instance().clear();
     coopa::scene::SceneLoader::clear_component_parsers();
+
+    // Restores the OS pointer enable_cursor() hid -- courtesy cleanup, not
+    // load-bearing (the process is exiting either way).
+    ctx.input().set_cursor_mode(coopa::input::CursorMode::Normal);
 
     return 0;
 }

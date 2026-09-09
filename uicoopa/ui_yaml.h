@@ -161,9 +161,22 @@ public:
      */
     Font* font_for(const std::string& ref, const coopa::scene::SceneLoader::ParseContext& ctx) {
         if (auto* named = UIResources::instance().find_font(ref)) return named;
+        return font_for_path(resolve_path_(ref, ctx));
+    }
+
+    /**
+     * @brief Loads (or returns the already-cached) Font for an exact filesystem
+     *        path -- no UIResources name lookup, no SceneLoader::ParseContext
+     *        resolution. This is what font_for() delegates to once it has a
+     *        resolved path, and what FontDefaults::resolve_font is typically
+     *        bound to (see font_defaults.h), so callers with a plain path in
+     *        hand -- like ui_theme_yaml.h's resolve_theme_fonts() -- don't need
+     *        a ParseContext just to load a theme font.
+     * @return The font, or nullptr if no GPU handles are configured or loading failed.
+     */
+    Font* font_for_path(const std::string& resolved) {
         if (!device_) return nullptr;
 
-        std::string resolved = resolve_path_(ref, ctx);
         auto it = fonts_by_path_.find(resolved);
         if (it != fonts_by_path_.end()) return it->second.get();
 
@@ -792,6 +805,14 @@ inline void register_ui_components(coopa::gfx::core::Device& device,
                                    coopa::gfx::command::CommandPool& cmd_pool) {
     UIResourceCache::instance().configure(device, allocator, cmd_pool);
     register_ui_components();
+
+    // Lets ui_theme_yaml.h's resolve_theme_fonts() load a theme's per-role
+    // fonts (TypographyStyle::title/heading/body/label/caption/numeric and the
+    // legacy font_path) through the same GPU-backed cache scene-referenced
+    // fonts use, without ui_theme_yaml.h depending on UIResourceCache directly.
+    FontDefaults::resolve_font = [](const std::string& path) {
+        return UIResourceCache::instance().font_for_path(path);
+    };
 }
 
 }  // namespace ui

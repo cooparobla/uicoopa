@@ -63,10 +63,25 @@ public:
                                       double-click hit-rect and the caret/selection's parent. */
     bool  interactable = true;
 
+    /** @brief Edit-mode tint: mixed 50% into the background while editing (see
+     *         highlight_bg_()), and used at a=0.45 for the selection-range highlight
+     *         (see ensure_caret_and_selection_()). Themed builder factories (make_text_field(),
+     *         make_spinbox()) set this from UITheme::TypographyStyle::selection; the default
+     *         here is only what a widget built by hand (no theme) gets. */
+    glm::vec4 selection_color{0.30f, 0.55f, 0.90f, 1.0f};
+
     bool wants_raycast() const override { return interactable; }
+    CursorRole cursor_role() const override { return interactable ? CursorRole::Text : CursorRole::Disabled; }
 
     /** @brief True while the buffer is being edited via the keyboard. */
     bool editing() const { return editing_; }
+
+    /** @brief Enters keyboard edit mode without a double-click -- the gamepad
+     *         Confirm path (builder/detail/selectables.h's TextField/SpinBox
+     *         adapters). A no-op when not interactable or already editing;
+     *         identical in every other respect to the double-click entry
+     *         (on_pointer_double_click). */
+    void begin_editing() { if (interactable && !editing_) begin_editing_(); }
 
     void update(float delta_time) override {
         if (!editing_ || has_selection_() || !caret_obj_) return;
@@ -259,11 +274,8 @@ private:
 
     void highlight_bg_(bool on) {
         if (!edit_bg_) return;
-        edit_bg_->color = on ? glm::mix(edit_bg_normal_color_, edit_highlight_(), 0.5f) : edit_bg_normal_color_;
+        edit_bg_->color = on ? glm::mix(edit_bg_normal_color_, selection_color, 0.5f) : edit_bg_normal_color_;
     }
-
-    static glm::vec4 edit_highlight_() { return glm::vec4(0.30f, 0.55f, 0.90f, 1.0f); }
-    static glm::vec4 selection_color_() { return glm::vec4(0.30f, 0.55f, 0.90f, 0.45f); }
 
     float text_cursor_height_() const {
         return label_text ? static_cast<float>(label_text->font_size) * 1.15f : 0.0f;
@@ -309,7 +321,7 @@ private:
             // Drawn after (on top of) the Text on the parent object -- see canvas.h's
             // emit_() ordering, components before children -- but at partial alpha, so
             // the already-rendered glyph pixels blend through rather than being hidden.
-            img->color = selection_color_();
+            img->color = glm::vec4(glm::vec3(selection_color), 0.45f);
             img->raycast_target = false;
             selection_obj_ = child.get();
             label_text->owner->add_child(std::move(child));

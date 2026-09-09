@@ -20,6 +20,7 @@
 #include <uicoopa/widgets/text.h>
 #include <cstdint>
 #include <functional>
+#include <string>
 
 namespace coopa {
 namespace ui {
@@ -38,6 +39,18 @@ struct FontDefaults {
     /** @brief Called with every (font, pixel size) pair actually assigned to a Text, so the
      *         application can bake exactly the glyph atlases it needs. */
     static inline std::function<void(class Font*, uint32_t)> note_text_size = nullptr;
+
+    /**
+     * @brief Loads (or returns an already-cached) Font for a filesystem path, so
+     *        ui_theme_yaml.h's resolve_theme_fonts() can populate UITheme::font
+     *        and each typography role's FontRoleStyle::font without this header
+     *        (or ui_theme_yaml.h) depending on the GPU-backed loader that
+     *        actually owns Font instances -- see ui_yaml.h's UIResourceCache::
+     *        font_for_path(), which applications typically bind this to. Null in
+     *        headless builds, so an unresolved path just leaves the theme's
+     *        Font* fields null and every role falls back to FontDefaults::font.
+     */
+    static inline std::function<class Font*(const std::string&)> resolve_font = nullptr;
 };
 
 /**

@@ -7,6 +7,7 @@
 #define UICOOPA_BUILDER_DETAIL_INVENTORY_H
 
 #include <uicoopa/builder/detail/build_context.h>
+#include <uicoopa/builder/detail/text_style.h>
 #include <uicoopa/text/font_defaults.h>
 #include <uicoopa/layout/rect_transform.h>
 #include <uicoopa/layout/layout_element.h>
@@ -14,6 +15,7 @@
 #include <uicoopa/widgets/image.h>
 #include <uicoopa/widgets/text.h>
 #include <uicoopa/widgets/inventory_grid.h>
+#include <uicoopa/builder/detail/selectables.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -47,6 +49,10 @@ inline InventoryGrid* make_inventory_grid(BuildContext ctx, const std::string& n
     inv_grid->tooltip_bg = theme.slot.tooltip_bg;
     inv_grid->tooltip_text_color = theme.slot.tooltip_text;
 
+    // Filled in as each slot is built below, then used afterward to wire explicit
+    // row/col neighbour links -- see attach_selectable(SceneObject*, InventorySlot*)'s doc.
+    std::vector<Selectable*> slot_selectables(ctx.builds_gamepad() ? static_cast<size_t>(rows * cols) : 0, nullptr);
+
     for (int r = 0; r < rows; ++r) {
         for (int c = 0; c < cols; ++c) {
             int idx = r * cols + c;
@@ -75,7 +81,9 @@ inline InventoryGrid* make_inventory_grid(BuildContext ctx, const std::string& n
             count_rt->set_anchored_position({-4.0f, 4.0f});
             count_rt->hittable = false;
             auto* count_txt = count_obj->add_component<Text>();
-            apply_font(count_txt, theme.text.size_small, theme.font);
+            // size_small explicitly, not Numeric's default size -- this badge has
+            // always rendered at the caption size, only its face should change.
+            apply_role_font(count_txt, theme, FontRole::Numeric, theme.text.size_small);
             count_txt->color = theme.text.primary;
             count_txt->horizontal_align = HorizontalAlign::Right;
             count_txt->vertical_align = VerticalAlign::Bottom;
@@ -93,8 +101,32 @@ inline InventoryGrid* make_inventory_grid(BuildContext ctx, const std::string& n
             slot_obj->add_child(std::move(icon_obj));
             slot_obj->add_child(std::move(count_obj));
 
+            if (ctx.builds_gamepad()) {
+                slot_selectables[static_cast<size_t>(idx)] = attach_selectable(slot_obj.get(), slot);
+            }
+
             inv_grid->register_slot(idx, slot);
             grid_obj->add_child(std::move(slot_obj));
+        }
+    }
+
+    if (ctx.builds_gamepad()) {
+        auto at = [&](int r, int c) -> Selectable* {
+            if (r < 0 || r >= rows || c < 0 || c >= cols) return nullptr;
+            return slot_selectables[static_cast<size_t>(r * cols + c)];
+        };
+        for (int r = 0; r < rows; ++r) {
+            for (int c = 0; c < cols; ++c) {
+                Selectable* s = at(r, c);
+                if (!s) continue;
+                // Canvas space is +Y up, so a lower row index (visually higher on
+                // screen, per this loop's top-to-bottom fill order) is nav_up from
+                // the row below it.
+                s->nav_up    = at(r - 1, c);
+                s->nav_down  = at(r + 1, c);
+                s->nav_left  = at(r, c - 1);
+                s->nav_right = at(r, c + 1);
+            }
         }
     }
 

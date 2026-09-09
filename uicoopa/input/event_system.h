@@ -9,6 +9,7 @@
 #include <uicoopa/input/raycaster.h>
 #include <uicoopa/input/ui_input.h>
 #include <uicoopa/input/focus.h>
+#include <uicoopa/input/modal_context.h>
 #include <coopa/scene/scene_object.h>
 #include <glm/glm.hpp>
 #include <algorithm>
@@ -40,6 +41,18 @@ struct PointerEventData {
 };
 
 /**
+ * @enum CursorRole
+ * @brief Which themed cursor icon a widget wants shown while it's hovered.
+ *
+ * Consumed by CursorOverlay (widgets/cursor_overlay.h), which resolves whichever
+ * IPointerHandler is on EventSystem::hovered_object() to one of these, then looks
+ * up the matching CursorRoleStyle on the active theme's CursorStyle
+ * (builder/ui_theme.h). Orthogonal to everything else IPointerHandler dispatches --
+ * a widget with no opinion just inherits IPointerHandler::cursor_role()'s default.
+ */
+enum class CursorRole { Default, Pointer, Text, Disabled };
+
+/**
  * @class IPointerHandler
  * @brief Implemented by any component that wants pointer events (Button, ScrollRect, ...).
  *
@@ -57,6 +70,9 @@ public:
     virtual void on_pointer_double_click(const PointerEventData&) {}
     virtual void on_drag(const PointerEventData&) {}
     virtual void on_scroll(const PointerEventData&) {}
+
+    /** @brief Which cursor icon to show while this handler's object is hovered. See CursorRole. */
+    virtual CursorRole cursor_role() const { return CursorRole::Default; }
 };
 
 /**
@@ -82,6 +98,28 @@ public:
         RaycastHit hit = Raycaster::hit_test(canvas_object, input.position());
         coopa::scene::SceneObject* hit_object = hit.object;
         std::vector<coopa::scene::SceneObject*> hit_chain = build_chain_(hit_object);
+
+        // A blocking modal (see ModalContext) makes everything outside its own subtree
+        // behave as if the pointer weren't over anything at all -- reusing the ordinary
+        // hover/press/click machinery below, which already handles an empty chain
+        // correctly (firing exit/up on whatever WAS hovered/pressed), rather than
+        // threading a blocked flag through every branch of this function. Deliberately
+        // policy-based, not z_order-based: this doesn't depend on the modal having WON
+        // the raycast, only on where the winning hit actually is in the tree.
+        if (ModalContext::instance().is_blocked(hit_object)) {
+            hit_object = nullptr;
+            hit_chain.clear();
+        }
+
+        // A press/drag already in flight when the modal opened isn't re-validated by
+        // the raycast above (press_chain_ is carried over from a previous frame) --
+        // release it explicitly so the widget behind the modal doesn't keep dragging,
+        // and doesn't stay visually stuck in its pressed state.
+        if (!press_chain_.empty() && ModalContext::instance().is_blocked(press_chain_.front())) {
+            PointerEventData release_data = make_data_(input);
+            dispatch_chain_(press_chain_, release_data, [](IPointerHandler* h, const PointerEventData& d) { h->on_pointer_up(d); });
+            press_chain_.clear();
+        }
 
         // The topmost hit is often a purely decorative leaf (a Button's Label, a
         // slider's Fill) with no IPointerHandler at all; hover tracking should
@@ -154,13 +192,20 @@ public:
         }
 
         // Keyboard goes straight to the focused object only -- no bubbling, unlike
-        // pointer events, since the focused widget owns the keyboard outright.
+        // pointer events, since the focused widget owns the keyboard outright. Gated by
+        // ModalContext the same way pointer dispatch is above: a field focused before a
+        // modal opened stops receiving keystrokes the instant it's no longer inside the
+        // topmost blocking root (ModalContext::push() also proactively clears focus in
+        // this situation, but that's a courtesy for the caret's visuals -- this check is
+        // what actually stops the input from applying).
         if (coopa::scene::SceneObject* focused = FocusContext::instance().focused()) {
-            for (unsigned int codepoint : input.char_input()) {
-                dispatch_text_(focused, [codepoint](ITextInputHandler* h) { h->on_char(codepoint); });
-            }
-            for (const auto& key_event : input.key_events()) {
-                dispatch_text_(focused, [&key_event](ITextInputHandler* h) { h->on_key(key_event); });
+            if (!ModalContext::instance().is_blocked(focused)) {
+                for (unsigned int codepoint : input.char_input()) {
+                    dispatch_text_(focused, [codepoint](ITextInputHandler* h) { h->on_char(codepoint); });
+                }
+                for (const auto& key_event : input.key_events()) {
+                    dispatch_text_(focused, [&key_event](ITextInputHandler* h) { h->on_key(key_event); });
+                }
             }
         }
     }

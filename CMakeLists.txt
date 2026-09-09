@@ -80,13 +80,25 @@ add_executable(uicoopa_settings_builder test_settings_builder.cpp)
 target_link_libraries(uicoopa_settings_builder PRIVATE coopa::gfx ${UICOOPA_AUDIO_LIBS})
 add_dependencies(uicoopa_settings_builder uicoopa_shaders)
 
+# Windowed demo dedicated to UIBuilder::dialog()/split_rows()/split_columns()/
+# tab_view() -- see test_dialog_builder.cpp.
+add_executable(uicoopa_dialog_builder test_dialog_builder.cpp)
+target_link_libraries(uicoopa_dialog_builder PRIVATE coopa::gfx ${UICOOPA_AUDIO_LIBS})
+add_dependencies(uicoopa_dialog_builder uicoopa_shaders)
+
+# Windowed demo for gamepad-style navigation (InputMode::Hybrid) -- see
+# test_gamepad_builder.cpp.
+add_executable(uicoopa_gamepad_builder test_gamepad_builder.cpp)
+target_link_libraries(uicoopa_gamepad_builder PRIVATE coopa::gfx ${UICOOPA_AUDIO_LIBS})
+add_dependencies(uicoopa_gamepad_builder uicoopa_shaders)
+
 enable_testing()
 add_test(NAME uicoopa_tests COMMAND uicoopa)
 
 # --- Vulkan/GLFW leak gate ---
-# uicoopa names zero Vk*/VK_*/vk*/GLFW*/glfw* symbols outside its one
-# documented gfx-allow-vulkan escape (test_window.cpp's ad-hoc capture
-# framebuffer -- gfxcoopa has no Framebuffer wrapper). ON by default: this
+# uicoopa names zero Vk*/VK_*/vk*/GLFW*/glfw* symbols outside its documented
+# gfx-allow-vulkan escapes -- each windowed demo's own save_screenshot()'s
+# ad-hoc capture framebuffer (gfxcoopa has no Framebuffer wrapper). ON by default: this
 # repo is done, and the gate's job is making sure it can't regress.
 option(GFX_LEAK_CHECK "Fail the build if consumer source names raw Vulkan/GLFW symbols" ON)
 if(GFX_LEAK_CHECK)
@@ -95,5 +107,7 @@ if(GFX_LEAK_CHECK)
     add_dependencies(uicoopa uicoopa_leak_check)
     add_dependencies(uicoopa_test_window uicoopa_leak_check)
     add_dependencies(uicoopa_settings_builder uicoopa_leak_check)
+    add_dependencies(uicoopa_dialog_builder uicoopa_leak_check)
+    add_dependencies(uicoopa_gamepad_builder uicoopa_leak_check)
     add_test(NAME uicoopa_no_vulkan COMMAND ${GFXCOOPA_DIR}/tools/check_no_vulkan.sh ${CMAKE_SOURCE_DIR})
 endif()

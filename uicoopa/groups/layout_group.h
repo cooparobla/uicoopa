@@ -65,6 +65,26 @@ public:
     bool           child_force_expand_height = true;
     bool           child_control_width  = true;
     bool           child_control_height = true;
+    /**
+     * @brief Split mode: main-axis sizing ignores measured min/preferred entirely.
+     *
+     * A child whose LayoutElement::preferred_size[axis] > 0 takes exactly that fixed
+     * extent; every other child divides the remaining space strictly in proportion to
+     * its LayoutElement::flexible_size[axis] (0 if unset, so such a child collapses to
+     * zero rather than sharing evenly -- always pair this with an explicit flexible_size
+     * on every non-fixed child).
+     *
+     * Exists because ordinary distribute_main_axis() can't express "a fixed pixel
+     * strip plus weighted remainder": preferred_of() falls back to the child's
+     * previous-frame size_delta when nothing reports a preferred size (place_child()
+     * writes that size_delta every arrange, one frame behind measure — see
+     * distribute_main_axis()'s doc), so a weight-only child's extra share collapses
+     * to 0 after the first frame instead of staying proportional; and both layout
+     * groups report min == preferred, so a content-bearing child can never shrink
+     * below its own content and a split overflows instead of honoring weights.
+     * Off by default — existing layouts are unaffected.
+     */
+    bool           child_distribute_by_weight = false;
 
 protected:
     /** @brief Direct active children with a RectTransform, skipping any LayoutElement marked ignore_layout. */
@@ -115,6 +135,10 @@ protected:
     std::vector<AxisSlot> distribute_main_axis(float available, bool force_expand,
                                                 const std::vector<coopa::scene::SceneObject*>& children,
                                                 int axis, float& out_leftover) const {
+        if (child_distribute_by_weight) {
+            return distribute_main_axis_by_weight(available, children, axis, out_leftover);
+        }
+
         size_t n = children.size();
         std::vector<float> min_sizes(n), preferred(n), flexible(n);
         for (size_t i = 0; i < n; ++i) {
@@ -155,6 +179,49 @@ protected:
 
         out_leftover = extra;
 
+        std::vector<AxisSlot> result(n);
+        float pen = 0.0f;
+        for (size_t i = 0; i < n; ++i) {
+            result[i] = { pen, sizes[i] };
+            pen += sizes[i] + spacing;
+        }
+        return result;
+    }
+
+    /**
+     * @brief child_distribute_by_weight's own main-axis distribution -- see that field's doc.
+     *
+     * Reads LayoutElement::preferred_size[axis]/flexible_size[axis] directly rather than
+     * through preferred_of()/flexible_of(), deliberately bypassing their measured-size and
+     * previous-frame-size_delta fallbacks: a child with neither set is a genuine 0-weight,
+     * 0-size slot here, not "whatever it happened to measure as."
+     */
+    std::vector<AxisSlot> distribute_main_axis_by_weight(float available,
+                                                          const std::vector<coopa::scene::SceneObject*>& children,
+                                                          int axis, float& out_leftover) const {
+        size_t n = children.size();
+        std::vector<float> sizes(n, 0.0f), weights(n, 0.0f);
+        float fixed_total = 0.0f, weight_total = 0.0f;
+        for (size_t i = 0; i < n; ++i) {
+            auto* le = children[i]->get_component<LayoutElement>();
+            float fixed = le ? le->preferred_size[axis] : -1.0f;
+            if (fixed > 0.0f) {
+                sizes[i] = fixed;
+                fixed_total += fixed;
+            } else {
+                weights[i] = le ? std::max(0.0f, le->flexible_size[axis]) : 0.0f;
+                weight_total += weights[i];
+            }
+        }
+
+        float spacing_total = n > 0 ? spacing * static_cast<float>(n - 1) : 0.0f;
+        float remaining = std::max(0.0f, available - spacing_total - fixed_total);
+        for (size_t i = 0; i < n; ++i) {
+            if (sizes[i] > 0.0f) continue;  // already sized as a fixed slot above
+            sizes[i] = weight_total > 0.0f ? remaining * weights[i] / weight_total : 0.0f;
+        }
+
+        out_leftover = 0.0f;
         std::vector<AxisSlot> result(n);
         float pen = 0.0f;
         for (size_t i = 0; i < n; ++i) {

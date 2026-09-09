@@ -20,14 +20,24 @@ text:
   primary:   { r: 0.10, g: 0.11, b: 0.14, a: 1.0 }
   secondary: { r: 0.35, g: 0.38, b: 0.44, a: 1.0 }
   muted:     { r: 0.50, g: 0.53, b: 0.58, a: 1.0 }
-  accent:    { r: 0.10, g: 0.40, b: 0.85, a: 1.0 }
+  accent:    { r: 0.72, g: 0.33, b: 0.02, a: 1.0 }
   success:   { r: 0.10, g: 0.55, b: 0.30, a: 1.0 }
-  warning:   { r: 0.70, g: 0.48, b: 0.05, a: 1.0 }
+  warning:   { r: 0.66, g: 0.52, b: 0.04, a: 1.0 }
   info:      { r: 0.15, g: 0.45, b: 0.75, a: 1.0 }
+  selection: { r: 0.88, g: 0.60, b: 0.35, a: 1.0 }
   size_title: 18.0
+  size_heading: 16.0
+  size_body: 11.0
   size_label: 14.0
   size_small: 11.0
-  font_path: assets/fonts/DejaVuSans.ttf
+  font_path: ../fonts/DejaVuSans.ttf
+  fonts:
+    title:   { path: ../fonts/Inter-SemiBold.ttf }
+    heading: { path: ../fonts/Inter-SemiBold.ttf }
+    body:    { path: ../fonts/Inter-Regular.ttf }
+    label:   { path: ../fonts/Inter-Regular.ttf }
+    caption: { path: ../fonts/Inter-Regular.ttf }
+    numeric: { path: ../fonts/JetBrainsMono-Regular.ttf }
 
 button:
   normal:   { r: 0.88, g: 0.89, b: 0.92, a: 1.0 }
@@ -36,10 +46,10 @@ button:
   disabled: { r: 0.90, g: 0.90, b: 0.92, a: 0.5 }
 
 button_primary:
-  normal:   { r: 0.20, g: 0.55, b: 0.85, a: 1.0 }
-  hover:    { r: 0.28, g: 0.65, b: 0.95, a: 1.0 }
-  press:    { r: 0.16, g: 0.45, b: 0.72, a: 1.0 }
-  disabled: { r: 0.60, g: 0.72, b: 0.85, a: 0.5 }
+  normal:   { r: 0.78, g: 0.38, b: 0.05, a: 1.0 }
+  hover:    { r: 0.88, g: 0.45, b: 0.10, a: 1.0 }
+  press:    { r: 0.60, g: 0.28, b: 0.02, a: 1.0 }
+  disabled: { r: 0.88, g: 0.72, b: 0.55, a: 0.5 }
 
 button_success:
   normal:   { r: 0.22, g: 0.55, b: 0.38, a: 1.0 }
@@ -49,7 +59,7 @@ button_success:
 
 slider:
   track:           { r: 0.85, g: 0.86, b: 0.89, a: 1.0 }
-  fill:            { r: 0.20, g: 0.55, b: 0.85, a: 1.0 }
+  fill:            { r: 0.80, g: 0.40, b: 0.06, a: 1.0 }
   handle:          { r: 0.20, g: 0.22, b: 0.26, a: 1.0 }
   handle_hover:    { r: 0.10, g: 0.11, b: 0.14, a: 1.0 }
   handle_press:    { r: 0.30, g: 0.32, b: 0.36, a: 1.0 }
@@ -62,7 +72,7 @@ toggle:
   bg_hover:    { r: 0.78, g: 0.80, b: 0.84, a: 1.0 }
   bg_press:    { r: 0.70, g: 0.72, b: 0.77, a: 1.0 }
   bg_disabled: { r: 0.85, g: 0.86, b: 0.89, a: 0.5 }
-  check:       { r: 0.20, g: 0.55, b: 0.85, a: 1.0 }
+  check:       { r: 0.78, g: 0.38, b: 0.05, a: 1.0 }
   size: 20.0
 
 spinbox:
@@ -78,10 +88,26 @@ combobox:
 slot:
   bg:       { r: 0.90, g: 0.91, b: 0.94, a: 0.9 }
   border:   { r: 0.75, g: 0.77, b: 0.82, a: 1.0 }
-  hover:    { r: 0.55, g: 0.65, b: 0.80, a: 1.0 }
+  hover:    { r: 0.85, g: 0.62, b: 0.40, a: 1.0 }
   selected: { r: 0.85, g: 0.62, b: 0.10, a: 1.0 }
   tooltip_bg:   { r: 0.85, g: 0.87, b: 0.91, a: 0.98 }
   tooltip_text: { r: 0.10, g: 0.11, b: 0.14, a: 1.0 }
+
+cursor:
+  size: 24.0
+  color: { r: 0.10, g: 0.11, b: 0.14, a: 1.0 }
+  default:  { icon: cursor_default,  hotspot: { x: 0.19, y: 0.16 } }
+  pointer:  { icon: cursor_pointer,  hotspot: { x: 0.50, y: 0.19 } }
+  text:     { icon: cursor_text,     hotspot: { x: 0.50, y: 0.50 } }
+  disabled: { icon: cursor_disabled, hotspot: { x: 0.50, y: 0.50 } }
+
+focus:
+  color: { r: 0.78, g: 0.38, b: 0.05, a: 1.0 }
+  fill:  { r: 0.78, g: 0.38, b: 0.05, a: 0.0 }
+  thickness: 2.0
+  padding: 3.0
+  move_duration: 0.08
+  fade_duration: 0.12
 
 metrics:
   row_height: 28.0
@@ -93,3 +119,17 @@ metrics:
   scroll_frame_padding: 6.0
   button_padding_x: 16.0
   button_min_width: 80.0
+  section_spacing: 10.0
+  dialog_padding: 16.0
+  tab_height: 32.0
+  tab_spacing: 4.0
+  tab_indicator_height: 3.0
+  scrim_alpha: 0.55
+
+tab:
+  normal:         { r: 0.88, g: 0.89, b: 0.92, a: 1.0 }
+  hover:          { r: 0.80, g: 0.82, b: 0.87, a: 1.0 }
+  press:          { r: 0.72, g: 0.74, b: 0.80, a: 1.0 }
+  selected:       { r: 0.78, g: 0.38, b: 0.05, a: 1.0 }
+  selected_hover: { r: 0.88, g: 0.45, b: 0.10, a: 1.0 }
+  indicator:      { r: 0.72, g: 0.33, b: 0.02, a: 1.0 }

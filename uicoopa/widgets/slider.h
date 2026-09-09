@@ -72,6 +72,7 @@ public:
 
     std::string type_name() const override { return "Slider"; }
     bool wants_raycast() const override { return interactable; }
+    CursorRole cursor_role() const override { return interactable ? CursorRole::Pointer : CursorRole::Disabled; }
 
     float value() const { return value_; }
 

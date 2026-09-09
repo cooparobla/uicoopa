@@ -68,6 +68,7 @@ public:
 
     std::string type_name() const override { return "Scrollbar"; }
     bool wants_raycast() const override { return interactable; }
+    CursorRole cursor_role() const override { return interactable ? CursorRole::Pointer : CursorRole::Disabled; }
 
     /** @brief Normalized handle position: 0 = top/left, 1 = bottom/right. */
     float value() const { return value_; }

@@ -70,6 +70,7 @@ public:
 
     std::string type_name() const override { return "Button"; }
     bool wants_raycast() const override { return interactable; }
+    CursorRole cursor_role() const override { return interactable ? CursorRole::Pointer : CursorRole::Disabled; }
 
     /** @brief Whether the pointer is currently over this button. */
     bool hovered() const { return hovered_; }
