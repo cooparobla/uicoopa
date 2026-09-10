@@ -15,12 +15,14 @@
 #include <uicoopa/input/raycaster.h>
 #include <uicoopa/layout/rect_transform.h>
 #include <uicoopa/groups/grid_layout_group.h>
+#include <uicoopa/render/icon_library.h>
 #include <uicoopa/widgets/image.h>
 #include <uicoopa/widgets/text.h>
 #include <uicoopa/widgets/mask.h>
 #include <uicoopa/text/font_defaults.h>
 #include <coopa/event/signal.h>
 #include <coopa/scene/scene_object.h>
+#include <functional>
 #include <vector>
 #include <string>
 #include <algorithm>
@@ -65,8 +67,21 @@ public:
     Image*          icon_image   = nullptr;
     Text*           count_text   = nullptr;
 
+    /** @brief Optional "Selected" overlay Image (builder/detail/inventory.h builds one) --
+     *         painted transparent by default and tinted to selected_color by set_selected(true).
+     *         Null-safe: a grid built without this overlay simply can't show selection. */
+    Image*          selected_image = nullptr;
+    glm::vec4       selected_color{1.00f, 0.62f, 0.15f, 1.0f};
+
     glm::vec4       normal_border{0.30f, 0.34f, 0.42f, 1.0f};
     glm::vec4       hover_border{0.50f, 0.65f, 0.85f, 1.0f};
+
+    /** @brief Tints selected_image on/off. A no-op if this slot has no selected_image
+     *         (see InventoryGrid::set_selected_slot(), the exclusive-selection driver). */
+    void set_selected(bool selected) {
+        if (!selected_image) return;
+        selected_image->color = glm::vec4(glm::vec3(selected_color), selected ? selected_color.a : 0.0f);
+    }
 
     std::string type_name() const override { return "InventorySlot"; }
     bool wants_raycast() const override { return true; }
@@ -105,6 +120,14 @@ public:
 
     void update_visuals(const InventoryItem& item) {
         if (icon_image) {
+            // Resolve icon_path through IconLibrary at most once per distinct path --
+            // update_visuals() runs on every set_item()/refresh_all_slots(), and a full
+            // grid refresh would otherwise repeat this hash lookup for every slot every time.
+            const std::string& path = item.empty() ? std::string() : item.icon_path;
+            if (path != last_icon_path_) {
+                icon_image->sprite = path.empty() ? nullptr : IconLibrary::instance().icon(path);
+                last_icon_path_ = path;
+            }
             if (item.empty()) {
                 icon_image->color = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
             } else if (item.color.a >= 0.0f) {
@@ -145,8 +168,9 @@ public:
     void set_picked_up(bool picked_up);
 
 private:
-    glm::vec2 press_pos_{0.0f};
-    bool      dragging_this_ = false;
+    glm::vec2   press_pos_{0.0f};
+    bool        dragging_this_ = false;
+    std::string last_icon_path_;  // see update_visuals()'s resolve-at-most-once-per-path comment
 
     IDropTarget* hit_drop_target_(const glm::vec2& pos) const {
         if (!owner) return nullptr;
@@ -187,6 +211,20 @@ public:
     SlotChangedSignal  on_slot_changed;
     ItemsSwappedSignal on_items_swapped;
     SlotClickedSignal  on_slot_clicked;
+
+    /**
+     * @brief Optional interception point for transfer_or_swap_items(): when set, called
+     *        instead of this widget's own built-in move/merge/swap rule, and must return
+     *        true iff it actually changed something (matching that rule's own return
+     *        contract). Null (the default) is byte-identical to every caller before this
+     *        field existed -- every existing standalone InventoryGrid usage/test is
+     *        unaffected. This is the seam InventoryBinding (widgets/inventory_binding.h)
+     *        installs to route drag-drop/pick-place through a backing coopa::item::Inventory
+     *        instead of this widget's own items_ vector -- see that header's doc for why
+     *        the interception happens here rather than at each call site (InventorySlot::
+     *        on_drop() and pick_place_confirm() both funnel through this one function).
+     */
+    std::function<bool(int, int)> transfer_override;
 
     InventoryGrid() = default;
     InventoryGrid(int r, int c) : rows(r), cols(c) {
@@ -231,6 +269,15 @@ public:
         if (from_slot < 0 || from_slot >= slot_count() ||
             to_slot < 0 || to_slot >= slot_count() || from_slot == to_slot) {
             return false;
+        }
+
+        if (transfer_override) {
+            if (!transfer_override(from_slot, to_slot)) return false;
+            // The override is expected to have already pushed both slots' new visuals
+            // via set_item() (which emits on_slot_changed itself) -- only the swap
+            // notification is this function's own responsibility in override mode.
+            on_items_swapped.emit(from_slot, to_slot);
+            return true;
         }
 
         InventoryItem& from = items_[from_slot];
@@ -335,6 +382,22 @@ public:
             update_slot_visuals(i);
         }
     }
+
+    /** @brief Exclusively selects `index` (deselecting whatever was previously selected),
+     *         or clears selection entirely when index < 0. A no-op on out-of-range slots
+     *         that don't have a "Selected" overlay -- see InventorySlot::set_selected(). */
+    void set_selected_slot(int index) {
+        if (selected_slot_ == index) return;
+        if (selected_slot_ >= 0 && selected_slot_ < static_cast<int>(slots_.size()) && slots_[selected_slot_]) {
+            slots_[selected_slot_]->set_selected(false);
+        }
+        selected_slot_ = (index >= 0 && index < slot_count()) ? index : -1;
+        if (selected_slot_ >= 0 && selected_slot_ < static_cast<int>(slots_.size()) && slots_[selected_slot_]) {
+            slots_[selected_slot_]->set_selected(true);
+        }
+    }
+
+    int selected_slot() const { return selected_slot_; }
 
     /**
      * @brief The floating icon that follows the cursor during a drag originated by
@@ -481,7 +544,8 @@ private:
 
     std::vector<InventoryItem> items_;
     std::vector<InventorySlot*> slots_;
-    int held_slot_ = -1;  // See held_slot()/is_holding()/pick_place_confirm().
+    int held_slot_ = -1;      // See held_slot()/is_holding()/pick_place_confirm().
+    int selected_slot_ = -1;  // See set_selected_slot()/selected_slot().
 };
 
 // --- InventorySlot inline implementations ---

@@ -75,6 +75,16 @@ inline InventoryGrid* make_inventory_grid(BuildContext ctx, const std::string& n
             auto* icon_img = icon_obj->add_component<Image>();
             icon_img->color = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
 
+            // Selection highlight -- painted transparent until InventoryGrid::set_selected_slot()
+            // turns it on (InventorySlot::set_selected()). Sits above Bg/Icon but below Count so
+            // the count badge stays legible over the highlight wash.
+            auto selected_obj = std::make_unique<SceneObject>("Selected");
+            selected_obj->add_component<RectTransform>()->anchor_preset(AnchorPreset::StretchAll);
+            selected_obj->get_component<RectTransform>()->set_size_delta({0.0f, 0.0f});
+            selected_obj->get_component<RectTransform>()->hittable = false;
+            auto* selected_img = selected_obj->add_component<Image>();
+            selected_img->color = glm::vec4(glm::vec3(theme.slot.selected), 0.0f);
+
             auto count_obj = std::make_unique<SceneObject>("Count");
             auto* count_rt = count_obj->add_component<RectTransform>();
             count_rt->anchor_preset(AnchorPreset::BottomRight);
@@ -96,9 +106,12 @@ inline InventoryGrid* make_inventory_grid(BuildContext ctx, const std::string& n
             slot->count_text = count_txt;
             slot->normal_border = theme.slot.border;
             slot->hover_border = theme.slot.hover;
+            slot->selected_image = selected_img;
+            slot->selected_color = theme.slot.selected;
 
             slot_obj->add_child(std::move(bg_obj));
             slot_obj->add_child(std::move(icon_obj));
+            slot_obj->add_child(std::move(selected_obj));
             slot_obj->add_child(std::move(count_obj));
 
             if (ctx.builds_gamepad()) {

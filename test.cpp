@@ -48,6 +48,17 @@
 #include <uicoopa/widgets/mask.h>
 #include <uicoopa/ui_yaml.h>
 #include <uicoopa/builder/ui_builder.h>
+#include <uicoopa/widgets/progress_bar.h>
+#include <uicoopa/widgets/message_log.h>
+#include <uicoopa/widgets/inventory_binding.h>
+#include <uicoopa/widgets/console.h>
+#include <coopa/stat/resource.h>
+#include <coopa/stat/stat_block.h>
+#include <coopa/item/item_id.h>
+#include <coopa/item/item_def.h>
+#include <coopa/item/item_database.h>
+#include <coopa/item/inventory.h>
+#include <coopa/item/hotbar.h>
 
 #ifdef UICOOPA_HAS_AUDIO
 #include <uicoopa/audio/sound_library.h>
@@ -5667,6 +5678,168 @@ void test_inventory_gamepad_pick_and_place() {
     ASSERT_TRUE(inv->get_item(3).empty());
 }
 
+/** @brief InventoryItem::icon_path, previously declared but never read, now resolves
+ *         through IconLibrary in InventorySlot::update_visuals(). Headless tests never
+ *         load an icon sheet, so the lookup must miss cleanly (nullptr sprite) and fall
+ *         all the way back to update_visuals()'s original id-keyed color table --
+ *         exactly the "no IconLibrary" degrade path test_builder_icons_degrade_without_
+ *         icon_library already covers for the rest of the builder. */
+void test_inventory_slot_icon_path_resolves_through_icon_library() {
+    SceneObject root("InventoryRoot");
+    root.add_component<RectTransform>()->set_size_delta({100.0f, 100.0f});
+    UIBuilder builder(&root);
+    auto* inv = builder.add_inventory_grid("Bag", 1, 1, {40.0f, 40.0f}, {4.0f, 4.0f});
+
+    InventoryItem potion;
+    potion.id = "potion_health";
+    potion.icon_path = "potion";  // not published by any sheet in this headless test
+    potion.count = 3;
+    potion.max_stack = 10;
+    inv->set_item(0, potion);
+
+    auto* slot0 = inv->owner->find_descendant("Slot_0")->get_component<InventorySlot>();
+    ASSERT_TRUE(slot0 != nullptr);
+    ASSERT_TRUE(slot0->icon_image->sprite == nullptr);
+    // The id-keyed fallback color (see update_visuals()'s built-in table) is untouched.
+    ASSERT_NEAR(slot0->icon_image->color.r, 0.92f, 1e-4f);
+    ASSERT_NEAR(slot0->icon_image->color.g, 0.28f, 1e-4f);
+    ASSERT_NEAR(slot0->icon_image->color.b, 0.32f, 1e-4f);
+
+    // Clearing the slot clears the sprite back to nullptr, not just the color.
+    inv->clear_slot(0);
+    ASSERT_TRUE(slot0->icon_image->sprite == nullptr);
+}
+
+/** @brief InventoryGrid::set_selected_slot() is exclusive: selecting a new slot
+ *         deselects whatever was previously selected, and -1 clears entirely. */
+void test_inventory_grid_selected_slot_is_exclusive() {
+    SceneObject root("InventoryRoot");
+    root.add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+    UIBuilder builder(&root);
+    auto* inv = builder.add_inventory_grid("Bag", 1, 5, {40.0f, 40.0f}, {4.0f, 4.0f});
+
+    auto selected_alpha = [&](int i) {
+        auto* slot = inv->owner->find_descendant("Slot_" + std::to_string(i))->get_component<InventorySlot>();
+        return slot->selected_image->color.a;
+    };
+
+    ASSERT_TRUE(inv->selected_slot() == -1);
+    for (int i = 0; i < 5; ++i) ASSERT_NEAR(selected_alpha(i), 0.0f, 1e-6f);
+
+    inv->set_selected_slot(2);
+    ASSERT_TRUE(inv->selected_slot() == 2);
+    ASSERT_TRUE(selected_alpha(2) > 0.0f);
+    ASSERT_NEAR(selected_alpha(0), 0.0f, 1e-6f);
+
+    inv->set_selected_slot(4);
+    ASSERT_TRUE(inv->selected_slot() == 4);
+    ASSERT_NEAR(selected_alpha(2), 0.0f, 1e-6f);  // deselected
+    ASSERT_TRUE(selected_alpha(4) > 0.0f);
+
+    inv->set_selected_slot(-1);
+    ASSERT_TRUE(inv->selected_slot() == -1);
+    ASSERT_NEAR(selected_alpha(4), 0.0f, 1e-6f);
+}
+
+/** @brief InventoryGrid::transfer_override, when set, is the sole authority for both
+ *         a mouse drag-drop (InventorySlot::on_drop()) and a gamepad pick-place
+ *         (InventoryGrid::pick_place_confirm()) -- both funnel through the single
+ *         interception point inside transfer_or_swap_items() (see that field's doc). */
+void test_inventory_grid_transfer_override_intercepts_drop_and_pick_place() {
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    auto* root = canvas_obj->add_child(std::make_unique<SceneObject>("InventoryRoot"));
+    root->add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+
+    UITheme theme = UITheme::builtin_dark();
+    UIBuilder builder(root, &theme, InputMode::Gamepad);
+    auto* inv = builder.add_inventory_grid("PlayerBag", 2, 2, {40.0f, 40.0f}, {4.0f, 4.0f});
+
+    InventoryItem potion{ .id = "potion", .name = "Health Potion", .count = 1, .max_stack = 10 };
+    inv->set_item(0, potion);
+
+    canvas->rebuild_layout(400, 400);
+
+    std::vector<std::pair<int, int>> calls;
+    inv->transfer_override = [&](int from, int to) {
+        calls.push_back({from, to});
+        return true;  // handled, but deliberately does NOT mutate items_ -- proves the
+                      // grid defers entirely to the override rather than also running
+                      // its own built-in rule afterward.
+    };
+
+    // Via gamepad pick-place.
+    auto* sel0 = inv->owner->find_descendant("Slot_0")->get_component<Selectable>();
+    auto* sel1 = inv->owner->find_descendant("Slot_1")->get_component<Selectable>();
+    ASSERT_TRUE(sel0 && sel1);
+    ASSERT_TRUE(sel0->handle_nav(NavAction::Confirm));  // pick up slot 0
+    ASSERT_TRUE(sel1->handle_nav(NavAction::Confirm));  // place onto slot 1
+    ASSERT_TRUE(calls.size() == 1u);
+    ASSERT_TRUE(calls[0].first == 0 && calls[0].second == 1);
+    ASSERT_TRUE(inv->get_item(0).id == "potion");  // unmoved -- the override owns mutation
+    ASSERT_TRUE(!inv->is_holding());
+
+    // Via mouse drag-drop.
+    auto* slot0_obj = inv->owner->find_descendant("Slot_0");
+    auto* slot1_obj = inv->owner->find_descendant("Slot_1");
+    glm::vec2 slot0_center = slot0_obj->get_component<RectTransform>()->rect().center();
+    glm::vec2 slot1_center = slot1_obj->get_component<RectTransform>()->rect().center();
+
+    PointerEventData down;
+    down.position = slot0_center;
+    dispatch_chain_for_test(slot0_obj, down, [](IPointerHandler* h, const PointerEventData& d) { h->on_pointer_down(d); });
+    PointerEventData drag;
+    drag.position = slot1_center;
+    dispatch_chain_for_test(slot0_obj, drag, [](IPointerHandler* h, const PointerEventData& d) { h->on_drag(d); });
+    PointerEventData up;
+    up.position = slot1_center;
+    dispatch_chain_for_test(slot0_obj, up, [](IPointerHandler* h, const PointerEventData& d) { h->on_pointer_up(d); });
+
+    ASSERT_TRUE(calls.size() == 2u);
+    ASSERT_TRUE(calls[1].first == 0 && calls[1].second == 1);
+
+    // A false-returning override changes nothing and isn't reported as a swap.
+    int swap_count = 0;
+    inv->on_items_swapped.connect([&](int, int) { swap_count++; });
+    inv->transfer_override = [](int, int) { return false; };
+    ASSERT_TRUE(!inv->transfer_or_swap_items(0, 1));
+    ASSERT_TRUE(swap_count == 0);
+}
+
+/** @brief A default-constructed (null) transfer_override leaves transfer_or_swap_items()
+ *         byte-identical to its pre-existing move/merge/swap rule -- the regression lock
+ *         for every standalone InventoryGrid caller that predates this field. */
+void test_inventory_grid_null_override_matches_builtin_three_way() {
+    SceneObject root("InventoryRoot");
+    root.add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+    UIBuilder builder(&root);
+    auto* inv = builder.add_inventory_grid("Bag", 2, 2, {40.0f, 40.0f}, {4.0f, 4.0f});
+
+    ASSERT_TRUE(!inv->transfer_override);
+
+    InventoryItem potion{ .id = "potion", .name = "Health Potion", .count = 5, .max_stack = 10 };
+    InventoryItem sword{ .id = "sword", .name = "Iron Sword", .count = 1, .max_stack = 1 };
+    inv->set_item(0, potion);
+    inv->set_item(2, sword);
+
+    ASSERT_TRUE(inv->transfer_or_swap_items(0, 1));  // move into empty
+    ASSERT_TRUE(inv->get_item(1).id == "potion");
+    ASSERT_TRUE(inv->get_item(1).count == 5);
+
+    inv->set_item(0, InventoryItem{ .id = "potion", .name = "Health Potion", .count = 3, .max_stack = 10 });
+    ASSERT_TRUE(inv->transfer_or_swap_items(0, 1));  // merge same id
+    ASSERT_TRUE(inv->get_item(0).empty());
+    ASSERT_TRUE(inv->get_item(1).count == 8);
+
+    ASSERT_TRUE(inv->transfer_or_swap_items(1, 2));  // swap different items
+    ASSERT_TRUE(inv->get_item(1).id == "sword");
+    ASSERT_TRUE(inv->get_item(2).id == "potion");
+    ASSERT_TRUE(inv->get_item(2).count == 8);
+}
+
 /** @brief Regression: CursorOverlay::update() hides itself by toggling a node's
  *         active() flag -- it used to be `owner->set_active()`, but owner was the
  *         very node this component's own update() lived on, and SceneObject::
@@ -5785,6 +5958,750 @@ void test_theme_focus_style_parsed() {
     // Unmentioned fields keep their (builtin_dark()) defaults.
     ASSERT_NEAR(theme.focus.padding, 3.0f, 1e-4f);
     ASSERT_NEAR(theme.focus.move_duration, 0.08f, 1e-4f);
+}
+
+void test_theme_hud_style_parsed() {
+    UITheme theme = UITheme::builtin_dark();
+    std::string yaml_text =
+        "hud:\n"
+        "  health_fill: { r: 0.11, g: 0.22, b: 0.33, a: 1.0 }\n"
+        "  bar_height: 20.0\n";
+    fkyaml::node root = fkyaml::node::deserialize(yaml_text);
+    coopa::ui::detail::parse_theme(root, theme);
+
+    ASSERT_NEAR(theme.hud.health_fill.r, 0.11f, 1e-4f);
+    ASSERT_NEAR(theme.hud.health_fill.g, 0.22f, 1e-4f);
+    ASSERT_NEAR(theme.hud.health_fill.b, 0.33f, 1e-4f);
+    ASSERT_NEAR(theme.hud.bar_height, 20.0f, 1e-4f);
+    // Unmentioned fields keep their (builtin_dark()) defaults.
+    ASSERT_NEAR(theme.hud.bar_width, 200.0f, 1e-4f);
+    ASSERT_NEAR(theme.hud.corner_margin, 16.0f, 1e-4f);
+}
+
+/** @brief UIBuilder::hud_corner() docks a fixed-size region to each of the eight
+ *         non-centered screen regions, inset by margin -- canvas space is +Y up
+ *         (0,0 bottom-left, (w,h) top-right, per test_canvas_rebuild_layout's own
+ *         comment), so "inward" from a Top* anchor is a smaller y, from a Bottom*
+ *         anchor a larger one. */
+void test_hud_corner_resolves_expected_rect() {
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    auto* root = canvas_obj->add_child(std::make_unique<SceneObject>("Root"));
+    root->add_component<RectTransform>()->set_size_delta({1280.0f, 720.0f});
+
+    UIBuilder builder(root);
+    const glm::vec2 size{100.0f, 50.0f};
+    const float margin = 16.0f;
+
+    struct Case { HudAnchor anchor; glm::vec2 min; glm::vec2 max; };
+    // clang-format off
+    std::vector<Case> cases = {
+        {HudAnchor::TopLeft,      {16.0f,   654.0f}, {116.0f,  704.0f}},
+        {HudAnchor::TopCenter,    {590.0f,  654.0f}, {690.0f,  704.0f}},
+        {HudAnchor::TopRight,     {1164.0f, 654.0f}, {1264.0f, 704.0f}},
+        {HudAnchor::MiddleLeft,   {16.0f,   335.0f}, {116.0f,  385.0f}},
+        {HudAnchor::MiddleRight,  {1164.0f, 335.0f}, {1264.0f, 385.0f}},
+        {HudAnchor::BottomLeft,   {16.0f,   16.0f},  {116.0f,  66.0f}},
+        {HudAnchor::BottomCenter, {590.0f,  16.0f},  {690.0f,  66.0f}},
+        {HudAnchor::BottomRight,  {1164.0f, 16.0f},  {1264.0f, 66.0f}},
+    };
+    // clang-format on
+
+    for (const auto& c : cases) {
+        UIBuilder corner = builder.hud_corner(c.anchor, size, margin, SectionFlow::None);
+        canvas->rebuild_layout(1280, 720);
+        const Rect& r = corner.rect_transform()->rect();
+        ASSERT_VEC2_NEAR(r.min, c.min, 0.01f);
+        ASSERT_VEC2_NEAR(r.max, c.max, 0.01f);
+    }
+}
+
+/** @brief make_hud_layer()'s own hittable=false silences only the layer node itself --
+ *         Raycaster::hit_test_all_() still recurses into (and hit-tests) its children,
+ *         so an interactive widget built into a HUD layer (e.g. a hotbar) is unaffected. */
+void test_hud_layer_is_transparent_to_raycast() {
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    auto* root = canvas_obj->add_child(std::make_unique<SceneObject>("Root"));
+    root->add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+
+    UIBuilder builder(root);
+    UIBuilder hud = builder.hud_layer();
+    Button* btn = hud.add_button("Loot");
+
+    canvas->rebuild_layout(400, 400);
+
+    glm::vec2 center = btn->owner->get_component<RectTransform>()->rect().center();
+    RaycastHit hit = Raycaster::hit_test(*canvas_obj, center);
+    ASSERT_TRUE(static_cast<bool>(hit));
+    ASSERT_TRUE(hit.object == btn->owner);
+}
+
+/** @brief Locks ProgressBar and Slider to the exact same fill math (both call
+ *         fill_direction.h's apply_fill_rect()) -- driven to identical min/max/
+ *         value/direction, their fill_rect anchors must match in every direction. */
+void test_progress_bar_fill_matches_slider_for_all_directions() {
+    SceneObject slider_owner("SliderOwner");
+    slider_owner.add_component<RectTransform>();
+    auto* slider = slider_owner.add_component<Slider>();
+    auto* slider_fill_obj = slider_owner.add_child(std::make_unique<SceneObject>("Fill"));
+    slider->fill_rect = slider_fill_obj->add_component<RectTransform>();
+    slider->min_value = 0.0f;
+    slider->max_value = 10.0f;
+
+    SceneObject bar_owner("BarOwner");
+    bar_owner.add_component<RectTransform>();
+    auto* bar = bar_owner.add_component<ProgressBar>();
+    auto* bar_fill_obj = bar_owner.add_child(std::make_unique<SceneObject>("Fill"));
+    bar->fill_rect = bar_fill_obj->add_component<RectTransform>();
+    bar->min_value = 0.0f;
+    bar->max_value = 10.0f;
+
+    const SliderDirection directions[] = {
+        SliderDirection::LeftToRight, SliderDirection::RightToLeft,
+        SliderDirection::BottomToTop, SliderDirection::TopToBottom,
+    };
+    const float values[] = {0.0f, 3.0f, 5.0f, 9.0f, 10.0f};
+
+    for (SliderDirection dir : directions) {
+        slider->direction = dir;
+        bar->direction = dir;
+        for (float v : values) {
+            slider->set_value(v, false);
+            bar->set_value(v, false);
+            ASSERT_VEC2_NEAR(slider->fill_rect->anchor_min(), bar->fill_rect->anchor_min(), 1e-6f);
+            ASSERT_VEC2_NEAR(slider->fill_rect->anchor_max(), bar->fill_rect->anchor_max(), 1e-6f);
+        }
+    }
+}
+
+void test_progress_bar_clamps_and_formats_label() {
+    SceneObject owner("BarOwner");
+    owner.add_component<RectTransform>();
+    auto* bar = owner.add_component<ProgressBar>();
+    auto* fill_obj = owner.add_child(std::make_unique<SceneObject>("Fill"));
+    bar->fill_rect = fill_obj->add_component<RectTransform>();
+    auto* label_obj = owner.add_child(std::make_unique<SceneObject>("Label"));
+    bar->label_text = label_obj->add_component<Text>();
+
+    bar->min_value = 0.0f;
+    bar->max_value = 100.0f;
+
+    bar->set_value(250.0f, false);  // clamps to max
+    ASSERT_NEAR(bar->value(), 100.0f, 1e-4f);
+    ASSERT_NEAR(bar->normalized_value(), 1.0f, 1e-4f);
+    ASSERT_TRUE(bar->label_text->text == "100 / 100");
+
+    bar->set_value(-20.0f, false);  // clamps to min
+    ASSERT_NEAR(bar->value(), 0.0f, 1e-4f);
+    ASSERT_TRUE(bar->label_text->text == "0 / 100");
+
+    bar->set_value(42.0f, false);
+    ASSERT_TRUE(bar->label_text->text == "42 / 100");
+}
+
+/** @brief A decrease arms the ghost trail at the pre-damage value; it holds for
+ *         ghost_delay, then drains at ghost_speed (pixels of the bar's own resolved
+ *         width per second) until it catches up to the current fill. */
+void test_progress_bar_ghost_trails_then_catches_up() {
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    auto* root = canvas_obj->add_child(std::make_unique<SceneObject>("Root"));
+    root->add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+
+    UIBuilder builder(root);
+    ProgressBar* bar = builder.add_progress_bar("Health", 0.0f, 100.0f, 100.0f,
+                                                ProgressBarRole::Health, {200.0f, 20.0f}, false);
+    bar->ghost_delay = 0.1f;
+    bar->ghost_speed = 200.0f;  // == bar width -- 1.0 normalized unit/second
+
+    canvas->rebuild_layout(400, 400);  // resolves the bar's own rect() for bar_length_along_axis_()
+
+    bar->set_value(50.0f);  // damage: fill drops to 0.5, ghost should still show the old 1.0
+    ASSERT_NEAR(bar->fill_rect->anchor_max().x, 0.5f, 1e-4f);
+    ASSERT_NEAR(bar->ghost_rect->anchor_max().x, 1.0f, 1e-4f);
+
+    bar->update(0.1f);  // consumes the entire ghost_delay hold -- no drain yet
+    ASSERT_NEAR(bar->ghost_rect->anchor_max().x, 1.0f, 1e-4f);
+
+    bar->update(0.1f);  // past the hold now -- drains 0.1 normalized units
+    ASSERT_NEAR(bar->ghost_rect->anchor_max().x, 0.9f, 1e-4f);
+
+    bar->update(1.0f);  // more than enough to fully drain -- clamps at the current fill
+    ASSERT_NEAR(bar->ghost_rect->anchor_max().x, 0.5f, 1e-4f);
+}
+
+/** @brief ProgressBar::bind() syncs immediately and then follows Resource::on_changed;
+ *         bind(nullptr) stops following without resetting the bar's last value. */
+void test_progress_bar_bound_resource_drives_value() {
+    coopa::stat::Resource res(100.0f);
+
+    SceneObject owner("BarOwner");
+    owner.add_component<RectTransform>();
+    auto* bar = owner.add_component<ProgressBar>();
+    auto* fill_obj = owner.add_child(std::make_unique<SceneObject>("Fill"));
+    bar->fill_rect = fill_obj->add_component<RectTransform>();
+
+    bar->bind(&res);
+    ASSERT_NEAR(bar->max_value, 100.0f, 1e-4f);
+    ASSERT_NEAR(bar->value(), 100.0f, 1e-4f);
+
+    res.damage(30.0f);
+    ASSERT_NEAR(bar->value(), 70.0f, 1e-4f);
+
+    bar->bind(nullptr);
+    res.damage(20.0f);  // no longer bound -- the bar must not follow this
+    ASSERT_NEAR(bar->value(), 70.0f, 1e-4f);
+}
+
+/** @brief Pushing past max_lines must reuse the same pooled Text children
+ *         (see MessageLog's own doc for why: LayoutGroupBase::layout_children()
+ *         only skips INACTIVE children -- a growing/rebuilt pool would defeat that). */
+void test_message_log_pool_is_reused_and_capped() {
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+    UIBuilder builder(&root);
+    MessageLog* log = builder.add_message_log("Log", 6, {200.0f, 100.0f});
+    SceneObject* log_obj = log->owner;
+
+    size_t initial_children = log_obj->children().size();
+    ASSERT_TRUE(initial_children == 6u);
+
+    for (int i = 0; i < 20; ++i) {
+        log->push("Line " + std::to_string(i));
+    }
+
+    ASSERT_TRUE(log_obj->children().size() == initial_children);  // pool reused, not grown
+    ASSERT_TRUE(log->line_count() == 6);
+    ASSERT_TRUE(log->line(0) == "Line 14");  // oldest of the 6 survivors from 20 pushes
+}
+
+/** @brief A line fades over fade_seconds once past hold_seconds, then is removed
+ *         from the model and its pooled Text node deactivated -- not just blanked. */
+void test_message_log_expires_and_deactivates_line() {
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+    UIBuilder builder(&root);
+    MessageLog* log = builder.add_message_log("Log", 4, {200.0f, 100.0f});
+    log->hold_seconds = 0.2f;
+    log->fade_seconds = 0.1f;
+
+    log->push("Pickup: Iron Sword");
+    auto* line0 = log->owner->find_descendant("Line_0");
+    ASSERT_TRUE(line0 != nullptr);
+    ASSERT_TRUE(line0->active());
+    ASSERT_TRUE(log->line_count() == 1);
+
+    log->update(0.25f);  // past hold_seconds, mid-fade -- still present, dimmer
+    ASSERT_TRUE(log->line_count() == 1);
+    ASSERT_TRUE(line0->active());
+    ASSERT_TRUE(line0->get_component<Text>()->color.a < 1.0f);
+
+    log->update(0.2f);  // now past hold + fade entirely
+    ASSERT_TRUE(log->line_count() == 0);
+    ASSERT_TRUE(!line0->active());
+}
+
+/** @brief newest_first controls on-screen slot order (checked via the pooled Line_N
+ *         nodes directly); line(i) itself always reports oldest-pushed-first,
+ *         per its own doc, regardless of newest_first. */
+void test_message_log_newest_first_ordering() {
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+    UIBuilder builder(&root);
+    MessageLog* log = builder.add_message_log("Log", 3, {200.0f, 100.0f});
+    log->newest_first = true;
+    log->push("A");
+    log->push("B");
+    log->push("C");
+
+    auto text_at = [&](int i) -> const std::string& {
+        return log->owner->find_descendant("Line_" + std::to_string(i))->get_component<Text>()->text;
+    };
+    ASSERT_TRUE(text_at(0) == "C");
+    ASSERT_TRUE(text_at(1) == "B");
+    ASSERT_TRUE(text_at(2) == "A");
+
+    // line() itself is unaffected by newest_first -- push order, not screen order.
+    ASSERT_TRUE(log->line(0) == "A");
+    ASSERT_TRUE(log->line(2) == "C");
+}
+
+/** @brief hold_seconds <= 0 is the console-scrollback configuration -- lines
+ *         never expire regardless of elapsed update() time. */
+void test_message_log_zero_hold_never_expires() {
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+    UIBuilder builder(&root);
+    MessageLog* log = builder.add_message_log("Log", 4, {200.0f, 100.0f});
+    log->hold_seconds = 0.0f;
+
+    log->push("> give potion_health 5");
+    log->update(10000.0f);
+
+    ASSERT_TRUE(log->line_count() == 1);
+    ASSERT_TRUE(log->line(0) == "> give potion_health 5");
+}
+
+/** @brief A small item database shared by the InventoryBinding/Hotbar tests below --
+ *         potion_health (stackable to 16), sword_iron (unstackable). */
+static coopa::item::ItemDatabase make_binding_test_db() {
+    coopa::item::ItemDatabase db;
+
+    coopa::item::ItemDef potion;
+    potion.id = coopa::item::ItemId::from_name("potion_health");
+    potion.name = "Health Potion";
+    potion.icon = "potion";
+    potion.description = "Restores health.";
+    potion.max_stack = 16;
+    db.define(potion);
+
+    coopa::item::ItemDef sword;
+    sword.id = coopa::item::ItemId::from_name("sword_iron");
+    sword.name = "Iron Sword";
+    sword.max_stack = 1;
+    db.define(sword);
+
+    return db;
+}
+
+void test_inventory_binding_pushes_model_into_grid() {
+    coopa::item::ItemDatabase db = make_binding_test_db();
+    coopa::item::Inventory inv(4, &db);
+    inv.set(0, coopa::item::ItemStack{coopa::item::ItemId::from_name("potion_health"), 3}, false);
+
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+    UIBuilder builder(&root);
+    InventoryGrid* grid = builder.add_inventory_grid("Bag", 2, 2, {40.0f, 40.0f}, {4.0f, 4.0f});
+
+    InventoryBinding* binding = detail::bind_inventory(grid, &inv, &db);
+    ASSERT_TRUE(binding != nullptr);
+
+    ASSERT_TRUE(grid->get_item(0).id == "potion_health");
+    ASSERT_TRUE(grid->get_item(0).name == "Health Potion");
+    ASSERT_TRUE(grid->get_item(0).count == 3);
+    ASSERT_TRUE(grid->get_item(0).max_stack == 16);
+    ASSERT_TRUE(grid->get_item(0).icon_path == "potion");
+    ASSERT_TRUE(grid->get_item(1).empty());
+
+    // A model change AFTER the initial bind must also mirror through.
+    inv.add(coopa::item::ItemId::from_name("sword_iron"), 1);
+    ASSERT_TRUE(grid->get_item(1).id == "sword_iron");
+}
+
+/** @brief Drives InventorySlot's real IPointerHandler overrides (the same path
+ *         test_inventory_slot_drag_drop_via_handlers exercises against a
+ *         standalone grid) and asserts the coopa::item::Inventory MODEL moved,
+ *         not just the grid's own view-local mirror. */
+void test_inventory_binding_drop_mutates_model_not_just_view() {
+    coopa::item::ItemDatabase db = make_binding_test_db();
+    coopa::item::Inventory inv(4, &db);
+    coopa::item::ItemId potion = coopa::item::ItemId::from_name("potion_health");
+    inv.set(0, coopa::item::ItemStack{potion, 1}, false);
+
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    auto* root = canvas_obj->add_child(std::make_unique<SceneObject>("InventoryRoot"));
+    root->add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+
+    UIBuilder builder(root);
+    InventoryGrid* grid = builder.add_inventory_grid("Bag", 2, 2, {40.0f, 40.0f}, {4.0f, 4.0f});
+    detail::bind_inventory(grid, &inv, &db);
+
+    canvas->rebuild_layout(400, 400);
+
+    auto* slot0_obj = grid->owner->find_descendant("Slot_0");
+    auto* slot1_obj = grid->owner->find_descendant("Slot_1");
+    ASSERT_TRUE(slot0_obj && slot1_obj);
+    glm::vec2 slot0_center = slot0_obj->get_component<RectTransform>()->rect().center();
+    glm::vec2 slot1_center = slot1_obj->get_component<RectTransform>()->rect().center();
+
+    PointerEventData down;
+    down.position = slot0_center;
+    dispatch_chain_for_test(slot0_obj, down, [](IPointerHandler* h, const PointerEventData& d) { h->on_pointer_down(d); });
+    PointerEventData drag;
+    drag.position = slot1_center;
+    dispatch_chain_for_test(slot0_obj, drag, [](IPointerHandler* h, const PointerEventData& d) { h->on_drag(d); });
+    PointerEventData up;
+    up.position = slot1_center;
+    dispatch_chain_for_test(slot0_obj, up, [](IPointerHandler* h, const PointerEventData& d) { h->on_pointer_up(d); });
+
+    ASSERT_TRUE(inv.at(0).empty());
+    ASSERT_TRUE(inv.at(1).item == potion);
+    ASSERT_TRUE(inv.at(1).count == 1);
+
+    ASSERT_TRUE(grid->get_item(0).empty());
+    ASSERT_TRUE(grid->get_item(1).id == "potion_health");
+}
+
+/** @brief The widget's OWN mirrored InventoryItem::max_stack, deliberately corrupted
+ *         here, must be irrelevant once transfer_override is installed -- the merge
+ *         cap must come from Inventory::move_or_merge() reading the ItemDatabase. */
+void test_inventory_binding_respects_itemdef_max_stack_on_merge() {
+    coopa::item::ItemDatabase db = make_binding_test_db();  // potion_health max_stack = 16
+    coopa::item::Inventory inv(2, &db);
+    coopa::item::ItemId potion = coopa::item::ItemId::from_name("potion_health");
+    inv.set(0, coopa::item::ItemStack{potion, 5}, false);
+    inv.set(1, coopa::item::ItemStack{potion, 14}, false);
+
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+    UIBuilder builder(&root);
+    InventoryGrid* grid = builder.add_inventory_grid("Bag", 1, 2, {40.0f, 40.0f}, {4.0f, 4.0f});
+    detail::bind_inventory(grid, &inv, &db);
+
+    InventoryItem stale = grid->get_item(1);
+    stale.max_stack = 999;  // corrupt the mirror -- if consulted, the merge below would cap at 19
+    grid->set_item(1, stale, false);
+
+    ASSERT_TRUE(grid->transfer_or_swap_items(0, 1));
+    ASSERT_TRUE(inv.at(1).count == 16);  // capped by the ItemDef, not the corrupted mirror
+    ASSERT_TRUE(inv.at(0).count == 3);
+    ASSERT_TRUE(grid->get_item(1).count == 16);  // the binding's on_slot_changed refreshed the mirror too
+}
+
+void test_inventory_binding_detach_stops_forwarding() {
+    coopa::item::ItemDatabase db = make_binding_test_db();
+    coopa::item::Inventory inv(2, &db);
+    coopa::item::ItemId potion = coopa::item::ItemId::from_name("potion_health");
+    inv.set(0, coopa::item::ItemStack{potion, 1}, false);
+
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+    UIBuilder builder(&root);
+    InventoryGrid* grid = builder.add_inventory_grid("Bag", 1, 2, {40.0f, 40.0f}, {4.0f, 4.0f});
+    InventoryBinding* binding = detail::bind_inventory(grid, &inv, &db);
+    ASSERT_TRUE(grid->get_item(0).id == "potion_health");
+
+    binding->detach();
+    ASSERT_TRUE(!grid->transfer_override);
+
+    inv.add(potion, 5);  // model changes -- must NOT reach the now-detached grid
+    ASSERT_TRUE(grid->get_item(0).count == 1);
+
+    // transfer_or_swap_items() now falls back to the widget's own built-in rule.
+    ASSERT_TRUE(grid->transfer_or_swap_items(0, 1));
+    ASSERT_TRUE(grid->get_item(1).id == "potion_health");
+}
+
+void test_hotbar_handle_selection_follows_model() {
+    coopa::item::ItemDatabase db = make_binding_test_db();
+    coopa::item::Inventory inv(9, &db);
+    coopa::item::Hotbar hotbar(&inv, 0, 9);
+
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({600.0f, 200.0f});
+    UIBuilder builder(&root);
+    HotbarHandle hb = builder.add_hotbar("Hotbar", &hotbar, &db);
+
+    ASSERT_TRUE(hb.grid() != nullptr);
+    ASSERT_TRUE(hb.grid()->selected_slot() == -1);
+
+    hotbar.next();  // model-driven selection change
+    ASSERT_TRUE(hotbar.selected() == 0);
+    ASSERT_TRUE(hb.grid()->selected_slot() == 0);
+
+    hb.select(3);  // HotbarHandle::select() forwards to the model
+    ASSERT_TRUE(hotbar.selected() == 3);
+    ASSERT_TRUE(hb.grid()->selected_slot() == 3);
+}
+
+void test_hotbar_slot_click_routes_through_model() {
+    coopa::item::ItemDatabase db = make_binding_test_db();
+    coopa::item::Inventory inv(9, &db);
+    coopa::item::Hotbar hotbar(&inv, 0, 9);
+
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    auto* root = canvas_obj->add_child(std::make_unique<SceneObject>("Root"));
+    root->add_component<RectTransform>()->set_size_delta({600.0f, 200.0f});
+
+    UIBuilder builder(root);
+    HotbarHandle hb = builder.add_hotbar("Hotbar", &hotbar, &db);
+
+    canvas->rebuild_layout(600, 200);
+
+    auto* slot2_obj = hb.grid()->owner->find_descendant("Slot_2");
+    ASSERT_TRUE(slot2_obj != nullptr);
+    glm::vec2 center = slot2_obj->get_component<RectTransform>()->rect().center();
+
+    PointerEventData down;
+    down.position = center;
+    dispatch_chain_for_test(slot2_obj, down, [](IPointerHandler* h, const PointerEventData& d) { h->on_pointer_down(d); });
+    PointerEventData up;
+    up.position = center;  // no movement -- a plain click, not a drag
+    dispatch_chain_for_test(slot2_obj, up, [](IPointerHandler* h, const PointerEventData& d) { h->on_pointer_up(d); });
+
+    ASSERT_TRUE(hotbar.selected() == 2);
+    ASSERT_TRUE(hb.grid()->selected_slot() == 2);
+}
+
+/** @brief `first_slot` shifts every grid<->model index by a constant offset --
+ *         a drop between grid slots 0/1 must move MODEL slots first_slot/first_slot+1. */
+void test_inventory_binding_first_slot_offset() {
+    coopa::item::ItemDatabase db = make_binding_test_db();
+    coopa::item::Inventory inv(20, &db);
+    coopa::item::ItemId potion = coopa::item::ItemId::from_name("potion_health");
+    inv.set(5, coopa::item::ItemStack{potion, 7}, false);
+
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
+    UIBuilder builder(&root);
+    InventoryGrid* grid = builder.add_inventory_grid("Hotbar", 1, 4, {40.0f, 40.0f}, {4.0f, 4.0f});
+    detail::bind_inventory(grid, &inv, &db, /*first_slot=*/5);
+
+    ASSERT_TRUE(grid->get_item(0).id == "potion_health");
+    ASSERT_TRUE(grid->get_item(0).count == 7);
+
+    ASSERT_TRUE(grid->transfer_or_swap_items(0, 1));
+    ASSERT_TRUE(inv.at(5).empty());
+    ASSERT_TRUE(inv.at(6).item == potion);
+    ASSERT_TRUE(inv.at(0).empty());  // untouched -- proves the offset was actually applied
+}
+
+void test_console_toggle_opens_focuses_and_pushes_modal() {
+    ModalContext::instance().clear();
+    FocusContext::instance().clear_focus();
+
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+    UIBuilder builder(&root);
+    coopa::input::Input raw_input;
+    ConsoleHandle console = builder.add_console("Console", raw_input);
+
+    ASSERT_TRUE(!console.is_open());
+
+    raw_input.begin_frame(0.016f);
+    raw_input.push_key(coopa::input::Key::GraveAccent, 0, coopa::input::KeyAction::Press, coopa::input::Mods::None);
+    console.component()->late_update(0.016f);
+
+    ASSERT_TRUE(console.is_open());
+    ASSERT_TRUE(FocusContext::instance().focused() == console.input()->owner);
+    ASSERT_TRUE(ModalContext::instance().top() == console.component()->panel);
+
+    console.close();
+    ModalContext::instance().clear();
+    FocusContext::instance().clear_focus();
+}
+
+/** @brief Load-bearing: TextEditBase::on_char() only rejects codepoints > 127, and
+ *         TextField::accept_char() accepts the full printable range, so without
+ *         ConsoleInput's own accept_char() override the very backtick that opens
+ *         the console would also type itself into the freshly-focused field. */
+void test_console_backtick_never_enters_buffer() {
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+    UIBuilder builder(&root);
+    coopa::input::Input raw_input;
+    ConsoleHandle console = builder.add_console("Console", raw_input);
+
+    console.open();
+    ASSERT_TRUE(console.input()->editing());
+
+    console.input()->on_char(0x60);
+    console.input()->on_char('h');
+    console.input()->on_char('i');
+    console.input()->on_key(make_key_(coopa::input::Key::Enter));
+
+    ASSERT_TRUE(console.scrollback()->line(0) == "> hi");  // no leading backtick
+
+    console.close();
+    ModalContext::instance().clear();
+}
+
+void test_console_second_toggle_closes_and_clears_modal_and_focus() {
+    ModalContext::instance().clear();
+    FocusContext::instance().clear_focus();
+
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+    UIBuilder builder(&root);
+    coopa::input::Input raw_input;
+    ConsoleHandle console = builder.add_console("Console", raw_input);
+
+    raw_input.begin_frame(0.016f);
+    raw_input.push_key(coopa::input::Key::GraveAccent, 0, coopa::input::KeyAction::Press, coopa::input::Mods::None);
+    console.component()->late_update(0.016f);
+    ASSERT_TRUE(console.is_open());
+
+    // Release before the second press -- push_key(Press) only sets the "pressed"
+    // edge when the key wasn't already down (see coopa::input::Input::push_key()),
+    // matching how a real keyboard actually reports a second, separate keystroke.
+    raw_input.begin_frame(0.016f);
+    raw_input.push_key(coopa::input::Key::GraveAccent, 0, coopa::input::KeyAction::Release, coopa::input::Mods::None);
+    console.component()->late_update(0.016f);
+
+    raw_input.begin_frame(0.016f);
+    raw_input.push_key(coopa::input::Key::GraveAccent, 0, coopa::input::KeyAction::Press, coopa::input::Mods::None);
+    console.component()->late_update(0.016f);
+
+    ASSERT_TRUE(!console.is_open());
+    ASSERT_TRUE(FocusContext::instance().focused() == nullptr);
+    ASSERT_TRUE(ModalContext::instance().top() == nullptr);
+}
+
+void test_console_enter_submits_and_stays_editing() {
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+    UIBuilder builder(&root);
+    coopa::input::Input raw_input;
+    ConsoleHandle console = builder.add_console("Console", raw_input);
+    console.open();
+
+    console.input()->on_char('h');
+    console.input()->on_char('i');
+    console.input()->on_key(make_key_(coopa::input::Key::Enter));
+
+    ASSERT_TRUE(console.input()->editing());       // stays editing -- unlike a plain TextField
+    ASSERT_TRUE(console.input()->text().empty());  // committed value cleared
+    ASSERT_TRUE(console.scrollback()->line(0) == "> hi");
+
+    console.close();
+    ModalContext::instance().clear();
+}
+
+void test_console_unknown_command_echoes_and_help_lists_registered() {
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+    UIBuilder builder(&root);
+    coopa::input::Input raw_input;
+    ConsoleHandle console = builder.add_console("Console", raw_input);
+
+    bool give_called = false;
+    console.register_command("give", "give <id> [n]", [&](const std::vector<std::string>&) {
+        give_called = true;
+    });
+
+    console.component()->submit("bogus_command");
+    ASSERT_TRUE(console.scrollback()->line(1) == "Unknown command: bogus_command");
+
+    console.component()->submit("give potion_health 5");
+    ASSERT_TRUE(give_called);
+
+    console.component()->submit("help");
+    bool found_give_help = false;
+    for (int i = 0; i < console.scrollback()->line_count(); ++i) {
+        if (console.scrollback()->line(i) == "give - give <id> [n]") found_give_help = true;
+    }
+    ASSERT_TRUE(found_give_help);
+}
+
+void test_console_history_up_down() {
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+    UIBuilder builder(&root);
+    coopa::input::Input raw_input;
+    ConsoleHandle console = builder.add_console("Console", raw_input);
+    console.open();
+
+    console.component()->submit("first");
+    console.component()->submit("second");
+
+    console.input()->on_key(make_key_(coopa::input::Key::Up));
+    ASSERT_TRUE(console.input()->label_text->text == "second");
+
+    console.input()->on_key(make_key_(coopa::input::Key::Up));
+    ASSERT_TRUE(console.input()->label_text->text == "first");
+
+    console.input()->on_key(make_key_(coopa::input::Key::Down));
+    ASSERT_TRUE(console.input()->label_text->text == "second");
+
+    console.input()->on_key(make_key_(coopa::input::Key::Down));
+    ASSERT_TRUE(console.input()->label_text->text.empty());  // back to a blank new line
+
+    console.close();
+    ModalContext::instance().clear();
+}
+
+/** @brief The real integration test (mirrors test_modal_blocks_pointer_dispatch_end_to_end):
+ *         drives EventSystem::process() with a synthetic coopa::input::Input while the
+ *         console is open, and asserts a click on ordinary HUD content underneath never
+ *         reaches its handler. */
+void test_console_modal_blocks_hud_beneath() {
+    ModalContext::instance().clear();
+
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    UIBuilder root(canvas_obj.get());
+    int click_count = 0;
+    Button* behind = root.add_button("Behind", [&click_count]() { ++click_count; });
+    behind->owner->get_component<RectTransform>()->anchor_preset(AnchorPreset::StretchAll);
+    behind->owner->get_component<RectTransform>()->set_size_delta({0.0f, 0.0f});
+
+    coopa::input::Input raw_input;
+    ConsoleHandle console = root.add_console("Console", raw_input);
+
+    canvas_obj->start();
+    canvas->rebuild_layout(400, 300);
+
+    UiInput ui_input;
+    EventSystem event_system;
+    glm::vec2 center = canvas->root_rect().center();
+
+    auto click_at_center = [&]() {
+        raw_input.begin_frame(0.016f);
+        raw_input.push_cursor_position(center.x, canvas->root_rect().size().y - center.y);
+        raw_input.push_mouse_button(coopa::input::MouseButton::Left, coopa::input::KeyAction::Press, coopa::input::Mods::None);
+        ui_input.update(raw_input, canvas->root_rect(), canvas->scale_factor());
+        event_system.process(ui_input, *canvas_obj, 0.016f);
+
+        raw_input.begin_frame(0.016f);
+        raw_input.push_mouse_button(coopa::input::MouseButton::Left, coopa::input::KeyAction::Release, coopa::input::Mods::None);
+        ui_input.update(raw_input, canvas->root_rect(), canvas->scale_factor());
+        event_system.process(ui_input, *canvas_obj, 0.016f);
+    };
+
+    click_at_center();
+    ASSERT_TRUE(click_count == 1);
+
+    console.open();
+    click_at_center();
+    ASSERT_TRUE(click_count == 1);  // blocked while the console is open
+
+    console.close();
+    click_at_center();
+    ASSERT_TRUE(click_count == 2);
+
+    ModalContext::instance().clear();
+}
+
+/** @brief Console::~Console() removes `panel` from ModalContext's stack even though
+ *         `panel` (a child SceneObject) is already-destroyed memory by the time the
+ *         destructor body runs -- see that method's own doc for why comparing the
+ *         dangling pointer's VALUE (never dereferencing it) is safe. Dialog does
+ *         NOT do this for itself; this is the fix that class's own bug doesn't get. */
+void test_console_destructor_removes_modal_root() {
+    ModalContext::instance().clear();
+    {
+        auto root_obj = std::make_unique<SceneObject>("Root");
+        root_obj->add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+        UIBuilder builder(root_obj.get());
+        coopa::input::Input raw_input;
+        ConsoleHandle console = builder.add_console("Console", raw_input);
+        console.open();
+        ASSERT_TRUE(ModalContext::instance().top() == console.component()->panel);
+        // root_obj destructs here: children_ (ConsolePanel) before components_ (Console).
+    }
+    ASSERT_TRUE(ModalContext::instance().top() == nullptr);
 }
 
 int main() {
@@ -5945,10 +6862,40 @@ int main() {
     RUN_TEST(test_navigation_driver_combobox_via_real_pad_stationary_mouse);
     RUN_TEST(test_navigation_ring_follows_tab_switch);
     RUN_TEST(test_inventory_gamepad_pick_and_place);
+    RUN_TEST(test_inventory_slot_icon_path_resolves_through_icon_library);
+    RUN_TEST(test_inventory_grid_selected_slot_is_exclusive);
+    RUN_TEST(test_inventory_grid_transfer_override_intercepts_drop_and_pick_place);
+    RUN_TEST(test_inventory_grid_null_override_matches_builtin_three_way);
     RUN_TEST(test_cursor_overlay_recovers_after_leaving_window);
     RUN_TEST(test_focus_ring_tracks_selected_rect);
     RUN_TEST(test_focus_ring_snaps_on_first_show);
     RUN_TEST(test_theme_focus_style_parsed);
+    RUN_TEST(test_theme_hud_style_parsed);
+    RUN_TEST(test_hud_corner_resolves_expected_rect);
+    RUN_TEST(test_hud_layer_is_transparent_to_raycast);
+    RUN_TEST(test_progress_bar_fill_matches_slider_for_all_directions);
+    RUN_TEST(test_progress_bar_clamps_and_formats_label);
+    RUN_TEST(test_progress_bar_ghost_trails_then_catches_up);
+    RUN_TEST(test_progress_bar_bound_resource_drives_value);
+    RUN_TEST(test_message_log_pool_is_reused_and_capped);
+    RUN_TEST(test_message_log_expires_and_deactivates_line);
+    RUN_TEST(test_message_log_newest_first_ordering);
+    RUN_TEST(test_message_log_zero_hold_never_expires);
+    RUN_TEST(test_inventory_binding_pushes_model_into_grid);
+    RUN_TEST(test_inventory_binding_drop_mutates_model_not_just_view);
+    RUN_TEST(test_inventory_binding_respects_itemdef_max_stack_on_merge);
+    RUN_TEST(test_inventory_binding_detach_stops_forwarding);
+    RUN_TEST(test_hotbar_handle_selection_follows_model);
+    RUN_TEST(test_hotbar_slot_click_routes_through_model);
+    RUN_TEST(test_inventory_binding_first_slot_offset);
+    RUN_TEST(test_console_toggle_opens_focuses_and_pushes_modal);
+    RUN_TEST(test_console_backtick_never_enters_buffer);
+    RUN_TEST(test_console_second_toggle_closes_and_clears_modal_and_focus);
+    RUN_TEST(test_console_enter_submits_and_stays_editing);
+    RUN_TEST(test_console_unknown_command_echoes_and_help_lists_registered);
+    RUN_TEST(test_console_history_up_down);
+    RUN_TEST(test_console_modal_blocks_hud_beneath);
+    RUN_TEST(test_console_destructor_removes_modal_root);
 
     std::cout << "===========================================" << std::endl;
     std::cout << "Tests run: " << g_tests_run << ", Failed: " << g_tests_failed << std::endl;

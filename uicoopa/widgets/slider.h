@@ -9,6 +9,7 @@
 #include <uicoopa/ui_component.h>
 #include <uicoopa/input/event_system.h>
 #include <uicoopa/layout/rect_transform.h>
+#include <uicoopa/widgets/fill_direction.h>
 #include <uicoopa/widgets/image.h>
 #include <uicoopa/widgets/mask.h>
 #include <uicoopa/widgets/color_transition.h>
@@ -22,17 +23,6 @@
 
 namespace coopa {
 namespace ui {
-
-/**
- * @enum SliderDirection
- * @brief Direction along which the slider value increases.
- */
-enum class SliderDirection {
-    LeftToRight,
-    RightToLeft,
-    BottomToTop,
-    TopToBottom,
-};
 
 /**
  * @class Slider
@@ -186,28 +176,7 @@ public:
 
     void update_visuals() {
         float t = normalized_value();
-        if (fill_rect) {
-            switch (direction) {
-                case SliderDirection::LeftToRight:
-                    fill_rect->set_anchor_min({0.0f, 0.0f});
-                    fill_rect->set_anchor_max({t, 1.0f});
-                    break;
-                case SliderDirection::RightToLeft:
-                    fill_rect->set_anchor_min({1.0f - t, 0.0f});
-                    fill_rect->set_anchor_max({1.0f, 1.0f});
-                    break;
-                case SliderDirection::BottomToTop:
-                    fill_rect->set_anchor_min({0.0f, 0.0f});
-                    fill_rect->set_anchor_max({1.0f, t});
-                    break;
-                case SliderDirection::TopToBottom:
-                    fill_rect->set_anchor_min({0.0f, 1.0f - t});
-                    fill_rect->set_anchor_max({1.0f, 1.0f});
-                    break;
-            }
-            fill_rect->set_size_delta({0.0f, 0.0f});
-            fill_rect->set_anchored_position({0.0f, 0.0f});
-        }
+        apply_fill_rect(fill_rect, direction, t);
         if (handle_rect) {
             switch (direction) {
                 case SliderDirection::LeftToRight:

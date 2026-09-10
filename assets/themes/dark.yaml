@@ -131,3 +131,33 @@ tab:
   selected:       { r: 0.80, g: 0.42, b: 0.10, a: 1.0 }
   selected_hover: { r: 0.95, g: 0.53, b: 0.16, a: 1.0 }
   indicator:      { r: 1.00, g: 0.58, b: 0.20, a: 1.0 }
+
+hud:
+  bar_bg:     { r: 0.10, g: 0.11, b: 0.14, a: 0.85 }
+  bar_border: { r: 0.30, g: 0.34, b: 0.42, a: 1.0 }
+  bar_text:   { r: 0.95, g: 0.95, b: 0.97, a: 1.0 }
+  health_fill:   { r: 0.85, g: 0.22, b: 0.24, a: 1.0 }
+  health_ghost:  { r: 0.45, g: 0.12, b: 0.13, a: 1.0 }
+  stamina_fill:  { r: 0.80, g: 0.68, b: 0.20, a: 1.0 }
+  stamina_ghost: { r: 0.45, g: 0.38, b: 0.12, a: 1.0 }
+  hotbar_key:      { r: 0.70, g: 0.72, b: 0.78, a: 0.9 }
+  hotbar_selected: { r: 1.00, g: 0.62, b: 0.15, a: 1.0 }
+  log_bg:   { r: 0.08, g: 0.09, b: 0.12, a: 0.0 }
+  log_text: { r: 0.90, g: 0.91, b: 0.94, a: 1.0 }
+  console_bg:        { r: 0.08, g: 0.09, b: 0.12, a: 0.96 }
+  console_input_bg:  { r: 0.14, g: 0.16, b: 0.20, a: 1.0 }
+  console_text:      { r: 0.92, g: 0.93, b: 0.96, a: 1.0 }
+  console_prompt:    { r: 0.60, g: 0.80, b: 1.00, a: 1.0 }
+  console_echo:      { r: 0.65, g: 0.68, b: 0.75, a: 1.0 }
+  console_error:     { r: 0.92, g: 0.40, b: 0.38, a: 1.0 }
+  corner_margin: 16.0
+  bar_width: 200.0
+  bar_height: 14.0
+  bar_spacing: 6.0
+  ghost_delay: 0.35
+  ghost_speed: 45.0
+  log_line_height: 18.0
+  log_hold_seconds: 6.0
+  log_fade_seconds: 1.0
+  console_height: 220.0
+  console_input_height: 26.0

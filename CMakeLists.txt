@@ -92,6 +92,12 @@ add_executable(uicoopa_gamepad_builder test_gamepad_builder.cpp)
 target_link_libraries(uicoopa_gamepad_builder PRIVATE coopa::gfx ${UICOOPA_AUDIO_LIBS})
 add_dependencies(uicoopa_gamepad_builder uicoopa_shaders)
 
+# Windowed demo: a gameplay HUD bound to coopa::item / coopa::stat models --
+# see test_hud_builder.cpp.
+add_executable(uicoopa_hud_builder test_hud_builder.cpp)
+target_link_libraries(uicoopa_hud_builder PRIVATE coopa::gfx ${UICOOPA_AUDIO_LIBS})
+add_dependencies(uicoopa_hud_builder uicoopa_shaders)
+
 enable_testing()
 add_test(NAME uicoopa_tests COMMAND uicoopa)
 
@@ -109,5 +115,6 @@ if(GFX_LEAK_CHECK)
     add_dependencies(uicoopa_settings_builder uicoopa_leak_check)
     add_dependencies(uicoopa_dialog_builder uicoopa_leak_check)
     add_dependencies(uicoopa_gamepad_builder uicoopa_leak_check)
+    add_dependencies(uicoopa_hud_builder uicoopa_leak_check)
     add_test(NAME uicoopa_no_vulkan COMMAND ${GFXCOOPA_DIR}/tools/check_no_vulkan.sh ${CMAKE_SOURCE_DIR})
 endif()

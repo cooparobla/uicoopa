@@ -202,6 +202,38 @@ inline void parse_theme(const fkyaml::node& root, UITheme& out) {
         if (n.contains("move_duration")) s.move_duration = n.at("move_duration").get_value<float>();
         if (n.contains("fade_duration")) s.fade_duration = n.at("fade_duration").get_value<float>();
     }
+    if (root.contains("hud")) {
+        const auto& n = root.at("hud");
+        auto& h = out.hud;
+        if (n.contains("bar_bg"))     h.bar_bg     = parse_theme_color(n.at("bar_bg"), h.bar_bg);
+        if (n.contains("bar_border")) h.bar_border = parse_theme_color(n.at("bar_border"), h.bar_border);
+        if (n.contains("bar_text"))   h.bar_text   = parse_theme_color(n.at("bar_text"), h.bar_text);
+        if (n.contains("health_fill"))    h.health_fill    = parse_theme_color(n.at("health_fill"), h.health_fill);
+        if (n.contains("health_ghost"))   h.health_ghost   = parse_theme_color(n.at("health_ghost"), h.health_ghost);
+        if (n.contains("stamina_fill"))   h.stamina_fill   = parse_theme_color(n.at("stamina_fill"), h.stamina_fill);
+        if (n.contains("stamina_ghost"))  h.stamina_ghost  = parse_theme_color(n.at("stamina_ghost"), h.stamina_ghost);
+        if (n.contains("hotbar_key"))      h.hotbar_key      = parse_theme_color(n.at("hotbar_key"), h.hotbar_key);
+        if (n.contains("hotbar_selected")) h.hotbar_selected = parse_theme_color(n.at("hotbar_selected"), h.hotbar_selected);
+        if (n.contains("log_bg"))   h.log_bg   = parse_theme_color(n.at("log_bg"), h.log_bg);
+        if (n.contains("log_text")) h.log_text = parse_theme_color(n.at("log_text"), h.log_text);
+        if (n.contains("console_bg"))       h.console_bg       = parse_theme_color(n.at("console_bg"), h.console_bg);
+        if (n.contains("console_input_bg")) h.console_input_bg = parse_theme_color(n.at("console_input_bg"), h.console_input_bg);
+        if (n.contains("console_text"))     h.console_text     = parse_theme_color(n.at("console_text"), h.console_text);
+        if (n.contains("console_prompt"))   h.console_prompt   = parse_theme_color(n.at("console_prompt"), h.console_prompt);
+        if (n.contains("console_echo"))     h.console_echo     = parse_theme_color(n.at("console_echo"), h.console_echo);
+        if (n.contains("console_error"))    h.console_error    = parse_theme_color(n.at("console_error"), h.console_error);
+        if (n.contains("corner_margin")) h.corner_margin = n.at("corner_margin").get_value<float>();
+        if (n.contains("bar_width"))     h.bar_width     = n.at("bar_width").get_value<float>();
+        if (n.contains("bar_height"))    h.bar_height    = n.at("bar_height").get_value<float>();
+        if (n.contains("bar_spacing"))   h.bar_spacing   = n.at("bar_spacing").get_value<float>();
+        if (n.contains("ghost_delay"))   h.ghost_delay   = n.at("ghost_delay").get_value<float>();
+        if (n.contains("ghost_speed"))   h.ghost_speed   = n.at("ghost_speed").get_value<float>();
+        if (n.contains("log_line_height"))  h.log_line_height  = n.at("log_line_height").get_value<float>();
+        if (n.contains("log_hold_seconds")) h.log_hold_seconds = n.at("log_hold_seconds").get_value<float>();
+        if (n.contains("log_fade_seconds")) h.log_fade_seconds = n.at("log_fade_seconds").get_value<float>();
+        if (n.contains("console_height"))       h.console_height       = n.at("console_height").get_value<float>();
+        if (n.contains("console_input_height")) h.console_input_height = n.at("console_input_height").get_value<float>();
+    }
     if (root.contains("metrics")) {
         const auto& n = root.at("metrics");
         auto& m = out.metrics;

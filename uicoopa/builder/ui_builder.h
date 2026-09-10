@@ -21,6 +21,7 @@
 #include <uicoopa/builder/detail/widgets.h>
 #include <uicoopa/builder/detail/rows.h>
 #include <uicoopa/builder/detail/inventory.h>
+#include <uicoopa/builder/detail/hud.h>
 #include <uicoopa/builder/detail/values.h>
 #include <uicoopa/builder/detail/sections.h>
 #include <uicoopa/builder/detail/dialogs.h>
@@ -52,6 +53,8 @@ namespace ui {
 class SectionSet;
 class TabSet;
 class DialogHandle;
+class HotbarHandle;
+class ConsoleHandle;
 
 /** @struct ActionSpec
  *  @brief One button in a UIBuilder::add_action_bar() row. */
@@ -525,6 +528,83 @@ public:
         return detail::make_inventory_grid(ctx_(), name, rows, cols, slot_size, slot_spacing);
     }
 
+    /**
+     * @brief A hotbar (a 1xN InventoryGrid with key labels) bound to `hotbar`'s
+     *        backing Inventory -- see widgets/inventory_binding.h for the
+     *        model/view contract. Declared here, defined out-of-line after
+     *        HotbarHandle (below) is a complete type -- same reason
+     *        dialog()/tab_view() are.
+     * @param database Passed straight through to the InventoryBinding; may be null.
+     */
+    HotbarHandle add_hotbar(const std::string& name, coopa::item::Hotbar* hotbar,
+                            const coopa::item::ItemDatabase* database,
+                            glm::vec2 slot_size = {52.0f, 52.0f}, glm::vec2 slot_spacing = {6.0f, 6.0f},
+                            bool key_labels = true);
+
+    // --- Gameplay HUD Shorthand ---
+
+    /** @brief A full-canvas, non-interactive overlay node -- the usual root for a
+     *         gameplay HUD (see builder/detail/hud.h's make_hud_layer() for why
+     *         its own hittable=false doesn't stop interactive children, e.g. a
+     *         hotbar, from receiving clicks). */
+    UIBuilder hud_layer(const std::string& name = "HUD") {
+        ensure_node_();
+        return child_(detail::make_hud_layer(ctx_(), name));
+    }
+
+    /** @brief A fixed-size region docked to one of eight screen corners/edges.
+     * @param margin < 0 uses theme.hud.corner_margin.
+     * @param flow Vertical/Horizontal packs children toward this corner via a
+     *        LayoutGroup; SectionFlow::None adds none, for a single pre-sized child. */
+    UIBuilder hud_corner(HudAnchor anchor, glm::vec2 size, float margin = -1.0f,
+                        SectionFlow flow = SectionFlow::Vertical, const std::string& name = "") {
+        ensure_node_();
+        float resolved_margin = margin >= 0.0f ? margin : theme_->hud.corner_margin;
+        std::string resolved_name = !name.empty() ? name : std::string("Hud") + detail::hud_anchor_name(anchor);
+        return child_(detail::make_hud_corner(ctx_(), anchor, size, resolved_margin, flow, resolved_name));
+    }
+
+    /** @brief A display-only fill bar -- see ProgressBar's own doc for why this
+     *         isn't just a non-interactive Slider.
+     * @param size.x/y <= 0 use theme.hud.bar_width/bar_height. */
+    ProgressBar* add_progress_bar(const std::string& name, float min_value = 0.0f, float max_value = 1.0f,
+                                  float value = 1.0f, ProgressBarRole role = ProgressBarRole::Neutral,
+                                  glm::vec2 size = {-1.0f, -1.0f}, bool with_label = false) {
+        ensure_node_();
+        glm::vec2 resolved = {
+            size.x > 0.0f ? size.x : theme_->hud.bar_width,
+            size.y > 0.0f ? size.y : theme_->hud.bar_height,
+        };
+        return detail::make_progress_bar(ctx_(), name, min_value, max_value, value, role, resolved, with_label);
+    }
+
+    /** @brief An "icon + labeled bar" row -- the standard HUD stat readout shape.
+     * @param resource If non-null, binds the bar to it immediately (ProgressBar::bind()).
+     * @param width <= 0 uses theme.hud.bar_width. */
+    StatBar add_stat_bar(const std::string& name, const std::string& icon_name,
+                        coopa::stat::Resource* resource = nullptr,
+                        ProgressBarRole role = ProgressBarRole::Neutral, float width = -1.0f) {
+        ensure_node_();
+        float resolved_width = width > 0.0f ? width : theme_->hud.bar_width;
+        return detail::make_stat_bar(ctx_(), name, icon_name, resource, role, resolved_width);
+    }
+
+    /** @brief A timed, fading line log -- a pickup/kill feed when built with the
+     *         theme's default hold_seconds, or a never-expiring scrollback (set
+     *         MessageLog::hold_seconds <= 0 afterward) for a console. */
+    MessageLog* add_message_log(const std::string& name, int max_lines = 8,
+                                glm::vec2 size = {320.0f, 140.0f}, bool boxed = false) {
+        ensure_node_();
+        return detail::make_message_log(ctx_(), name, max_lines, size, boxed);
+    }
+
+    /** @brief A backtick-toggled dev console -- see widgets/console.h. Declared
+     *         here, defined out-of-line after ConsoleHandle (below) is complete,
+     *         same reason dialog()/tab_view()/add_hotbar() are.
+     * @param app_input Polled every late_update() for Console::toggle_key.
+     * @param height <= 0 uses theme.hud.console_height. */
+    ConsoleHandle add_console(const std::string& name, coopa::input::Input& app_input, float height = -1.0f);
+
     // --- Direct Value Queries / Mutations from Parent ---
 
     template<typename T>
@@ -725,6 +805,67 @@ private:
     InputMode                  input_mode_ = InputMode::Pointer;
 };
 
+/**
+ * @class HotbarHandle
+ * @brief The result of UIBuilder::add_hotbar() -- the built InventoryGrid, the
+ *        InventoryBinding wiring it to the model, and the coopa::item::Hotbar
+ *        model itself, plus a builder over the hotbar's own node.
+ */
+class HotbarHandle {
+public:
+    HotbarHandle(InventoryGrid* grid, InventoryBinding* binding, coopa::item::Hotbar* model, UIBuilder node)
+        : grid_(grid), binding_(binding), model_(model), node_(node) {}
+
+    InventoryGrid*        grid() const { return grid_; }
+    InventoryBinding*     binding() const { return binding_; }
+    coopa::item::Hotbar*  model() const { return model_; }
+    UIBuilder             node() const { return node_; }
+
+    /** @brief Forwards to the model's select() -- the view follows via
+     *         on_selection_changed, never the other way around. */
+    void select(int index) const { if (model_) model_->select(index); }
+    int  selected() const { return model_ ? model_->selected() : -1; }
+
+private:
+    InventoryGrid*       grid_    = nullptr;
+    InventoryBinding*    binding_ = nullptr;
+    coopa::item::Hotbar* model_   = nullptr;
+    UIBuilder             node_;
+};
+
+/**
+ * @class ConsoleHandle
+ * @brief The result of UIBuilder::add_console() -- the Console component and
+ *        a builder over its layer node, plus pass-through shorthand for the
+ *        calls an application actually needs (open/close/register/echo).
+ */
+class ConsoleHandle {
+public:
+    ConsoleHandle(Console* component, UIBuilder layer) : component_(component), layer_(layer) {}
+
+    Console*      component() const { return component_; }
+    ConsoleInput* input() const { return component_ ? component_->input : nullptr; }
+    MessageLog*   scrollback() const { return component_ ? component_->scrollback : nullptr; }
+    UIBuilder     layer() const { return layer_; }
+
+    void open() const { if (component_) component_->open(); }
+    void close() const { if (component_) component_->close(); }
+    void toggle() const { if (component_) component_->toggle(); }
+    bool is_open() const { return component_ && component_->is_open(); }
+
+    void register_command(const std::string& name, const std::string& help,
+                          Console::CommandHandler handler) const {
+        if (component_) component_->register_command(name, help, std::move(handler));
+    }
+    void echo(const std::string& text, glm::vec4 color = {0.0f, 0.0f, 0.0f, -1.0f}) const {
+        if (component_) component_->echo(text, color);
+    }
+
+private:
+    Console*  component_ = nullptr;
+    UIBuilder layer_;
+};
+
 // --- UIBuilder::split_rows()/split_columns()/dialog()/tab_view() -- out-of-line, now that
 //     SectionSet/TabSet/DialogHandle above are complete types. ---
 
@@ -801,6 +942,40 @@ inline TabSet UIBuilder::tab_view(const std::string& name, const std::vector<std
 
     coopa::scene::SceneObject* bar_node = tv->owner ? tv->owner->find_descendant("TabBar") : nullptr;
     return TabSet(tv, child_(bar_node), std::move(page_builders), labels);
+}
+
+inline HotbarHandle UIBuilder::add_hotbar(const std::string& name, coopa::item::Hotbar* hotbar,
+                                          const coopa::item::ItemDatabase* database,
+                                          glm::vec2 slot_size, glm::vec2 slot_spacing, bool key_labels) {
+    ensure_node_();
+    int count = hotbar ? hotbar->count() : 1;
+    InventoryGrid* grid = detail::make_hotbar_grid(ctx_(), name, count, slot_size, slot_spacing, key_labels);
+
+    InventoryBinding* binding = nullptr;
+    if (hotbar && hotbar->inventory()) {
+        binding = detail::bind_inventory(grid, hotbar->inventory(), database, hotbar->first_slot());
+    }
+
+    if (binding && hotbar) {
+        // Selection is one-way, model -> view: every input path (number keys, scroll
+        // wheel, a slot click) calls the MODEL and lets its signal drive the grid's
+        // highlight back around, rather than the grid ever owning selection itself.
+        binding->own_connection(hotbar->on_selection_changed.connect_scoped([grid, hotbar](int) {
+            grid->set_selected_slot(hotbar->selected());
+        }));
+        binding->own_connection(grid->on_slot_clicked.connect_scoped([hotbar](int slot_index) {
+            hotbar->select(slot_index);
+        }));
+        grid->set_selected_slot(hotbar->selected());
+    }
+
+    return HotbarHandle(grid, binding, hotbar, child_(grid->owner));
+}
+
+inline ConsoleHandle UIBuilder::add_console(const std::string& name, coopa::input::Input& app_input, float height) {
+    ensure_node_();
+    Console* console = detail::make_console(ctx_(), name, app_input, height);
+    return ConsoleHandle(console, child_(console->owner));
 }
 
 }  // namespace ui

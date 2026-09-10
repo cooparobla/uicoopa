@@ -252,6 +252,56 @@ struct TabStyle {
 };
 
 /**
+ * @struct HudStyle
+ * @brief Colors and metrics for the gameplay-HUD family of builder helpers
+ *        (builder/detail/hud.h): stat bars, the hotbar, the message log, and
+ *        the dev console. Kept as its own struct for the same reason every
+ *        other widget family is (SlotStyle, TabStyle, ...): one obvious place
+ *        for a themed app to override this look, and a 1:1 mirror of the
+ *        `hud:` YAML block ui_theme_yaml.h parses.
+ */
+struct HudStyle {
+    glm::vec4 bar_bg{0.10f, 0.11f, 0.14f, 0.85f};      /**< ProgressBar's background Image. */
+    glm::vec4 bar_border{0.30f, 0.34f, 0.42f, 1.0f};   /**< ProgressBar's border, where drawn. */
+    glm::vec4 bar_text{0.95f, 0.95f, 0.97f, 1.0f};     /**< ProgressBar's optional "cur / max" label. */
+
+    glm::vec4 health_fill{0.85f, 0.22f, 0.24f, 1.0f};    /**< ProgressBarRole::Health's fill. */
+    glm::vec4 health_ghost{0.45f, 0.12f, 0.13f, 1.0f};   /**< ProgressBarRole::Health's delayed chip-damage trail. */
+    glm::vec4 stamina_fill{0.80f, 0.68f, 0.20f, 1.0f};   /**< ProgressBarRole::Stamina's fill. */
+    glm::vec4 stamina_ghost{0.45f, 0.38f, 0.12f, 1.0f};  /**< ProgressBarRole::Stamina's delayed trail. */
+
+    glm::vec4 hotbar_key{0.70f, 0.72f, 0.78f, 0.9f};    /**< A hotbar slot's "1".."9" key-label text. */
+    /** @brief A hotbar's selected-slot highlight. Defaults to SlotStyle::selected's own
+     *         default so the two read as the same accent unless deliberately split. */
+    glm::vec4 hotbar_selected{1.00f, 0.62f, 0.15f, 1.0f};
+
+    glm::vec4 log_bg{0.08f, 0.09f, 0.12f, 0.0f};        /**< MessageLog's optional backing panel (alpha 0 = none). */
+    glm::vec4 log_text{0.90f, 0.91f, 0.94f, 1.0f};      /**< MessageLog's line text. */
+
+    glm::vec4 console_bg{0.08f, 0.09f, 0.12f, 0.96f};       /**< Console's scrollback panel. */
+    glm::vec4 console_input_bg{0.14f, 0.16f, 0.20f, 1.0f};  /**< Console's input row background. */
+    glm::vec4 console_text{0.92f, 0.93f, 0.96f, 1.0f};      /**< Console's ordinary echoed text. */
+    glm::vec4 console_prompt{0.60f, 0.80f, 1.00f, 1.0f};    /**< Console's leading ">" prompt glyph. */
+    glm::vec4 console_echo{0.65f, 0.68f, 0.75f, 1.0f};      /**< Console's echo of a submitted command line. */
+    glm::vec4 console_error{0.92f, 0.40f, 0.38f, 1.0f};     /**< Console's unknown-command / error lines. */
+
+    float corner_margin = 16.0f;  /**< hud_corner()'s default inset from its canvas edge. */
+    float bar_width      = 200.0f; /**< make_progress_bar()'s default width. */
+    float bar_height     = 14.0f;  /**< make_progress_bar()'s default height. */
+    float bar_spacing    = 6.0f;   /**< Gap between stacked stat bars in a corner. */
+
+    float ghost_delay = 0.35f;  /**< ProgressBar: seconds a chip-damage trail holds before draining. */
+    float ghost_speed = 45.0f;  /**< ProgressBar: trail drain speed, in normalized units/second. */
+
+    float log_line_height  = 18.0f; /**< MessageLog's per-line height. */
+    float log_hold_seconds = 6.0f;  /**< MessageLog's default hold_seconds. */
+    float log_fade_seconds = 1.0f;  /**< MessageLog's default fade_seconds. */
+
+    float console_height       = 220.0f; /**< Console's panel height. */
+    float console_input_height = 26.0f;  /**< Console's input row height. */
+};
+
+/**
  * @struct UITheme
  * @brief Color palette, metrics, and typographic parameters used by UIBuilder.
  *
@@ -286,6 +336,7 @@ struct UITheme {
     MetricsStyle     metrics;
     TabStyle         tab;
     FocusStyle       focus;
+    HudStyle         hud;
 
     /** @brief Per-theme font override; falls back to FontDefaults::font when null. */
     class Font* font = nullptr;
@@ -357,6 +408,24 @@ struct UITheme {
         t.tab.selected        = {0.78f, 0.38f, 0.05f, 1.0f};
         t.tab.selected_hover  = {0.88f, 0.45f, 0.10f, 1.0f};
         t.tab.indicator       = {0.72f, 0.33f, 0.02f, 1.0f};
+
+        t.hud.bar_bg     = {0.90f, 0.91f, 0.94f, 0.9f};
+        t.hud.bar_border = {0.75f, 0.77f, 0.82f, 1.0f};
+        t.hud.bar_text   = {0.10f, 0.11f, 0.14f, 1.0f};
+        t.hud.health_fill   = {0.80f, 0.18f, 0.20f, 1.0f};
+        t.hud.health_ghost  = {0.88f, 0.62f, 0.62f, 1.0f};
+        t.hud.stamina_fill  = {0.70f, 0.56f, 0.08f, 1.0f};
+        t.hud.stamina_ghost = {0.88f, 0.80f, 0.55f, 1.0f};
+        t.hud.hotbar_key      = {0.35f, 0.38f, 0.44f, 0.9f};
+        t.hud.hotbar_selected = {0.78f, 0.38f, 0.05f, 1.0f};
+        t.hud.log_bg   = {0.99f, 0.99f, 1.00f, 0.0f};
+        t.hud.log_text = {0.10f, 0.11f, 0.14f, 1.0f};
+        t.hud.console_bg        = {0.97f, 0.97f, 0.99f, 0.97f};
+        t.hud.console_input_bg  = {0.90f, 0.91f, 0.94f, 1.0f};
+        t.hud.console_text      = {0.10f, 0.11f, 0.14f, 1.0f};
+        t.hud.console_prompt    = {0.15f, 0.45f, 0.75f, 1.0f};
+        t.hud.console_echo      = {0.35f, 0.38f, 0.44f, 1.0f};
+        t.hud.console_error     = {0.72f, 0.20f, 0.18f, 1.0f};
 
         return t;
     }

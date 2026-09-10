@@ -109,6 +109,24 @@ Composition follows a `coopa::scene::SceneObject` tree: every UI node carries a
 - **`cursor_overlay.h`** — `CursorOverlay`, the opt-in software cursor that replaces the OS
   pointer once `UIBuilder::enable_cursor()` installs it — see **Builder**'s `UITheme::cursor`
   section for the full picture (theme schema, hotspot convention, position/role lag trade-off).
+- **`fill_direction.h`** — `SliderDirection` and `apply_fill_rect()`, the fill-bar anchor math
+  shared verbatim by `Slider` and `ProgressBar` — extracted so the two can never drift apart.
+- **`progress_bar.h`** — `ProgressBar`, a display-only fill bar (not a disabled `Slider` — see
+  its own doc for why that would flip the software cursor to its disabled glyph on hover) with
+  an optional delayed "chip damage" ghost trail and a formatted value label; `bind()`s directly
+  to a `coopa::stat::Resource`.
+- **`message_log.h`** — `MessageLog`, a capped, timed, fading line log (a pickup/kill feed, or
+  — with `hold_seconds <= 0` — a never-expiring console scrollback) backed by a pool of reused
+  `Text` children rather than rebuilt ones, so `LayoutGroupBase`'s inactive-child skip collapses
+  expired lines for free.
+- **`inventory_binding.h`** — `InventoryBinding`, the seam that makes an `InventoryGrid` a pure
+  visualization of a `coopa::item::Inventory`: installs `InventoryGrid::transfer_override` to
+  route every drag-drop/pick-place through `Inventory::move_or_merge()`, and mirrors the
+  model's `on_slot_changed` back into the grid. See **Builder**'s hotbar section below.
+- **`console.h`** — `ConsoleInput` (a `TextField` whose Enter submits-and-stays-editing and
+  whose Escape/Up/Down are repurposed for cancel/history instead of TextEditBase's own
+  revert-and-blur) and `Console` (toggle/focus/`ModalContext` lifecycle, scrollback, and a
+  small named-command registry) — the backtick dev console; see `UIBuilder::add_console()`.
 
 ### Groups (`uicoopa/groups/`)
 - **`layout_group.h`** — `HorizontalLayoutGroup`/`VerticalLayoutGroup`: automatic child
@@ -177,8 +195,10 @@ freely-copyable value type. **Container** methods (`panel`, `vertical_layout`,
 widget and return its raw component pointer, taking `std::function` callbacks
 (`add_label`, `add_paragraph`, `add_button`, `add_slider`, `add_toggle`, `add_spinbox`,
 `add_dropdown`, `add_text_field`, `add_image`, `add_icon`, `add_icon_button`,
-`add_inventory_grid`, `add_spacer`, `add_separator`, `add_action_bar`, `add_icon_row`, plus
-`add_*_row` label-and-control variants for settings forms). A name-keyed
+`add_inventory_grid`, `add_progress_bar`, `add_stat_bar`, `add_message_log`, `add_spacer`,
+`add_separator`, `add_action_bar`, `add_icon_row`, plus `add_*_row` label-and-control variants
+for settings forms); `add_hotbar`/`add_console` return small handle types for the same reason
+`dialog()`/`tab_view()` do (see **Gameplay HUD**, below). A name-keyed
 `get_value<T>(name)` / `set_value(name, val)` pair reads/writes any descendant widget's value
 by the `SceneObject` name it was built with — this is why every widget factory names its
 node after the caller's identifier.
@@ -285,11 +305,71 @@ caller to populate, so `tab_view()` deliberately does *not* self-start the way
 before hiding all but the selected one) must run only after every page's content already
 exists, which is exactly when the app's one `Scene::start()` call reaches it.
 
+#### Gameplay HUD: `hud_layer()` / `hud_corner()` / stat bars / hotbar / console
+
+The pieces every gameplay HUD needs, built the same UIBuilder way as everything else —
+see `test_hud_builder.cpp` (below) for a complete worked example, and
+`widgets/inventory_binding.h`'s file doc for the "the UI visualizes a `coopa::item`/
+`coopa::stat` model, it doesn't own one" contract this whole family follows.
+
+```cpp
+UIBuilder hud = root.hud_layer();  // full-canvas, non-interactive root (children still hit-test)
+
+hud.hud_corner(HudAnchor::TopLeft, {320, 24}).add_status_line("Objective: survive the night");
+
+UIBuilder top_right = hud.hud_corner(HudAnchor::TopRight, {260, 70});
+top_right.add_stat_bar("Health", "heart", &stats.resource("health"), ProgressBarRole::Health);
+top_right.add_stat_bar("Stamina", "bolt", &stats.resource("stamina"), ProgressBarRole::Stamina);
+
+MessageLog* log = hud.hud_corner(HudAnchor::BottomLeft, {420, 160}).add_message_log("Log", 8);
+
+HotbarHandle hb = hud.hud_corner(HudAnchor::BottomCenter, {520, 60}, -1, SectionFlow::None)
+                      .add_hotbar("Hotbar", &hotbar, &item_db);
+
+ConsoleHandle console = root.add_console("Console", app_input);
+console.register_command("give", "give <id> [n]", [&](const std::vector<std::string>& args) { ... });
+```
+
+- **`hud_layer(name)`** — a `StretchAll`, `hittable = false` node. Its own `hittable = false`
+  only silences *itself* for raycasting; `Raycaster::hit_test_all_()` still recurses into (and
+  hit-tests) its children regardless — the mechanism that lets a fully interactive hotbar live
+  under a HUD layer that never itself steals a click meant for gameplay underneath it.
+- **`hud_corner(anchor, size, margin = -1, flow = SectionFlow::Vertical, name = "")`** — a
+  fixed-size region docked to one of eight non-centered `HudAnchor` points
+  (`TopLeft/TopCenter/TopRight/MiddleLeft/MiddleRight/BottomLeft/BottomCenter/BottomRight`),
+  inset by `margin` (`< 0` → `theme.hud.corner_margin`). `flow` adds a matching layout group
+  packed toward that same corner point, or `SectionFlow::None` for a single pre-sized child
+  (e.g. a hotbar grid that already sizes itself).
+- **`add_progress_bar(...)`** — a display-only fill bar (see `ProgressBar`'s own doc for why
+  it isn't just a disabled `Slider`); **`add_stat_bar(name, icon, resource, role, width)`** —
+  the standard "icon + labeled bar" row, `bind()`ing the bar to a `coopa::stat::Resource`
+  immediately if one is given.
+- **`add_message_log(name, max_lines, size, boxed)`** — a timed, fading line log; set the
+  returned `MessageLog::hold_seconds <= 0` for a never-expiring scrollback instead (which is
+  exactly what `add_console()` does internally for its own scrollback).
+- **`add_hotbar(name, hotbar, database, slot_size, slot_spacing, key_labels)`** — a 1×N
+  `InventoryGrid` with "1".."9" key labels, bound to `hotbar`'s backing `coopa::item::Inventory`
+  via `InventoryBinding`. Returns a `HotbarHandle` (`grid()`, `binding()`, `model()`, `node()`,
+  `select(i)`, `selected()`). **Selection is one-way, model → view**: every input path (number
+  keys, the scroll wheel, a slot click) calls `coopa::item::Hotbar::select()`/`next()`/`prev()`
+  and lets `on_selection_changed` drive the grid's highlight back around — the grid never owns
+  selection itself.
+- **`add_console(name, app_input, height = -1)`** — a backtick-toggled dev console: an
+  always-active layer (polls `app_input.key_pressed(toggle_key)` in `late_update()`, since
+  keyboard events are only ever dispatched to `FocusContext::focused()` — a *closed* console,
+  focused by nothing, could never otherwise learn the key was pressed) over a panel that
+  pushes/pops itself on `ModalContext` while open, exactly like `Dialog` — except, unlike
+  `Dialog`, `Console`'s destructor actually removes itself. Returns a `ConsoleHandle`
+  (`component()`, `input()`, `scrollback()`, `open/close/toggle/is_open`, `register_command`,
+  `echo`). `ConsoleInput` (a `TextField` subclass) makes Enter submit-and-stay-editing instead
+  of committing-and-blurring, repurposes Escape/Up/Down for cancel/history, and refuses to
+  ever type the backtick that opened it.
+
 #### `UITheme` / `ThemeLibrary` (`ui_theme.h`, `ui_theme_yaml.h`)
 
 `UITheme` is grouped into per-widget-family style structs (`PanelStyle`, `TypographyStyle`,
 `ButtonStyle` ×3 roles, `SliderStyle`, `ToggleStyle`, `SpinBoxStyle`, `ComboBoxStyle`,
-`SlotStyle`, `IconStyle`, `CursorStyle`, `MetricsStyle`, `TabStyle`) rather than one flat bag of fields, so
+`SlotStyle`, `IconStyle`, `CursorStyle`, `MetricsStyle`, `TabStyle`, `HudStyle`) rather than one flat bag of fields, so
 the shape matches the YAML schema `ui_theme_yaml.h` parses field-for-field. `UITheme::
 builtin_dark()`/`builtin_light()` are the two built-in palettes; `ThemeLibrary::instance()`
 loads/caches theme files and tracks the single process-wide active theme, falling back to
@@ -512,6 +592,17 @@ nests its own `split_rows()`), and Nav's buttons open a `DialogMode::Window` ("A
 `DialogMode::Modal` ("Discard Changes?") — both stacking correctly over the tabbed content
 beneath them.
 
+### `test_hud_builder.cpp` — the gameplay HUD demo
+
+The worked example for **Gameplay HUD** (above): a hotbar (9 slots, keys 1-9, bound to a
+`coopa::item::Inventory`/`Hotbar` via `InventoryBinding`), health/stamina `ProgressBar`s
+bound to `coopa::stat::Resource`s, a pickup/kill `MessageLog`, and a backtick `Console` with
+`give`/`take`/`damage`/`heal`/`stamina`/`kill`/`say`/`items`/`clearlog` commands. The model
+objects (`Inventory`, `Hotbar`, `StatBlock`, the loaded `ItemDatabase`) are declared *before*
+the `Scene` in `main()`, so they outlive it during teardown — see
+`widgets/inventory_binding.h`'s ownership contract. Item definitions load from
+`assets/items/items.yaml` via `coopa::item::ItemDatabaseLoader`.
+
 ### Running a demo
 
 ```bash
@@ -519,6 +610,7 @@ cbuild --vulkan   # or: cmake -B build && cmake --build build
 ./build/uicoopa_test_window
 ./build/uicoopa_settings_builder
 ./build/uicoopa_dialog_builder
+./build/uicoopa_hud_builder
 # or, via the local cplay/cbuild wrappers:
 cplay
 ```
@@ -547,10 +639,15 @@ Environment variables for scripted, headless-friendly runs (no human required at
 | `ANIM_TIME=<seconds>` | `settings_builder` | Freeze the info banner's idle animation at an exact time before the loop starts, for a reproducible screenshot. |
 | `CURSOR_POS=<x>,<y>` | `settings_builder` | Pin the (now OS-hidden, see `UITheme::cursor`) pointer to a fixed window-pixel position every frame, so a screenshot can show the themed cursor overlay reacting to a known hover target. |
 | `SCENE=<name>` | `test_window` | Load `assets/scenes/<name>/scene.yaml` instead of `test_window` (e.g. `test_window_variant`). |
+| `HUD_HP=<0..1>` / `HUD_STAMINA=<0..1>` | `hud_builder` | Pre-set health's/stamina's normalized value before the loop starts. |
+| `HUD_HOTBAR=<0..8>` | `hud_builder` | Pre-select a hotbar slot. |
+| `HUD_CONSOLE=1` | `hud_builder` | Open the console before the first frame. |
+| `HUD_SCRIPT="give potion_health 5,kill Grunt,say hello"` | `hud_builder` | Comma-separated console commands replayed pre-loop — what makes a message-log/hotbar screenshot deterministic. |
+| `HUD_LOG_HOLD=<seconds>` | `hud_builder` | Override the message log's `hold_seconds` so a scripted pickup line can't fade before a screenshot is taken. |
 
 ### Targets
 
-`CMakeLists.txt` builds four executables from this repo:
+`CMakeLists.txt` builds five executables from this repo:
 
 | Target | Source | Purpose |
 |---|---|---|
@@ -558,6 +655,7 @@ Environment variables for scripted, headless-friendly runs (no human required at
 | `uicoopa_test_window` | `test_window.cpp` | The YAML-declarative interactive demo. |
 | `uicoopa_settings_builder` | `test_settings_builder.cpp` | The `UIBuilder` settings-panel demo. |
 | `uicoopa_dialog_builder` | `test_dialog_builder.cpp` | The `dialog()`/`split_rows()`/`split_columns()`/`tab_view()` demo. |
+| `uicoopa_hud_builder` | `test_hud_builder.cpp` | The gameplay HUD demo — hotbar/stat-bars/message-log/console bound to `coopa::item`/`coopa::stat` models. |
 
 Run the test suite with `./build/uicoopa` (or `ctest --test-dir build`, which also runs the
 Vulkan/GLFW leak gate below); run a demo with `./build/uicoopa_<name>` (or `cplay`, which keys
