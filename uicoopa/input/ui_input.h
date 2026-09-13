@@ -52,6 +52,25 @@ public:
             wpos.x / sf,
             canvas_root_rect.size().y - wpos.y / sf);
 
+        update_at(input, canvas_pos);
+    }
+
+    /**
+     * @brief Same per-frame state as update(), but with the canvas-space cursor position
+     *        supplied directly instead of derived from a screen-space scale factor.
+     *
+     * This is the world-space canvas path: there, the cursor reaches canvas space through a
+     * ray/plane intersection against the canvas's 3D placement (see
+     * CanvasComponent::ray_to_canvas()), which has no scale_factor to divide by. update()
+     * above is now just "compute the screen-space cursor, then call this", so the
+     * button/scroll/character/key-event copying below exists exactly once.
+     *
+     * @param input      Source of per-frame input state.
+     * @param canvas_pos Cursor position in canvas pixels, +Y up from the bottom-left. A
+     *                   caller with no hit to report should pass a point far outside the
+     *                   canvas rather than (0, 0), which is a real point *inside* it.
+     */
+    void update_at(const coopa::input::Input& input, glm::vec2 canvas_pos) {
         delta_ = canvas_pos - position_;
         position_ = canvas_pos;
 

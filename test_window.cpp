@@ -113,6 +113,8 @@ void save_screenshot(coopa::gfx::app::Context& ctx,
 
     // Safe here (no render pass open, and the caller has already called ctx.wait_idle()).
     ui_pass.register_textures(draw_list);
+    ui_pass.begin_frame(/*frame_index=*/0, draw_list.vertices().size(),
+                        draw_list.indices().size());
 
     memory::Image capture_image(ctx.device(), ctx.allocator(), width, height, ctx.color_format(),
                                 ImageUsage::ColorAttachment | ImageUsage::TransferSrc);
@@ -348,7 +350,21 @@ coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env
 
         // Must run before frame(): resolving new textures updates descriptor
         // sets, which is unsafe once a render pass is open.
-        for (auto* c : canvases) ui_pass.register_textures(c->draw_list());
+        // Per-frame, like every other demo here. The pre-loop call is not enough any more: Text
+        // bakes its glyph atlas at font_size * the canvas's effective text scale, which depends on
+        // the live window size, so a mark taken before the first frame can miss the atlas that
+        // actually gets drawn -- and an unmarked R8 atlas renders as solid colour blocks.
+        UIResourceCache::instance().mark_text_atlases(ui_pass);
+
+        size_t total_verts = 0, total_indices = 0;
+        for (auto* c : canvases) {
+            ui_pass.register_textures(c->draw_list());
+            total_verts   += c->draw_list().vertices().size();
+            total_indices += c->draw_list().indices().size();
+        }
+        // Sized over ALL canvases, not per canvas: they share one buffer pair per frame slot
+        // and draw() appends into it -- see UiPass::begin_frame().
+        ui_pass.begin_frame(ctx.current_frame(), total_verts, total_indices);
 
         coopa::gfx::app::FrameCallbacks cb;
         cb.record = [&](coopa::gfx::command::CommandBuffer& cmd) {

@@ -1,0 +1,26 @@
+# Extra glslc flags for this repo's shaders. Read by cbuild --vulkan
+# (/home/coopa/.sww/packages/cbuild/cbuild). One token per line.
+#
+# Without this file, `cbuild --vulkan` invoked glslc with no -I at all and failed on
+# ui.vert, whose `#include <gfx/surface2d/quad_vs.glsl>` pulls the shared 2D quad transform
+# from gfxcoopa's base shader library. The CMake build never hit it, because
+# gfx_add_shader_target() adds both directories to -I on its own -- so the two build paths
+# disagreed, and only the one nobody runs first was broken. (uicoopa/CMakeLists.txt's own
+# comment claimed this file was "already present"; it was not.)
+#
+# Paths are RELATIVE to the repo root -- cbuild invokes glslc with cwd=repo root. Both
+# entries work whether this repo sits at ~/git/uicoopa or is vendored as a submodule under
+# another project's libs/, since either way its siblings are one level up.
+#
+# ORDER MATTERS, and matches gfx_add_shader_target() exactly (see
+# gfxcoopa/cmake/GfxShaders.cmake:81-82): this repo's OWN shader dir first, then gfxcoopa's
+# base library. glslc searches -I in order, so a gfx/ header present in both resolves to
+# uicoopa's copy -- consumers shadow the base library.
+#
+# Note the world-space UI fragment shaders deliberately use a QUOTED include for their
+# shared ui_world_occlude.glsl body, which glslc resolves relative to the including file
+# and which therefore needs no -I at all.
+-I
+assets/shaders
+-I
+../gfxcoopa/assets/shaders

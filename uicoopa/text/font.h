@@ -163,15 +163,27 @@ public:
         }
     }
 
-    /** @brief Returns the atlas baked at pixel_height, creating (and uploading) it on first use. */
-    FontAtlas& atlas_for_size(uint32_t pixel_height) {
-        auto it = atlases_.find(pixel_height);
+    /**
+     * @brief Returns the atlas baked at pixel_height, creating (and uploading) it on first use.
+     *
+     * @param pixel_height Bake size in pixels.
+     * @param oversample   stb pack oversampling -- see FontAtlas's ctor doc. Part of the cache
+     *   key, not just a construction detail: a caller drawing at 1:1 wants 2 and a caller
+     *   supersampling wants 1, and the same font/size can legitimately be asked for both in one
+     *   frame (Font::measure() at the authored size alongside Text::emit()'s scaled bake). The
+     *   two agree on metrics regardless -- advances and vertical metrics are oversample-
+     *   independent -- so mixing them is safe.
+     */
+    FontAtlas& atlas_for_size(uint32_t pixel_height, uint32_t oversample = 2) {
+        const AtlasKey key{pixel_height, oversample};
+        auto it = atlases_.find(key);
         if (it != atlases_.end()) return *it->second;
         auto atlas = std::make_unique<FontAtlas>(device_, allocator_, cmd_pool_,
                                                   ttf_bytes_.data(), ttf_bytes_.size(),
-                                                  static_cast<float>(pixel_height));
+                                                  static_cast<float>(pixel_height),
+                                                  oversample, oversample);
         FontAtlas& ref = *atlas;
-        atlases_[pixel_height] = std::move(atlas);
+        atlases_[key] = std::move(atlas);
         return ref;
     }
 
@@ -184,11 +196,16 @@ public:
      *
      * @param text        Text to lay out; '\\n' forces a line break.
      * @param pixel_size  Pixel height to bake/reuse a FontAtlas at.
-     * @param wrap_width  Wrap column in pixels; <= 0 disables wrapping.
-     * @return Per-glyph placements, per-line widths, and the overall bounding size.
+     * @param wrap_width  Wrap column in pixels; <= 0 disables wrapping. In the SAME space as
+     *   pixel_size -- a caller laying out at a supersampled size must scale its wrap width to
+     *   match, or the text wraps at the wrong column.
+     * @param oversample  Forwarded to atlas_for_size(); see its doc.
+     * @return Per-glyph placements, per-line widths, and the overall bounding size, all in
+     *   pixel_size's space.
      */
-    TextLayout layout(const std::string& text, uint32_t pixel_size, float wrap_width = -1.0f) {
-        FontAtlas& atlas = atlas_for_size(pixel_size);
+    TextLayout layout(const std::string& text, uint32_t pixel_size, float wrap_width = -1.0f,
+                      uint32_t oversample = 2) {
+        FontAtlas& atlas = atlas_for_size(pixel_size, oversample);
         TextLayout result = layout_text(text, wrap_width, [&](uint32_t codepoint) {
             const GlyphInfo* g = atlas.glyph(codepoint);
             return g ? g->advance : 0.0f;
@@ -207,7 +224,18 @@ private:
     coopa::gfx::memory::Allocator& allocator_;
     coopa::gfx::command::CommandPool& cmd_pool_;
     std::vector<unsigned char> ttf_bytes_;
-    std::map<uint32_t, std::unique_ptr<FontAtlas>> atlases_;
+
+    /// Cache key: one atlas per (bake size, oversampling). Nothing evicts -- see Text::emit()'s
+    /// size quantization, which is what bounds how many distinct sizes can ever be asked for.
+    struct AtlasKey {
+        uint32_t pixel_height;
+        uint32_t oversample;
+        bool operator<(const AtlasKey& o) const {
+            return pixel_height != o.pixel_height ? pixel_height < o.pixel_height
+                                                  : oversample < o.oversample;
+        }
+    };
+    std::map<AtlasKey, std::unique_ptr<FontAtlas>> atlases_;
 };
 
 }  // namespace ui

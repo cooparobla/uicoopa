@@ -103,6 +103,23 @@ public:
         current_z_order_ = 0;
     }
 
+    /**
+     * @brief Sets the canvas-pixel -> target-pixel ratio this list's text should be baked at.
+     *
+     * Text widgets read this to bake their glyph atlas at the size it will actually be DRAWN at
+     * rather than at the authored font_size, which is in canvas pixels and can be magnified
+     * several times over on screen (see Text::emit()). It is a property of the canvas, so
+     * CanvasComponent::rebuild_emit() sets it -- deliberately NOT reset by begin(), which clears
+     * per-frame geometry.
+     *
+     * Defaults to 1.0: a DrawList built by hand, or by a host that never sets it, keeps exactly
+     * the pre-supersampling behaviour.
+     */
+    void set_text_scale(float scale) { text_scale_ = scale; }
+
+    /** @brief The scale set by set_text_scale(); 1.0 unless a canvas supplied one. */
+    float text_scale() const { return text_scale_; }
+
     /** @brief Sets the texture used for untextured/solid-color quads (typically a 1x1 white texel). */
     void set_default_texture(coopa::gfx::TextureView view) {
         default_texture_view_ = view;
@@ -239,6 +256,8 @@ private:
     std::vector<Rect>      clip_stack_{ Rect{} };
     coopa::gfx::TextureView current_texture_;
     coopa::gfx::TextureView default_texture_view_;
+    /// See set_text_scale(). Not touched by begin() -- it describes the canvas, not the frame.
+    float                   text_scale_ = 1.0f;
     int                     current_z_order_ = 0;
 };
 

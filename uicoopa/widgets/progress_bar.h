@@ -62,6 +62,16 @@ public:
     Text*          label_text = nullptr;  /**< Optional "cur / max" readout. */
     std::string    label_format = "{cur} / {max}";
 
+    // Name-based alternatives to the three pointers above, resolved against this object's
+    // descendants in start() when the corresponding pointer is still null. This is what
+    // makes ProgressBar declarable in scene YAML at all: SceneLoader parses an object's
+    // components BEFORE its children exist, so a parser has no child to take a pointer to
+    // -- it can only record a name. Same pattern (and same start()-time resolution) that
+    // Slider::fill_name / handle_name already use.
+    std::string fill_name;   /**< Resolved by name in start() if fill_rect is null. */
+    std::string ghost_name;  /**< Resolved by name in start() if ghost_rect is null. */
+    std::string label_name;  /**< Resolved by name in start() if label_text is null. */
+
     float ghost_delay = 0.35f;  /**< Seconds the trail holds before draining. */
     float ghost_speed = 45.0f;  /**< Trail drain speed, in bar-length pixels/second. */
 
@@ -114,6 +124,25 @@ public:
     }
 
     void start() override {
+        // Resolve any name-based child references first: everything below (and
+        // update_visuals() in particular) reads the pointers, not the names.
+        if (owner) {
+            if (!fill_rect && !fill_name.empty()) {
+                if (auto* child = owner->find_descendant(fill_name)) {
+                    fill_rect = child->get_component<RectTransform>();
+                }
+            }
+            if (!ghost_rect && !ghost_name.empty()) {
+                if (auto* child = owner->find_descendant(ghost_name)) {
+                    ghost_rect = child->get_component<RectTransform>();
+                }
+            }
+            if (!label_text && !label_name.empty()) {
+                if (auto* child = owner->find_descendant(label_name)) {
+                    label_text = child->get_component<Text>();
+                }
+            }
+        }
         if (owner && !owner->get_component<Mask>()) {
             owner->add_component<Mask>();
         }

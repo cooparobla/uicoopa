@@ -32,8 +32,89 @@ Composition follows a `coopa::scene::SceneObject` tree: every UI node carries a
   how the test suite (`test.cpp`) exercises resolved layout without a window.
 - **`canvas_scaler.h`** — `CanvasScaler`, screen-size-independent scaling (Unity's
   `CanvasScaler` equivalent): a reference resolution plus a width/height blend factor.
+  **Screen-space only** — a world canvas ignores it entirely (see below).
 - **`layout_element.h`** — `LayoutElement`, explicit min/preferred/flexible size overrides
   for a child inside a layout group, and an `ignore_layout` escape hatch.
+
+#### World-space canvases
+
+`CanvasComponent::render_mode` is uicoopa's equivalent of Unity's `Canvas.renderMode`:
+
+```cpp
+enum class CanvasRenderMode { ScreenSpaceOverlay, WorldSpace };
+enum class CanvasBillboard  { CameraFacing, Transform };
+```
+
+A `WorldSpace` canvas hosts the **entire** widget library unchanged — `Image`, `Text`,
+`Button`, `ProgressBar`, `ScrollRect`, layout groups, `Mask`, `UIBuilder`, themes, all of it.
+That is not a coincidence to be preserved carefully; it is structural. Every widget already
+emits nothing but canvas-space rects into a `DrawList`, and knows nothing about screens,
+projections or Vulkan. World space changes exactly two things around them: where the root rect
+comes from, and one matrix at the pass level.
+
+```yaml
+- type: Canvas
+  render_mode: WorldSpace
+  billboard: CameraFacing     # or Transform
+  world_size: { x: 150.0, y: 38.0 }   # CANVAS PIXELS, not world units
+  pixels_per_unit: 110.0
+  text_supersample: 2.0               # glyph atlas density; see below
+  occlude: false
+```
+
+- **`world_size`** is the authored design size every child anchors against — the exact role
+  the framebuffer size plays in screen space. **`pixels_per_unit`** alone converts it to world
+  units (`world_size / pixels_per_unit`), so it is the single size knob: change it and the
+  canvas grows or shrinks with no re-layout. `CanvasScaler` is **ignored**, because its whole
+  job is relating canvas pixels to *screen* pixels and a world canvas has no fixed
+  relationship to the screen — its on-screen size is whatever perspective makes it.
+- **`CameraFacing`** builds the canvas basis from the view matrix's own right/up axes, so the
+  quad sits at a constant view-space depth. That has a payoff beyond looks: it projects to a
+  screen-**axis-aligned** rectangle, which is what lets `UiWorldPass` turn a `Mask`'s clip rect
+  into an exact `vkCmdSetScissor`. **`Transform`** instead honours the owner `SceneObject`'s own
+  3D rotation and scale — true Unity WorldSpace behaviour, visible edge-on — via
+  `local_right_axis`/`local_up_axis`, which default to a **Z-up** host (canvas right = local
+  +X, canvas up = local +Z, so an unrotated canvas faces world −Y). A Y-up host sets
+  `local_up_axis = {0,1,0}` and needs no code change. For a rotated `Transform` canvas the
+  projected clip rect is no longer axis-aligned, so scissors fall back to the corners' screen
+  AABB — a mask clips a little loosely, never incorrectly.
+- **`text_supersample`** bakes this canvas's glyph atlases that many times denser than the
+  authored `font_size`. A glyph atlas is a bitmap, so it has no resolution to spare: baked at
+  `font_size` and then magnified on screen it can only go soft, and solid quads hide this
+  because they sample a 1x1 white texel where magnifying a constant is exact. Set it to roughly
+  the magnification the canvas is usually seen at,
+  `(render_height / (2 * distance * tan(fov/2))) / pixels_per_unit`, and round **down** — mild
+  magnification is a soft edge, while minification through a sampler with no mipmaps aliases.
+  Layout is unaffected at any value: `Text` divides everything the atlas reports back down by
+  the same factor (see `widgets/text.h`). **Screen-space canvases need nothing here** — their
+  magnification is exactly `scale_factor()`, which is folded in automatically; the default
+  `1.0` reproduces the pre-supersampling behaviour byte for byte.
+- **`occlude`** hides fragments behind opaque geometry. Off by default: the floating-nameplate
+  look, always legible. It is a fragment-shader depth compare and `discard`, **not** a hardware
+  depth test, because a world canvas composites into whatever colour target the host already
+  has open and that target generally carries no *scene* depth. The host supplies the real scene
+  depth as a sampled texture at set 1 — see `ExtraSets` on `UiWorldPass`'s constructor and
+  `assets/shaders/ui_world_occlude.glsl`.
+
+Two things the host must do, neither of which uicoopa can do for itself:
+
+```cpp
+// Between Scene::update() and Scene::late_update(): world matrices are current only after the
+// transform resolve inside update(), and EventSystem::process() runs inside late_update().
+canvas->set_default_texture(world_ui_pass.white_view());
+canvas->update_world_transform(view);
+auto hit = canvas->ray_to_canvas(ray_origin, ray_dir);      // mouse ray -> canvas pixels
+// A miss must be parked far outside the canvas -- (0,0) is a real point INSIDE it.
+canvas->set_world_input(input, hit ? *hit : glm::vec2(-1.0e6f));
+```
+
+`ray_to_canvas()` is what makes a world canvas genuinely interactive: give it a world-space
+pointer ray and `Raycaster`/`EventSystem` — and therefore `Button`, `Slider`, `ScrollRect`,
+drag-and-drop — work completely unmodified. One ray/plane path serves both billboard modes.
+
+`toyengine`'s `assets/scenes/world_canvas_test/` is the worked example: a cube with a health
+bar floating above it, plus a second `Transform`-mode canvas, driven by
+`toyengine/render/passes` wiring and `toyengine/scene/health_driver.h`.
 
 ### Rendering (`uicoopa/render/`)
 - **`ui_vertex.h`** — the single 2D vertex format (`UiVertex`) every draw call uses, plus
@@ -41,6 +122,14 @@ Composition follows a `coopa::scene::SceneObject` tree: every UI node carries a
 - **`draw_list.h`** — `DrawList`, accumulated per frame and batched by `(VkImageView, clip
   Rect)` into indexed draw calls. Carries raw `VkImageView`s rather than resolved descriptor
   sets, so it has no notion of Vulkan descriptors at all.
+- **`ui_world_pass.h`** — `UiWorldPass`, the world-space sibling of `UiPass`. Same
+  `TexturedQuad2DPass` backbone; differs in exactly three places: a full
+  `proj * view * CanvasComponent::model()` push constant instead of a 2D scale/offset (hence
+  its own `ui_world.vert`), clip rects that become scissors by **projecting** the rect's
+  corners rather than scaling them, and the optional scene-depth occlusion compare. Note
+  `begin_frame()` — unlike `UiPass`, it must be called once per frame before the draws,
+  because a scene can hold many world canvases and they all append into one streaming buffer
+  pair per frame-in-flight.
 - **`ui_pass.h`** — `UiPass`, the actual Vulkan pipeline: owns the per-frame streaming
   vertex/index buffers and an image-view-to-descriptor-set cache, and **composites into the
   same render pass an existing 3D pass already opened** rather than clearing and owning its
@@ -114,7 +203,9 @@ Composition follows a `coopa::scene::SceneObject` tree: every UI node carries a
 - **`progress_bar.h`** — `ProgressBar`, a display-only fill bar (not a disabled `Slider` — see
   its own doc for why that would flip the software cursor to its disabled glyph on hover) with
   an optional delayed "chip damage" ghost trail and a formatted value label; `bind()`s directly
-  to a `coopa::stat::Resource`.
+  to a `coopa::stat::Resource`. YAML-declarable (`type: ProgressBar`), with
+  `fill`/`ghost`/`label` naming child objects that `start()` resolves — components are parsed
+  before their children exist, so a parser can only record a name, exactly as `Slider` does.
 - **`message_log.h`** — `MessageLog`, a capped, timed, fading line log (a pickup/kill feed, or
   — with `hold_seconds <= 0` — a never-expiring console scrollback) backed by a pool of reused
   `Text` children rather than rebuilt ones, so `LayoutGroupBase`'s inactive-child skip collapses
@@ -672,9 +763,35 @@ pair).
 
 ## Building
 
+### As a CMake subdirectory: `coopa::ui`
+
+A downstream project can `add_subdirectory()` this repo and link one target:
+
+```cmake
+add_subdirectory(path/to/uicoopa ${CMAKE_CURRENT_BINARY_DIR}/uicoopa-build)
+target_link_libraries(myapp PRIVATE coopa::gfx coopa::ui)   # coopa::ui LAST -- see below
+add_dependencies(myapp uicoopa_shaders)                      # compiles ui*.vert/frag to .spv
+```
+
+`coopa::ui` is an INTERFACE target carrying the include paths and linking `coopa::gfx` (plus
+`coopa::sfx` and `UICOOPA_HAS_AUDIO` when audio is on), alongside a small `uicoopa_impl` STATIC
+target owning stb_truetype's implementation block. Everything that belongs to "the uicoopa repo
+as an application" — the six demos, `ctest` registration, the generated `root_directory.h`, and
+the `GFX_LEAK_CHECK` gate — is behind a `CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR`
+guard, so a consumer gets none of it. Building standalone is unchanged.
+
+Two things worth knowing: link `coopa::ui` **after** `coopa::gfx`, because this repo's
+`includes/` also carries `stb_image.h`/`stb_image_write.h` whose implementations live in
+`gfxcoopa_impl`; and the `uicoopa_shaders` target is deliberately *not* behind the standalone
+guard, since `UiPass`/`UiWorldPass` are constructed from `.spv` paths a consumer needs at
+runtime. Point a `ShaderLibrary` at this repo's `assets/shaders` to resolve them.
+
+### Manual include paths
+
 `uicoopa`, [libcoopa](../libcoopa), and [gfxcoopa](../gfxcoopa) are sibling, header-only
-repositories with no install step — a downstream project (see this repo's own
-`CMakeLists.txt`, or [blendy](../blendy)'s) just adds them as `include_directories()`:
+repositories with no install step — a downstream project that would rather not
+`add_subdirectory()` can just add them as `include_directories()` (this is what
+[blendy](../blendy) does):
 
 ```cmake
 get_filename_component(ROOT_DIR_PARENT "${CMAKE_SOURCE_DIR}" DIRECTORY)

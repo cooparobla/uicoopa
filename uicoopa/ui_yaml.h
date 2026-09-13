@@ -56,11 +56,13 @@
 #include <uicoopa/render/texture_factory.h>
 #include <uicoopa/render/ui_pass.h>
 #include <uicoopa/text/font.h>
+#include <uicoopa/text/text_atlas_registry.h>
 #include <uicoopa/widgets/image.h>
 #include <uicoopa/widgets/text.h>
 #include <uicoopa/widgets/button.h>
 #include <uicoopa/widgets/mask.h>
 #include <uicoopa/widgets/slider.h>
+#include <uicoopa/widgets/progress_bar.h>
 #include <uicoopa/widgets/toggle.h>
 #include <uicoopa/widgets/spinbox.h>
 #include <uicoopa/widgets/combobox.h>
@@ -238,17 +240,35 @@ public:
 
     /**
      * @brief Marks every font atlas texture used by any parsed !Text component as
-     *        an R8-coverage text atlas, so UiPass samples it correctly.
+     *        an R8-coverage text atlas, so the pass samples it correctly.
      *
      * Call once after loading a scene (or scenes) — replaces the app hand-listing
      * every baked size itself, e.g. test_window.cpp's old
      * `ui_pass.mark_as_text_atlas(ui_font.atlas_for_size(kTitleSize).texture().view_typed())`
      * lines.
+     *
+     * Templated on the pass rather than taking `UiPass&`: UiWorldPass exposes the same
+     * mark_as_text_atlas(TextureView) method and needs exactly the same treatment, and a
+     * canvas drawn by both must be registered with both. Without this, every world-space
+     * Text batch would select the RGBA "quad" variant and render an R8 glyph atlas's
+     * coverage values as colour — solid red blocks instead of letters. Source-compatible
+     * with every existing call site.
+     *
+     * @tparam Pass Anything with a `mark_as_text_atlas(coopa::gfx::TextureView)` method.
      */
-    void mark_text_atlases(UiPass& ui_pass) {
+    template <typename Pass>
+    void mark_text_atlases(Pass& ui_pass) {
         for (auto& [font, size] : used_text_sizes_) {
             ui_pass.mark_as_text_atlas(font->atlas_for_size(size).texture().view_typed());
         }
+        // ...and every atlas that actually exists, whatever size it was baked at. The loop above
+        // only knows the sizes AUTHORED in the scene file, which is no longer the same thing:
+        // Text bakes at font_size * the canvas's effective text scale, a runtime property of the
+        // window and the canvas (see Text::emit()). Without this, a supersampled atlas would fail
+        // the pass's is_text_view_ check and its R8 coverage would be drawn as RGBA colour --
+        // solid blocks instead of letters. The authored-size loop is kept because a host may mark
+        // before anything has emitted, and marking twice is idempotent.
+        TextAtlasRegistry::instance().mark_all(ui_pass);
     }
 
     /**
@@ -263,6 +283,11 @@ public:
      */
     void clear() {
         used_text_sizes_.clear();
+        // Before fonts_by_path_ below, which destroys every Font and so every FontAtlas. Each
+        // atlas unregisters itself in its destructor, so this is belt-and-braces for atlases
+        // owned outside the cache (an app-local Font) -- but it must not run AFTER, or it would
+        // wipe entries those still-live atlases just re-registered.
+        TextAtlasRegistry::instance().clear();
         owned_sprites_.clear();
         textures_by_path_.clear();
         fonts_by_path_.clear();
@@ -314,6 +339,16 @@ inline glm::vec2 parse_vec2(const fkyaml::node& n, const char* kx, const char* k
     glm::vec2 v = fallback;
     if (n.contains(kx)) v.x = n.at(kx).get_value<float>();
     if (n.contains(ky)) v.y = n.at(ky).get_value<float>();
+    return v;
+}
+
+/** @brief An {x, y, z} node, for CanvasComponent's world-space axis fields. Keys are fixed
+ *         (unlike parse_vec2's, whose callers use w/h and min/max pairs too). */
+inline glm::vec3 parse_vec3(const fkyaml::node& n, glm::vec3 fallback) {
+    glm::vec3 v = fallback;
+    if (n.contains("x")) v.x = n.at("x").get_value<float>();
+    if (n.contains("y")) v.y = n.at("y").get_value<float>();
+    if (n.contains("z")) v.z = n.at("z").get_value<float>();
     return v;
 }
 
@@ -505,6 +540,39 @@ inline void register_ui_components() {
         if (node.contains("scale_factor"))          canvas->scaler.scale_factor          = node.at("scale_factor").get_value<float>();
         if (node.contains("fallback_dpi"))           canvas->scaler.fallback_dpi          = node.at("fallback_dpi").get_value<float>();
         if (node.contains("sort_order"))            canvas->sort_order = node.at("sort_order").get_value<int>();
+        // Glyph-atlas density multiplier -- see CanvasComponent::text_supersample. Float, like
+        // match_width_or_height above, because the right value is a measured magnification
+        // (e.g. 2.5) rather than a count.
+        if (node.contains("text_supersample")) canvas->text_supersample = node.at("text_supersample").get_value<float>();
+
+        // --- World space (see CanvasRenderMode). Absent keys leave a plain screen-space
+        // overlay canvas exactly as before, so every existing scene file is unaffected.
+        if (node.contains("render_mode")) {
+            std::string rm = node.at("render_mode").get_value<std::string>();
+            canvas->render_mode = (rm == "WorldSpace" || rm == "World" || rm == "world")
+                                ? CanvasRenderMode::WorldSpace
+                                : CanvasRenderMode::ScreenSpaceOverlay;
+        }
+        if (node.contains("billboard")) {
+            std::string bb = node.at("billboard").get_value<std::string>();
+            // "Transform" (and the friendlier "None") honour the owner's own 3D rotation;
+            // anything else, including a plain `billboard: true`-style value, means face
+            // the camera -- the mode a caller who bothered to write the key usually wants.
+            canvas->billboard = (bb == "Transform" || bb == "transform" || bb == "None" || bb == "none")
+                              ? CanvasBillboard::Transform
+                              : CanvasBillboard::CameraFacing;
+        }
+        if (node.contains("world_size")) {
+            canvas->world_size = parse_vec2(node.at("world_size"), "x", "y", canvas->world_size);
+        }
+        if (node.contains("pixels_per_unit")) canvas->pixels_per_unit = node.at("pixels_per_unit").get_value<float>();
+        if (node.contains("occlude"))         canvas->occlude         = node.at("occlude").get_value<bool>();
+        if (node.contains("local_right_axis")) {
+            canvas->local_right_axis = parse_vec3(node.at("local_right_axis"), canvas->local_right_axis);
+        }
+        if (node.contains("local_up_axis")) {
+            canvas->local_up_axis = parse_vec3(node.at("local_up_axis"), canvas->local_up_axis);
+        }
     });
 
     SceneLoader::register_component_parser("Image", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext& ctx) {
@@ -722,6 +790,33 @@ inline void register_ui_components() {
             else s->direction = SliderDirection::LeftToRight;
         }
         if (node.contains("value")) s->set_value(node.at("value").get_value<float>(), false);
+    });
+
+    // ProgressBar sits next to Slider deliberately: they share SliderDirection, the
+    // fill-by-name convention, and apply_fill_rect()'s geometry (see fill_direction.h).
+    // ProgressBar is display-only, though -- it is NOT a disabled Slider; see its own doc.
+    SceneLoader::register_component_parser("ProgressBar", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
+        auto* pb = obj.add_component<ProgressBar>();
+        if (node.contains("min")) pb->min_value = node.at("min").get_value<float>();
+        if (node.contains("max")) pb->max_value = node.at("max").get_value<float>();
+        // fill/ghost/label are child-object NAMES, not pointers: an object's components are
+        // parsed before its children exist, so ProgressBar::start() resolves them later.
+        if (node.contains("fill")) pb->fill_name = node.at("fill").get_value<std::string>();
+        if (node.contains("ghost")) pb->ghost_name = node.at("ghost").get_value<std::string>();
+        if (node.contains("label")) pb->label_name = node.at("label").get_value<std::string>();
+        if (node.contains("label_format")) pb->label_format = node.at("label_format").get_value<std::string>();
+        if (node.contains("ghost_delay")) pb->ghost_delay = node.at("ghost_delay").get_value<float>();
+        if (node.contains("ghost_speed")) pb->ghost_speed = node.at("ghost_speed").get_value<float>();
+        if (node.contains("direction")) {
+            std::string d = node.at("direction").get_value<std::string>();
+            if (d == "RightToLeft") pb->direction = SliderDirection::RightToLeft;
+            else if (d == "BottomToTop") pb->direction = SliderDirection::BottomToTop;
+            else if (d == "TopToBottom") pb->direction = SliderDirection::TopToBottom;
+            else pb->direction = SliderDirection::LeftToRight;
+        }
+        // Last, so it clamps against the min/max just parsed. notify=false: nothing can be
+        // connected to on_value_changed yet at parse time.
+        if (node.contains("value")) pb->set_value(node.at("value").get_value<float>(), false);
     });
 
     SceneLoader::register_component_parser("Toggle", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {

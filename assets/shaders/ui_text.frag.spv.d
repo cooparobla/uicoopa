@@ -1,1 +1,1 @@
-/home/coopa/git/uicoopa/assets/shaders/ui_text.frag.spv: /home/coopa/git/uicoopa/assets/shaders/ui_text.frag
+/home/coopa/git/toyengine/libs/uicoopa/assets/shaders/ui_text.frag.spv: /home/coopa/git/toyengine/libs/uicoopa/assets/shaders/ui_text.frag

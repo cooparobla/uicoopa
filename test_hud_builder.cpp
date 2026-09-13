@@ -112,6 +112,8 @@ void save_screenshot(coopa::gfx::app::Context& ctx, UiPass& ui_pass, const DrawL
     }
 
     ui_pass.register_textures(draw_list);
+    ui_pass.begin_frame(/*frame_index=*/0, draw_list.vertices().size(),
+                        draw_list.indices().size());
 
     memory::Image capture_image(ctx.device(), ctx.allocator(), width, height, ctx.color_format(),
                                 ImageUsage::ColorAttachment | ImageUsage::TransferSrc);
@@ -429,6 +431,8 @@ int main() {
 
         UIResourceCache::instance().mark_text_atlases(ui_pass);
         ui_pass.register_textures(canvas->draw_list());
+        ui_pass.begin_frame(ctx.current_frame(), canvas->draw_list().vertices().size(),
+                            canvas->draw_list().indices().size());
 
         coopa::gfx::app::FrameCallbacks cb;
         cb.record = [&](coopa::gfx::command::CommandBuffer& cmd) {

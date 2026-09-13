@@ -102,7 +102,11 @@ public:
         TexturedQuad2DDesc desc;
         desc.vertex             = UiVertex::layout();
         desc.vertex_stride      = sizeof(UiVertex);
-        desc.blend_mode         = pipeline::BlendMode::Alpha;
+        // AlphaOver, not Alpha: the two differ only in what they leave in the destination's
+        // ALPHA channel, and they are identical over the opaque targets this pass normally
+        // draws into. Matching UiWorldPass (which genuinely needs the accumulating variant --
+        // see its own comment) keeps the two UI passes' blend state from silently diverging.
+        desc.blend_mode         = pipeline::BlendMode::AlphaOver;
         desc.push_constant_size = sizeof(UiPushConstants);
         // Bilinear + clamp-to-edge, not linear_repeat(): this sampler is shared by every
         // texture UiPass binds (see TexturedQuad2DPass::register_view()), including
@@ -139,6 +143,27 @@ public:
     }
 
     /**
+     * @brief Sizes this frame's shared geometry buffers and resets the append cursor.
+     *
+     * Must be called once per frame, before that frame's draw() calls, and -- like
+     * register_textures() -- before the host's Renderer::begin_frame(), since growing a
+     * buffer destroys and recreates it.
+     *
+     * The totals are the SUM over every canvas this frame will draw. Passing a short total
+     * is not a soft failure: draw() would have nowhere to append the overflow, and the
+     * recorded draw commands of earlier canvases would read whatever landed there instead.
+     *
+     * @param frame_index     Host's current frame-in-flight index.
+     * @param total_vertices  Sum of draw_list().vertices().size() over this frame's canvases.
+     * @param total_indices   Sum of draw_list().indices().size() over this frame's canvases.
+     */
+    void begin_frame(uint32_t frame_index, size_t total_vertices, size_t total_indices) {
+        pass_->ensure_capacity(frame_index, total_vertices, total_indices);
+        vertex_cursor_ = 0;
+        index_cursor_  = 0;
+    }
+
+    /**
      * @brief Records the UI draw calls into an already-open render pass.
      *
      * Every texture referenced by draw_list must already have been registered via
@@ -159,9 +184,22 @@ public:
               const DrawList& draw_list) {
         if (draw_list.indices().empty()) return;
 
-        pass_->ensure_capacity(frame_index, draw_list.vertices().size(), draw_list.indices().size());
-        pass_->vertex_buffer(frame_index).upload(draw_list.vertices().data(), draw_list.vertices().size() * sizeof(UiVertex));
-        pass_->index_buffer(frame_index).upload(draw_list.indices().data(), draw_list.indices().size() * sizeof(uint32_t));
+        // Append at this frame's running cursor -- see begin_frame(). Every canvas the host
+        // draws shares one buffer pair per frame slot, so uploading at offset 0 here would
+        // make the LAST canvas's geometry the only geometry, and every earlier canvas's
+        // already-recorded draw commands would read it by mistake. Capacity is the caller's
+        // responsibility via begin_frame(), because growing a buffer mid-frame would
+        // invalidate exactly the geometry those recorded commands point at.
+        const uint32_t first_vertex = vertex_cursor_;
+        const uint32_t first_index  = index_cursor_;
+        pass_->vertex_buffer(frame_index).upload(
+            draw_list.vertices().data(), draw_list.vertices().size() * sizeof(UiVertex),
+            static_cast<size_t>(first_vertex) * sizeof(UiVertex));
+        pass_->index_buffer(frame_index).upload(
+            draw_list.indices().data(), draw_list.indices().size() * sizeof(uint32_t),
+            static_cast<size_t>(first_index) * sizeof(uint32_t));
+        vertex_cursor_ += static_cast<uint32_t>(draw_list.vertices().size());
+        index_cursor_  += static_cast<uint32_t>(draw_list.indices().size());
 
         pass_->bind(cmd); // stock ("quad") -- rebound to "text" per batch below as needed
         cmd.set_viewport(0.0f, 0.0f, static_cast<float>(screen_w), static_cast<float>(screen_h));
@@ -199,7 +237,12 @@ public:
             ScreenScissor scissor = to_screen_scissor_(batch.clip, screen_w, screen_h, scale_factor);
             cmd.set_scissor(scissor.x, scissor.y, scissor.w, scissor.h);
 
-            cmd.draw_indexed(batch.index_count, batch.first_index, 0, 1);
+            // first_index shifts by this canvas's slice start; vertex_offset re-bases the
+            // indices, which DrawList wrote relative to this canvas's own vertex array.
+            cmd.draw_indexed(batch.index_count,
+                             first_index + batch.first_index,
+                             static_cast<int32_t>(first_vertex),
+                             1);
         }
     }
 
@@ -216,6 +259,10 @@ public:
 private:
     static constexpr uint32_t kInitialMaxVerts   = 8192;
     static constexpr uint32_t kInitialMaxIndices = 12288;
+
+    /// Running append offsets into this frame's shared buffers; reset by begin_frame().
+    uint32_t vertex_cursor_ = 0;
+    uint32_t index_cursor_  = 0;
 
     bool is_text_view_(coopa::gfx::TextureView view) const {
         return view != pass_->fallback_view() && text_views_.count(view) != 0;

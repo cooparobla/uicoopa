@@ -8,6 +8,7 @@
 #include <filesystem>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <uicoopa/layout/rect.h>
 #include <uicoopa/layout/rect_transform.h>
@@ -874,6 +875,44 @@ void test_text_layout_wrap() {
         }
         for (float w : tl.line_widths) {
             ASSERT_TRUE(w <= 25.0f + 1e-3f);
+        }
+    }
+}
+
+// The assumption Text::emit()'s supersampling rests on: laying out at N times the size with N
+// times the wrap width produces N times the layout, exactly. That is what lets a glyph atlas be
+// baked at the size it will be DRAWN at while the emitted canvas-space layout stays the authored
+// one -- emit() multiplies every atlas-derived quantity by font_size/baked_px to get back.
+//
+// It holds because stb's advances and vertical metrics are `stbtt_ScaleForPixelHeight(f, h) *
+// font_units` with scale = h / (ascent - descent), i.e. exactly linear in bake size. The synthetic
+// advance function below is linear in the same way, so this pins the wrap/pen arithmetic in
+// layout_text() without needing a device to bake a real atlas.
+void test_text_layout_scales_linearly() {
+    auto advance_at = [](float size) {
+        return [size](uint32_t cp) -> float { return (cp == ' ' ? 5.0f : 10.0f) * size; };
+    };
+
+    const float kScale = 3.0f;
+    const char* kText = "the quick brown fox jumps over the lazy dog";
+
+    for (float wrap : {60.0f, 95.0f, 140.0f, -1.0f}) {
+        TextLayout base   = layout_text(kText, wrap, advance_at(1.0f));
+        TextLayout scaled = layout_text(kText, wrap > 0.0f ? wrap * kScale : -1.0f, advance_at(kScale));
+
+        ASSERT_TRUE(base.glyphs.size() == scaled.glyphs.size());
+        ASSERT_TRUE(base.line_widths.size() == scaled.line_widths.size());
+
+        for (size_t i = 0; i < base.line_widths.size(); ++i) {
+            ASSERT_NEAR(scaled.line_widths[i] / kScale, base.line_widths[i], 1e-3f);
+        }
+        for (size_t i = 0; i < base.glyphs.size(); ++i) {
+            // Same break decisions...
+            ASSERT_TRUE(base.glyphs[i].line == scaled.glyphs[i].line);
+            ASSERT_TRUE(base.glyphs[i].codepoint == scaled.glyphs[i].codepoint);
+            // ...and the same pen positions once divided back down, which is precisely the
+            // `* inv` Text::emit() applies.
+            ASSERT_NEAR(scaled.glyphs[i].pen_x / kScale, base.glyphs[i].pen_x, 1e-3f);
         }
     }
 }
@@ -6475,6 +6514,242 @@ void test_inventory_binding_first_slot_offset() {
     ASSERT_TRUE(inv.at(0).empty());  // untouched -- proves the offset was actually applied
 }
 
+
+// ---------------------------------------------------------------------------
+// World-space canvases (CanvasRenderMode::WorldSpace)
+//
+// All pure math -- no device, no window -- exercising the three things the world-space path
+// adds: a root rect that ignores the screen, a canvas-pixels-to-world matrix for both
+// billboard modes, and the ray/plane inverse that hit testing depends on.
+// ---------------------------------------------------------------------------
+
+/** @brief The negative-height viewport (0, h, w, -h) UiWorldPass draws through: framebuffer
+ *         row 0 is ndc_y = +1, the OPPOSITE sign of the usual Vulkan relation. Both helpers
+ *         below deliberately spell it out rather than sharing engine code, so a silent flip
+ *         in the real convention shows up here as a failure. */
+static glm::vec2 wc_ndc_to_fb(glm::vec2 ndc, float w, float h) {
+    return { (ndc.x * 0.5f + 0.5f) * w, (0.5f - ndc.y * 0.5f) * h };
+}
+static glm::vec2 wc_fb_to_ndc(glm::vec2 fb, float w, float h) {
+    return { 2.0f * fb.x / w - 1.0f, 1.0f - 2.0f * fb.y / h };
+}
+
+/** @brief A Z-up scene viewed from -Y, matching toyengine's world_canvas_test. */
+static glm::mat4 wc_view() {
+    return glm::lookAt(glm::vec3(0.0f, -6.0f, 1.5f), glm::vec3(0.0f, 0.0f, 0.6f),
+                       glm::vec3(0.0f, 0.0f, 1.0f));
+}
+static glm::mat4 wc_proj(float w, float h) {
+    return glm::perspective(glm::radians(50.0f), w / h, 0.1f, 100.0f);
+}
+
+/** @brief A world canvas at `pos` with the scene's own defaults; caller sets billboard. */
+static CanvasComponent* wc_make(SceneObject& obj, glm::vec3 pos) {
+    auto* tc = obj.add_component<coopa::scene::TransformComponent>();
+    tc->transform().set_position(pos);
+    auto* c = obj.add_component<CanvasComponent>();
+    c->render_mode = CanvasRenderMode::WorldSpace;
+    c->world_size = glm::vec2(140.0f, 34.0f);
+    c->pixels_per_unit = 90.0f;
+    return c;
+}
+
+void test_world_canvas_root_rect_ignores_screen_size() {
+    SceneObject obj("WorldCanvas");
+    CanvasComponent* c = wc_make(obj, glm::vec3(0.0f, 0.0f, 1.1f));
+
+    // A screen-space canvas would resolve 1920x1080 here. A world one must not: its root rect
+    // is the authored design size, and its scale factor is fixed at 1.
+    c->rebuild_layout(1920, 1080);
+    ASSERT_VEC2_NEAR(c->root_rect().size(), glm::vec2(140.0f, 34.0f), 1e-5f);
+    ASSERT_NEAR(c->scale_factor(), 1.0f, 1e-6f);
+
+    // set_viewport() must take the same branch. If only rebuild_layout() did,
+    // late_update()'s unconditional rebuild would clobber it back every frame.
+    c->set_viewport(640, 360);
+    ASSERT_VEC2_NEAR(c->root_rect().size(), glm::vec2(140.0f, 34.0f), 1e-5f);
+
+    // And with no viewport ever set at all -- the realistic case, since a world canvas has no
+    // reason to receive one. CanvasScaler's default ConstantPixelSize mode would turn the
+    // 0x0 default into an EMPTY root rect, from which nothing draws.
+    SceneObject fresh("Fresh");
+    CanvasComponent* f = wc_make(fresh, glm::vec3(0.0f));
+    f->rebuild_layout(0, 0);
+    ASSERT_VEC2_NEAR(f->root_rect().size(), glm::vec2(140.0f, 34.0f), 1e-5f);
+}
+
+void test_world_canvas_model_centres_on_owner_and_scales_by_ppu() {
+    const glm::vec3 pos(0.0f, 0.0f, 1.1f);
+    for (int mode = 0; mode < 2; ++mode) {
+        SceneObject obj("WorldCanvas");
+        CanvasComponent* c = wc_make(obj, pos);
+        c->billboard = mode == 0 ? CanvasBillboard::CameraFacing : CanvasBillboard::Transform;
+        c->update_world_transform(wc_view());
+
+        // The pivot is the canvas centre, so a bar "above the cube" needs no offset maths.
+        glm::vec3 centre = glm::vec3(c->model() * glm::vec4(70.0f, 17.0f, 0.0f, 1.0f));
+        ASSERT_NEAR(glm::length(centre - pos), 0.0f, 1e-5f);
+
+        // world_size is in canvas PIXELS; pixels_per_unit alone sets the world extent.
+        glm::vec3 bl = glm::vec3(c->model() * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+        glm::vec3 br = glm::vec3(c->model() * glm::vec4(140.0f, 0.0f, 0.0f, 1.0f));
+        glm::vec3 tl = glm::vec3(c->model() * glm::vec4(0.0f, 34.0f, 0.0f, 1.0f));
+        ASSERT_NEAR(glm::length(br - bl), 140.0f / 90.0f, 1e-5f);
+        ASSERT_NEAR(glm::length(tl - bl), 34.0f / 90.0f, 1e-5f);
+    }
+}
+
+void test_world_canvas_transform_mode_default_axes_face_minus_y() {
+    // The Z-up defaults (canvas right = local +X, canvas up = local +Z) must put an unrotated
+    // Transform-mode canvas's normal along world -Y, which is where a -Y camera sits.
+    SceneObject obj("WallCanvas");
+    CanvasComponent* c = wc_make(obj, glm::vec3(0.0f));
+    c->billboard = CanvasBillboard::Transform;
+    c->update_world_transform(wc_view());
+    ASSERT_VEC2_NEAR(glm::vec2(glm::normalize(c->world_normal())), glm::vec2(0.0f, -1.0f), 1e-5f);
+    ASSERT_NEAR(glm::normalize(c->world_normal()).z, 0.0f, 1e-5f);
+
+    // A Y-up host re-aims it with the two axis fields and no code change.
+    c->local_up_axis = glm::vec3(0.0f, 1.0f, 0.0f);
+    c->update_world_transform(wc_view());
+    ASSERT_NEAR(glm::normalize(c->world_normal()).z, 1.0f, 1e-5f);
+}
+
+void test_world_canvas_camera_facing_projects_axis_aligned() {
+    // UiWorldPass turns a Mask's clip rect into an EXACT scissor by projecting its corners and
+    // taking their AABB. That is only exact if a CameraFacing quad -- which sits at a constant
+    // view depth -- projects to a screen-axis-aligned rectangle. ProgressBar::start() adds a
+    // Mask unconditionally, so this premise is on the critical path, not a nicety.
+    const float W = 480.0f, H = 270.0f;
+    SceneObject obj("WorldCanvas");
+    CanvasComponent* c = wc_make(obj, glm::vec3(0.3f, -0.4f, 1.1f));
+    c->billboard = CanvasBillboard::CameraFacing;
+    c->update_world_transform(wc_view());
+
+    glm::mat4 clip = wc_proj(W, H) * wc_view() * c->model();
+    auto fb = [&](glm::vec2 p) {
+        glm::vec4 h = clip * glm::vec4(p, 0.0f, 1.0f);
+        return wc_ndc_to_fb(glm::vec2(h) / h.w, W, H);
+    };
+    glm::vec2 p00 = fb({0.0f, 0.0f}), p10 = fb({140.0f, 0.0f});
+    glm::vec2 p01 = fb({0.0f, 34.0f}), p11 = fb({140.0f, 34.0f});
+    ASSERT_NEAR(p00.y, p10.y, 1e-3f);   // bottom edge horizontal
+    ASSERT_NEAR(p01.y, p11.y, 1e-3f);   // top edge horizontal
+    ASSERT_NEAR(p00.x, p01.x, 1e-3f);   // left edge vertical
+    ASSERT_NEAR(p10.x, p11.x, 1e-3f);   // right edge vertical
+}
+
+void test_world_canvas_ray_to_canvas_round_trips() {
+    // The pointer-picking inverse: project a known canvas point to framebuffer pixels, rebuild
+    // the ray the host would build from that pixel, and land back on the same canvas point.
+    // Both billboard modes -- CameraFacing's projection happens to be affine, Transform's is
+    // genuinely projective, and one ray/plane path has to serve both.
+    const float W = 480.0f, H = 270.0f;
+    const glm::mat4 view = wc_view();
+    const glm::mat4 proj = wc_proj(W, H);
+    const glm::mat4 inv_vp = glm::inverse(proj * view);
+
+    for (int mode = 0; mode < 2; ++mode) {
+        SceneObject obj("WorldCanvas");
+        CanvasComponent* c = wc_make(obj, glm::vec3(0.0f, 0.0f, 1.1f));
+        c->billboard = mode == 0 ? CanvasBillboard::CameraFacing : CanvasBillboard::Transform;
+        c->update_world_transform(view);
+        glm::mat4 clip = proj * view * c->model();
+
+        const glm::vec2 probes[5] = {{0.0f, 0.0f}, {140.0f, 0.0f}, {140.0f, 34.0f},
+                                     {0.0f, 34.0f}, {70.0f, 17.0f}};
+        for (glm::vec2 want : probes) {
+            glm::vec4 h = clip * glm::vec4(want, 0.0f, 1.0f);
+            glm::vec2 ndc = wc_fb_to_ndc(wc_ndc_to_fb(glm::vec2(h) / h.w, W, H), W, H);
+            glm::vec4 a4 = inv_vp * glm::vec4(ndc, 0.0f, 1.0f);
+            glm::vec4 b4 = inv_vp * glm::vec4(ndc, 1.0f, 1.0f);
+            glm::vec3 ro = glm::vec3(a4) / a4.w;
+            glm::vec3 rd = glm::vec3(b4) / b4.w - ro;
+
+            std::optional<glm::vec2> got = c->ray_to_canvas(ro, rd);
+            ASSERT_TRUE(got.has_value());
+            ASSERT_VEC2_NEAR(*got, want, 0.01f);
+        }
+    }
+}
+
+void test_world_canvas_ray_misses_are_real_misses() {
+    SceneObject obj("WorldCanvas");
+    CanvasComponent* c = wc_make(obj, glm::vec3(0.0f, 0.0f, 1.1f));
+    c->billboard = CanvasBillboard::CameraFacing;
+    c->update_world_transform(wc_view());
+
+    // Pointing away from the plane: the intersection is BEHIND the ray origin, which is a miss,
+    // not a hit at negative t. A canvas that reported this as a hit would respond to a pointer
+    // aimed in the opposite direction.
+    ASSERT_TRUE(!c->ray_to_canvas(glm::vec3(0.0f, -6.0f, 1.5f), glm::vec3(0.0f, -1.0f, 0.0f)).has_value());
+
+    // Edge-on: the denominator is ~0 and must not be divided by.
+    glm::vec3 in_plane = glm::vec3(c->model()[0]);
+    ASSERT_TRUE(!c->ray_to_canvas(glm::vec3(0.0f, 0.0f, 1.1f) - in_plane * 10.0f, in_plane).has_value());
+
+    // A hit well outside the rect is still a HIT (the plane is infinite) -- rejecting it is
+    // Raycaster's job, via root_rect(). This keeps the two responsibilities separate.
+    std::optional<glm::vec2> far_hit =
+        c->ray_to_canvas(glm::vec3(40.0f, -6.0f, 1.1f), glm::vec3(0.0f, 1.0f, 0.0f));
+    ASSERT_TRUE(far_hit.has_value());
+    ASSERT_TRUE(!contains(c->root_rect(), *far_hit));
+}
+
+void test_world_canvas_does_not_disturb_screen_space_canvases() {
+    // The whole feature has to be inert unless asked for.
+    SceneObject obj("ScreenCanvas");
+    auto* c = obj.add_component<CanvasComponent>();
+    ASSERT_TRUE(c->render_mode == CanvasRenderMode::ScreenSpaceOverlay);
+    ASSERT_TRUE(!c->is_world_space());
+    c->set_viewport(640, 360);
+    ASSERT_VEC2_NEAR(c->root_rect().size(), glm::vec2(640.0f, 360.0f), 1e-5f);
+    ASSERT_NEAR(c->scale_factor(), 1.0f, 1e-6f);
+    // model() stays identity, and update_world_transform() is a no-op on a screen canvas.
+    c->update_world_transform(wc_view());
+    ASSERT_TRUE(c->model() == glm::mat4(1.0f));
+}
+
+void test_ui_input_update_at_sets_canvas_position_directly() {
+    // update_at() is the seam world canvases feed their ray/plane result through; update()
+    // is now defined in terms of it, so this also covers the screen-space path's copying.
+    coopa::input::Input input;
+    UiInput ui;
+    ui.update_at(input, glm::vec2(12.0f, 7.0f));
+    ASSERT_VEC2_NEAR(ui.position(), glm::vec2(12.0f, 7.0f), 1e-5f);
+    ui.update_at(input, glm::vec2(20.0f, 7.0f));
+    ASSERT_VEC2_NEAR(ui.position(), glm::vec2(20.0f, 7.0f), 1e-5f);
+    ASSERT_VEC2_NEAR(ui.delta(), glm::vec2(8.0f, 0.0f), 1e-5f);
+}
+
+void test_progress_bar_resolves_child_names_at_start() {
+    // A YAML parser cannot take pointers to children: SceneLoader parses an object's
+    // components BEFORE its children exist. ProgressBar therefore records names and resolves
+    // them in start(), the same way Slider does.
+    SceneObject bar("HealthBar");
+    auto* rt = bar.add_component<RectTransform>();
+    rt->set_size_delta(glm::vec2(100.0f, 10.0f));
+    rt->resolve(Rect{glm::vec2(0.0f), glm::vec2(200.0f, 50.0f)});
+
+    auto* pb = bar.add_component<ProgressBar>();
+    pb->min_value = 0.0f;
+    pb->max_value = 100.0f;
+    pb->fill_name = "Fill";
+    pb->label_name = "Label";
+
+    SceneObject* fill = bar.add_child(std::make_unique<SceneObject>("Fill"));
+    fill->add_component<RectTransform>();
+    SceneObject* label = bar.add_child(std::make_unique<SceneObject>("Label"));
+    auto* label_txt = label->add_component<Text>();
+
+    ASSERT_TRUE(pb->fill_rect == nullptr);   // not resolvable at construction
+    pb->start();
+    ASSERT_TRUE(pb->fill_rect == fill->get_component<RectTransform>());
+    ASSERT_TRUE(pb->label_text == label_txt);
+    // An unset name must stay null rather than picking something arbitrary.
+    ASSERT_TRUE(pb->ghost_rect == nullptr);
+}
+
 void test_console_toggle_opens_focuses_and_pushes_modal() {
     ModalContext::instance().clear();
     FocusContext::instance().clear_focus();
@@ -6732,6 +7007,7 @@ int main() {
     RUN_TEST(test_builder_icons_degrade_without_icon_library);
     RUN_TEST(test_rect_transform_world_corners_identity);
     RUN_TEST(test_text_layout_wrap);
+    RUN_TEST(test_text_layout_scales_linearly);
     RUN_TEST(test_raycaster_topmost_wins);
     RUN_TEST(test_raycast_masked);
     RUN_TEST(test_horizontal_layout_group_distribution);
@@ -6896,6 +7172,17 @@ int main() {
     RUN_TEST(test_console_history_up_down);
     RUN_TEST(test_console_modal_blocks_hud_beneath);
     RUN_TEST(test_console_destructor_removes_modal_root);
+
+    // --- World-space canvases ---
+    RUN_TEST(test_world_canvas_root_rect_ignores_screen_size);
+    RUN_TEST(test_world_canvas_model_centres_on_owner_and_scales_by_ppu);
+    RUN_TEST(test_world_canvas_transform_mode_default_axes_face_minus_y);
+    RUN_TEST(test_world_canvas_camera_facing_projects_axis_aligned);
+    RUN_TEST(test_world_canvas_ray_to_canvas_round_trips);
+    RUN_TEST(test_world_canvas_ray_misses_are_real_misses);
+    RUN_TEST(test_world_canvas_does_not_disturb_screen_space_canvases);
+    RUN_TEST(test_ui_input_update_at_sets_canvas_position_directly);
+    RUN_TEST(test_progress_bar_resolves_child_names_at_start);
 
     std::cout << "===========================================" << std::endl;
     std::cout << "Tests run: " << g_tests_run << ", Failed: " << g_tests_failed << std::endl;

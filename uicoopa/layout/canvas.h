@@ -1,9 +1,17 @@
 /**
  * @file canvas.h
- * @brief Root driver for a UI tree: screen-derived root rect, the explicit
- *        measure -> arrange -> emit rebuild pipeline, and (via late_update())
- *        a fully self-driving per-frame UI pass owning its own DrawList,
- *        UiInput, and EventSystem.
+ * @brief Root driver for a UI tree: screen- or world-derived root rect, the
+ *        explicit measure -> arrange -> emit rebuild pipeline, and (via
+ *        late_update()) a fully self-driving per-frame UI pass owning its own
+ *        DrawList, UiInput, and EventSystem.
+ *
+ * Two render modes, mirroring Unity's Canvas.renderMode -- see
+ * CanvasRenderMode. The world-space mode is deliberately confined to this file:
+ * it changes where the root rect comes from and adds a canvas-pixels-to-world
+ * matrix, and nothing else. Every RectTransform, Graphic, layout group and
+ * widget below the canvas keeps emitting plain canvas-space rects into the
+ * DrawList exactly as before, which is what lets a world canvas host the entire
+ * widget library with no per-widget work at all.
  */
 
 #ifndef UICOOPA_LAYOUT_CANVAS_H
@@ -18,18 +26,51 @@
 #include <uicoopa/input/event_system.h>
 #include <coopa/scene/scene_object.h>
 #include <coopa/scene/scene.h>
+#include <coopa/scene/components/transform_component.h>
 #include <glm/glm.hpp>
 #include <string>
 #include <cstdint>
 #include <vector>
 #include <algorithm>
+#include <cmath>
+#include <optional>
 
 namespace coopa {
 namespace ui {
 
 /**
+ * @enum CanvasRenderMode
+ * @brief Where a canvas's root rect lives, mirroring Unity's Canvas.renderMode.
+ */
+enum class CanvasRenderMode {
+    /// Root rect derived from the framebuffer via CanvasScaler; drawn by UiPass
+    /// straight into NDC. The original (and default) behaviour.
+    ScreenSpaceOverlay,
+    /// Root rect is the authored CanvasComponent::world_size, in canvas pixels,
+    /// placed in the 3D world by model(); drawn by UiWorldPass through a real
+    /// view/projection. CanvasScaler is ignored -- see world_size.
+    WorldSpace,
+};
+
+/**
+ * @enum CanvasBillboard
+ * @brief How a WorldSpace canvas orients itself. Ignored in ScreenSpaceOverlay mode.
+ */
+enum class CanvasBillboard {
+    /// Always square-on to the camera, built from the view matrix's own right/up
+    /// axes. Because the resulting quad sits at a constant view-space depth, it
+    /// projects to a screen-axis-aligned rectangle -- which is what lets
+    /// UiWorldPass turn a Mask's clip rect into an exact scissor.
+    CameraFacing,
+    /// Honours the owner SceneObject's own 3D rotation (and scale), via
+    /// local_right_axis/local_up_axis. True Unity WorldSpace behaviour: the
+    /// canvas is a flat object in the scene and can be seen edge-on.
+    Transform,
+};
+
+/**
  * @class CanvasComponent
- * @brief Screen-space root of a UI tree, driving the measure/arrange/emit rebuild.
+ * @brief Screen- or world-space root of a UI tree, driving the measure/arrange/emit rebuild.
  *
  * coopa::scene::SceneObject::update() is a pre-order depth-first walk over
  * components, which happens to visit parents before children — but layout
@@ -65,14 +106,100 @@ public:
 
     std::string type_name() const override { return "Canvas"; }
 
-    CanvasScaler scaler;   /**< Determines how the root rect's size relates to screen pixels. */
+    CanvasScaler scaler;   /**< Determines how the root rect's size relates to screen pixels. ScreenSpaceOverlay only. */
     int sort_order = 0;    /**< Higher draws later (on top); see collect_canvases(). */
+
+    /** @brief Screen-space (the default) or world-space. See CanvasRenderMode. */
+    CanvasRenderMode render_mode = CanvasRenderMode::ScreenSpaceOverlay;
+
+    /**
+     * @brief Extra glyph-atlas density for text on this canvas; see effective_text_scale().
+     *
+     * A glyph atlas is a bitmap, so it has no resolution to spare: baked at the authored
+     * font_size and then magnified on screen, it can only go soft. A ScreenSpaceOverlay canvas
+     * needs nothing here -- its magnification is exactly scale_factor(), which is folded in
+     * automatically. This knob is for WORLD canvases, whose on-screen size depends on how far
+     * away the camera happens to be and so cannot be derived once and for all.
+     *
+     * Set it to roughly the magnification the canvas is usually seen at: render pixels per
+     * canvas pixel, i.e. (render_height / (2 * distance * tan(fov/2))) / pixels_per_unit.
+     * Round DOWN when unsure -- slight magnification is a mild blur, while minification through
+     * a sampler with no mipmaps aliases, which is the worse failure.
+     *
+     * 1.0 (the default) reproduces the pre-supersampling behaviour exactly, down to stb's
+     * oversampling choice (see FontAtlas's ctor doc).
+     */
+    float text_supersample = 1.0f;
+
+    /** @brief How a WorldSpace canvas faces. See CanvasBillboard. */
+    CanvasBillboard billboard = CanvasBillboard::CameraFacing;
+
+    /**
+     * @brief A WorldSpace canvas's root rect size, in CANVAS PIXELS -- not world units.
+     *
+     * This is the authored design size every child anchors against, exactly as the
+     * framebuffer size is in screen-space mode; pixels_per_unit alone decides how big
+     * that is in the world. CanvasScaler plays no part in world space: its entire job is
+     * relating canvas pixels to *screen* pixels, and a world canvas has no fixed
+     * relationship to the screen at all (its on-screen size is whatever perspective
+     * makes it).
+     */
+    glm::vec2 world_size{200.0f, 50.0f};
+
+    /**
+     * @brief Canvas pixels per world unit -- the only size knob a WorldSpace canvas has.
+     *
+     * `world_size / pixels_per_unit` is the canvas's extent in world units, so a
+     * 200x50 canvas at 100 spans 2.0 x 0.5 units. Raising this shrinks the canvas
+     * without re-laying-out anything.
+     */
+    float pixels_per_unit = 100.0f;
+
+    /**
+     * @brief Hide fragments that fall behind opaque scene geometry.
+     *
+     * Off by default -- the floating-nameplate look, always legible. When on, the host's
+     * render pass discards occluded UI fragments by comparing against a scene depth
+     * texture it supplies (see UiWorldPass); this is a shader-side compare rather than a
+     * hardware depth test, because the target a world canvas composites into generally
+     * has no scene depth attached.
+     */
+    bool occlude = false;
+
+    /**
+     * @brief Which of the owner's LOCAL axes become canvas +X / +Y in
+     *        CanvasBillboard::Transform mode.
+     *
+     * Defaults suit a Z-up engine: canvas right is local +X and canvas up is local +Z,
+     * so the canvas normal is cross(+X, +Z) = -Y and an unrotated canvas stands
+     * vertical facing world -Y. A Y-up host sets local_up_axis = {0, 1, 0} and needs no
+     * code change -- uicoopa deliberately has no opinion about which way is up.
+     */
+    glm::vec3 local_right_axis{1.0f, 0.0f, 0.0f};
+    glm::vec3 local_up_axis{0.0f, 0.0f, 1.0f};
 
     /** @brief The resolved root rect from the most recent rebuild_layout()/set_viewport() call. */
     const Rect& root_rect() const { return root_rect_; }
 
     /** @brief The scale factor `scaler` computed in the most recent rebuild_layout()/set_viewport() call. */
     float scale_factor() const { return scale_factor_; }
+
+    /**
+     * @brief How many target pixels one canvas pixel covers, for glyph-atlas baking.
+     *
+     * Screen space: scale_factor() is exactly that ratio already (the pass draws into a
+     * screen_w x screen_h viewport while the canvas spans screen/scale_factor canvas pixels),
+     * so text_supersample is a pure multiplier on top and is normally left at 1.
+     *
+     * World space: scale_factor_ is pinned to 1 (canvas pixels ARE the unit -- see
+     * resolve_root_rect_()), and the real ratio depends on camera distance, so the author
+     * supplies it via text_supersample.
+     *
+     * Fed to DrawList::set_text_scale() by rebuild_emit(); see Text::emit() for what reads it.
+     */
+    float effective_text_scale() const {
+        return is_world_space() ? text_supersample : scale_factor_ * text_supersample;
+    }
 
     /**
      * @brief Runs the bottom-up measure pass followed by the top-down arrange pass.
@@ -82,16 +209,16 @@ public:
      * does not touch DrawList or any rendering type, so it is safe to call from a
      * headless unit test.
      *
-     * @param screen_w Framebuffer width in pixels.
-     * @param screen_h Framebuffer height in pixels.
+     * In WorldSpace mode both arguments are ignored: the root rect is the authored
+     * world_size and the scale factor is fixed at 1 (see resolve_root_rect_()).
+     *
+     * @param screen_w Framebuffer width in pixels. Unused in WorldSpace mode.
+     * @param screen_h Framebuffer height in pixels. Unused in WorldSpace mode.
      */
     void rebuild_layout(uint32_t screen_w, uint32_t screen_h) {
         if (!owner) return;
 
-        scale_factor_ = scaler.compute_scale_factor(screen_w, screen_h);
-        glm::vec2 screen_size(static_cast<float>(screen_w), static_cast<float>(screen_h));
-        glm::vec2 canvas_size = scale_factor_ > 0.0f ? screen_size / scale_factor_ : screen_size;
-        root_rect_ = Rect{ glm::vec2(0.0f), canvas_size };
+        resolve_root_rect_(screen_w, screen_h);
 
         for (auto& child : owner->children()) {
             if (child->active()) measure_(*child);
@@ -112,6 +239,11 @@ public:
      */
     void rebuild_emit(DrawList& draw_list) {
         if (!owner) return;
+        // Before the subtree emits: Text reads this off the list to pick its bake size. Set here
+        // rather than in late_update() because this method is public and documented as
+        // independently callable with any DrawList -- an external caller would otherwise be
+        // silently left on the 1.0 default and render text at the wrong density.
+        draw_list.set_text_scale(effective_text_scale());
         for (auto& child : owner->children()) {
             if (child->active()) emit_(*child, draw_list, 0);
         }
@@ -133,10 +265,7 @@ public:
     void set_viewport(uint32_t screen_w, uint32_t screen_h) {
         viewport_w_ = screen_w;
         viewport_h_ = screen_h;
-        scale_factor_ = scaler.compute_scale_factor(screen_w, screen_h);
-        glm::vec2 screen_size(static_cast<float>(screen_w), static_cast<float>(screen_h));
-        glm::vec2 canvas_size = scale_factor_ > 0.0f ? screen_size / scale_factor_ : screen_size;
-        root_rect_ = Rect{ glm::vec2(0.0f), canvas_size };
+        resolve_root_rect_(screen_w, screen_h);
     }
 
     /**
@@ -157,6 +286,149 @@ public:
     /** @brief This canvas's own EventSystem — owns hover/press state across frames. */
     EventSystem& event_system() { return event_system_; }
 
+    // --- World space (no-ops / identity in ScreenSpaceOverlay mode) ---
+
+    /** @brief True when render_mode is WorldSpace. */
+    bool is_world_space() const { return render_mode == CanvasRenderMode::WorldSpace; }
+
+    /** @brief True when this world canvas asked to be hidden behind opaque geometry. */
+    bool occludes() const { return occlude; }
+
+    /**
+     * @brief Recomputes model() from the owner's resolved world transform.
+     *
+     * Cheap (a handful of vector ops, no matrix inverse) and idempotent, so it is safe
+     * to call more than once per frame. late_update() calls it automatically; a host
+     * that needs model() *before* late_update() runs -- which hit testing does, since
+     * EventSystem::process() is dispatched from inside late_update() -- calls it
+     * itself, right after Scene::update() has resolved the transform hierarchy.
+     *
+     * @param view World-to-camera matrix. Only read in CanvasBillboard::CameraFacing
+     *             mode, for the camera's right/up axes; pass anything in Transform mode.
+     */
+    void update_world_transform(const glm::mat4& view = glm::mat4(1.0f)) {
+        if (!is_world_space() || !owner) return;
+        // Cached so late_update()'s own refresh can re-use the host's last view rather
+        // than silently falling back to identity (which would un-billboard the canvas).
+        view_ = view;
+
+        glm::mat4 owner_world(1.0f);
+        if (auto* tc = owner->get_transform()) {
+            // get_world_matrix() (not world_matrix()) so this also works with no
+            // TransformSystem installed at all, which is how the headless tests drive it.
+            // Both are main-thread-only here: late_update() runs on the main thread, after
+            // UpdatePhase::TransformResolve has already run inside Scene::update().
+            owner_world = tc->transform().get_world_matrix();
+        }
+
+        if (billboard == CanvasBillboard::CameraFacing) {
+            // `view` maps world -> camera, so the ROWS of its 3x3 rotation part are the
+            // camera's basis vectors expressed in world space. glm is column-major
+            // (m[col][row]), so transpose(mat3(view))'s COLUMNS are those rows: column 0
+            // is camera right, column 1 camera up. transpose() is an exact inverse for a
+            // rotation, so no inverse() is needed. normalize() is not redundant:
+            // get_view_matrix() is the inverse of a world matrix, so a scaled camera
+            // object leaks 1/scale into these rows.
+            glm::mat3 cam_basis = glm::transpose(glm::mat3(view));
+            right_ = safe_normalize_(cam_basis[0], glm::vec3(1.0f, 0.0f, 0.0f));
+            up_    = safe_normalize_(cam_basis[1], glm::vec3(0.0f, 1.0f, 0.0f));
+        } else {
+            // Transform mode: the owner's own axes, scale included (Unity-like), so a
+            // scaled canvas object scales its UI. Not normalized, deliberately.
+            glm::mat3 basis(owner_world);
+            right_ = basis * local_right_axis;
+            up_    = basis * local_up_axis;
+        }
+
+        float s = pixels_per_unit > 0.0f ? 1.0f / pixels_per_unit : 1.0f;
+        glm::vec3 u = right_ * s;   // world offset per canvas pixel along +X
+        glm::vec3 v = up_    * s;   // world offset per canvas pixel along +Y
+        normal_ = glm::cross(u, v);
+
+        // Pivot at the canvas centre, so the canvas hangs centred on its owner's origin
+        // -- the "health bar above the cube" case, with no offset arithmetic in the scene.
+        origin_ = glm::vec3(owner_world[3])
+                - u * (0.5f * world_size.x)
+                - v * (0.5f * world_size.y);
+
+        model_ = glm::mat4(1.0f);
+        model_[0] = glm::vec4(u, 0.0f);
+        model_[1] = glm::vec4(v, 0.0f);
+        // Column 2 is never exercised (UiVertex has no z, so in_pos.z is always 0); set it
+        // to the unit normal anyway so model() reads correctly in a debugger.
+        model_[2] = glm::vec4(safe_normalize_(normal_, glm::vec3(0.0f, 0.0f, 1.0f)), 0.0f);
+        model_[3] = glm::vec4(origin_, 1.0f);
+    }
+
+    /**
+     * @brief Canvas pixels -> world space, as of the last update_world_transform().
+     *
+     * A render pass forms its own clip matrix as `proj * view * model()`. Deliberately
+     * not premultiplied by view/proj here: the host owns the authoritative projection
+     * (which it may jitter for TAA), and computing the product at draw time is what
+     * keeps the UI's depth exactly consistent with the depth buffer it is compared
+     * against. Identity in ScreenSpaceOverlay mode.
+     */
+    const glm::mat4& model() const { return model_; }
+
+    /** @brief The canvas plane's world-space normal (unnormalized), from the last update_world_transform(). */
+    const glm::vec3& world_normal() const { return normal_; }
+
+    /**
+     * @brief Intersects a world-space ray with this canvas's plane.
+     *
+     * The pointer-picking half of world-space UI: the host turns a cursor position into
+     * a world ray, this turns the ray into a canvas-space point, and Raycaster /
+     * EventSystem then run completely unmodified. One ray/plane path serves both
+     * billboard modes -- a CameraFacing quad's projection happens to be affine (constant
+     * view depth) and could be inverted with a 2x2 solve, but Transform mode under
+     * perspective is genuinely projective, and one exact path beats two special cases.
+     *
+     * @param ray_origin World-space ray origin (the eye, for a perspective camera).
+     * @param ray_dir    World-space ray direction. Need not be normalized.
+     * @return Canvas-space point in canvas pixels (+Y up), or nullopt when the ray is
+     *         edge-on to the plane or the plane lies behind the origin. The point is NOT
+     *         clamped to the canvas: a hit outside root_rect() is a real miss that
+     *         Raycaster is already responsible for rejecting.
+     */
+    std::optional<glm::vec2> ray_to_canvas(const glm::vec3& ray_origin,
+                                           const glm::vec3& ray_dir) const {
+        glm::vec3 u(model_[0]);
+        glm::vec3 v(model_[1]);
+        float denom = glm::dot(normal_, ray_dir);
+        if (std::abs(denom) < 1.0e-8f) return std::nullopt;         // edge-on
+        float t = glm::dot(normal_, origin_ - ray_origin) / denom;
+        if (t < 0.0f) return std::nullopt;                           // plane behind the ray
+
+        glm::vec3 q = ray_origin + ray_dir * t - origin_;
+        float uu = glm::dot(u, u);
+        float vv = glm::dot(v, v);
+        if (uu <= 0.0f || vv <= 0.0f) return std::nullopt;           // degenerate canvas
+        // Exact for any ORTHOGONAL u/v, unit-length or not -- which covers both billboard
+        // modes and any uniformly or per-axis scaled owner. A sheared owner transform
+        // would make u/v non-orthogonal and need a 2x2 Gram inverse instead; no caller
+        // does that, and RectTransform layout can't express shear either.
+        return glm::vec2(glm::dot(q, u) / uu, glm::dot(q, v) / vv);
+    }
+
+    /**
+     * @brief Updates this canvas's UiInput from an explicit canvas-space cursor position.
+     *
+     * The world-space counterpart of set_input(), which can only derive the cursor from a
+     * screen-space scale factor. Hosts pair this with ray_to_canvas():
+     * @code
+     * canvas->update_world_transform(view);
+     * auto hit = canvas->ray_to_canvas(ray_origin, ray_dir);
+     * // A miss must be parked far outside the canvas, NOT at (0,0) -- that is the
+     * // canvas's own bottom-left corner, and would leave a widget there permanently
+     * // hovered whenever the pointer is off the canvas.
+     * canvas->set_world_input(input, hit ? *hit : glm::vec2(-1.0e6f));
+     * @endcode
+     */
+    void set_world_input(const coopa::input::Input& input, glm::vec2 canvas_pos) {
+        input_.update_at(input, canvas_pos);
+    }
+
     /** @brief Sets the texture used for untextured/solid-color quads (typically a 1x1 white texel). */
     void set_default_texture(coopa::gfx::TextureView view) { draw_list_.set_default_texture(view); }
 
@@ -174,12 +446,45 @@ public:
     void late_update(float delta_time) override {
         if (!owner) return;
         rebuild_layout(viewport_w_, viewport_h_);
+        // After rebuild_layout(), so a world_size written this frame is already reflected
+        // in the matrix; before event_system_.process(), so the matrix a host used for hit
+        // testing and the matrix the render pass will use are the same one. Uses the view
+        // matrix the host last supplied -- a host driving a CameraFacing canvas calls
+        // update_world_transform(view) itself before Scene::late_update() anyway (it needs
+        // model() for the pointer ray), and this call re-uses that same cached view.
+        update_world_transform(view_);
         draw_list_.begin(root_rect_);
         rebuild_emit(draw_list_);
         event_system_.process(input_, *owner, delta_time);
     }
 
 private:
+    /**
+     * @brief Computes root_rect_/scale_factor_ for whichever render mode is active.
+     *
+     * The WorldSpace branch comes FIRST for a reason beyond taste: viewport_w_/h_ default
+     * to 0, and CanvasScaler's default ConstantPixelSize mode would turn that into
+     * canvas_size = 0/1 = 0 -- an empty root rect, from which nothing draws at all. A
+     * world canvas never needs a viewport set, so it must never reach that path.
+     */
+    void resolve_root_rect_(uint32_t screen_w, uint32_t screen_h) {
+        if (is_world_space()) {
+            scale_factor_ = 1.0f;   // canvas pixels ARE the unit here; see world_size
+            root_rect_ = Rect{ glm::vec2(0.0f), world_size };
+            return;
+        }
+        scale_factor_ = scaler.compute_scale_factor(screen_w, screen_h);
+        glm::vec2 screen_size(static_cast<float>(screen_w), static_cast<float>(screen_h));
+        glm::vec2 canvas_size = scale_factor_ > 0.0f ? screen_size / scale_factor_ : screen_size;
+        root_rect_ = Rect{ glm::vec2(0.0f), canvas_size };
+    }
+
+    /** @brief normalize() that returns `fallback` instead of NaNs for a zero-length vector. */
+    static glm::vec3 safe_normalize_(const glm::vec3& v, const glm::vec3& fallback) {
+        float len2 = glm::dot(v, v);
+        return len2 > 1.0e-20f ? v * (1.0f / std::sqrt(len2)) : fallback;
+    }
+
     static void measure_(coopa::scene::SceneObject& obj) {
         for (auto& child : obj.children()) {
             if (child->active()) measure_(*child);
@@ -252,6 +557,15 @@ private:
     float scale_factor_ = 1.0f;
     uint32_t viewport_w_ = 0;
     uint32_t viewport_h_ = 0;
+
+    // World-space state, all recomputed together by update_world_transform() so nothing is
+    // ever derived twice or left inconsistent between the render and hit-test paths.
+    glm::mat4 model_{1.0f};     ///< Canvas pixels -> world.
+    glm::mat4 view_{1.0f};      ///< Last view matrix a host supplied, for late_update()'s refresh.
+    glm::vec3 right_{1.0f, 0.0f, 0.0f};
+    glm::vec3 up_{0.0f, 1.0f, 0.0f};
+    glm::vec3 normal_{0.0f, 0.0f, 1.0f};  ///< cross(model_[0], model_[1]); unnormalized.
+    glm::vec3 origin_{0.0f};              ///< World position of canvas-space (0, 0).
     UiInput     input_;
     EventSystem event_system_;
     DrawList    draw_list_;
