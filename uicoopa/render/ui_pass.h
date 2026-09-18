@@ -256,6 +256,31 @@ public:
      */
     void mark_as_text_atlas(coopa::gfx::TextureView view) { text_views_.insert(view); }
 
+    /**
+     * @brief Forgets everything this pass knows about `view` -- call before destroying the
+     *        Texture that owns it.
+     *
+     * Mandatory, not hygiene. TextureView is the raw VkImageView handle value, and drivers
+     * reuse a freed handle for the next view created; both caches below are keyed by it, so
+     * a stale entry silently captures the next texture that lands on the same handle. See
+     * TexturedQuad2DPass::unregister_view() for the descriptor-set half.
+     *
+     * The text_views_ half is the nastier of the two and is why this wrapper exists rather
+     * than a bare forward: a glyph atlas is an R8 coverage texture drawn through the "text"
+     * pipeline variant. Destroy a Font, upload an ordinary RGBA texture that inherits the
+     * atlas's handle, and is_text_view_() still says true -- so the new texture is sampled
+     * as single-channel coverage and draws as a flat tinted block.
+     *
+     * Safe to call for a view that was never registered or never marked.
+     *
+     * @param view The view to forget, before its Texture is destroyed and while no
+     *             in-flight frame still references it.
+     */
+    void unregister_texture(coopa::gfx::TextureView view) {
+        pass_->unregister_view(view);
+        text_views_.erase(view);
+    }
+
 private:
     static constexpr uint32_t kInitialMaxVerts   = 8192;
     static constexpr uint32_t kInitialMaxIndices = 12288;

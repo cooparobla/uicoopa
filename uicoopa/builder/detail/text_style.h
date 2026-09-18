@@ -39,13 +39,18 @@ inline void apply_role_font(Text* txt, const UITheme& theme, FontRole role, floa
 /**
  * @brief Measures `text` at `role`'s resolved font + size, for auto-fit layout
  *        (see make_button()'s and tab_view()'s width-measure sites).
+ * @param wrap_width Column to wrap at, or < 0 for a single unwrapped line. A wrapped
+ *        measure returns the height of every line, which is what sizing a multi-line
+ *        bubble (TooltipOverlay) needs -- Text itself reports no measure() for a
+ *        ContentSizeFitter to aggregate.
  * @return The measured size, or {0,0} if no font is loaded yet (headless tests).
  */
-inline glm::vec2 measure_role_text(const UITheme& theme, FontRole role, const std::string& text) {
+inline glm::vec2 measure_role_text(const UITheme& theme, FontRole role, const std::string& text,
+                                   float wrap_width = -1.0f) {
     Font* font = font_role_font(theme, role);
     if (!font) font = FontDefaults::font;
     if (!font) return glm::vec2(0.0f, 0.0f);
-    return font->measure(text, static_cast<uint32_t>(font_role_size(theme, role)));
+    return font->measure(text, static_cast<uint32_t>(font_role_size(theme, role)), wrap_width);
 }
 
 }  // namespace detail

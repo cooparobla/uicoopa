@@ -18,6 +18,8 @@
 #include <uicoopa/widgets/text.h>
 #include <uicoopa/widgets/mask.h>
 #include <uicoopa/widgets/scrollbar.h>
+#include <uicoopa/widgets/button.h>
+#include <uicoopa/widgets/collapsible_panel.h>
 #include <uicoopa/render/icon_library.h>
 #include <uicoopa/ui_component.h>
 #include <memory>
@@ -108,12 +110,22 @@ inline SceneObject* make_grid_layout(BuildContext ctx, const std::string& name,
  * @brief A titled, scrollable frame: HeaderBar+Title, a masked+ScrollRect
  *        Viewport, and a VerticalLayoutGroup Content, plus a vertical
  *        Scrollbar sibling to the Viewport (so it draws outside its Mask).
+ *
+ * @param with_header Whether to build the HeaderBar at all. False drops it and reclaims
+ *        its height for the Viewport and scrollbar -- for a scroll view nested inside
+ *        something that already has a title bar of its own (a card, a CollapsiblePanel),
+ *        where a second one would just stack two header strips.
  * @return The Content node -- callers populate it as they would any other
- *         parent, then typically call fit_content_height() on it.
+ *         parent, then typically call fit_content_height() on it, or add a
+ *         ContentSizeFitter when the children's heights change at runtime.
+ *
+ * @note `size.x` is baked into the Content width and the scrollbar's offsets, so this
+ *       frame cannot be stretched horizontally by a parent -- pass the real pixel width.
  */
 inline SceneObject* make_scroll_view(BuildContext ctx, const std::string& name,
                                      const std::string& title,
-                                     glm::vec2 size, AnchorPreset preset, glm::vec2 anchored_pos) {
+                                     glm::vec2 size, AnchorPreset preset, glm::vec2 anchored_pos,
+                                     bool with_header = true) {
     const UITheme& theme = *ctx.theme;
 
     auto frame_obj = std::make_unique<SceneObject>(name);
@@ -123,30 +135,36 @@ inline SceneObject* make_scroll_view(BuildContext ctx, const std::string& name,
     frame_rt->set_anchored_position(anchored_pos);
     frame_obj->add_component<Image>()->color = theme.panel.background;
 
-    // Title header bar.
-    auto header_obj = std::make_unique<SceneObject>("HeaderBar");
-    auto* header_rt = header_obj->add_component<RectTransform>();
-    header_rt->anchor_preset(AnchorPreset::StretchTop);
-    header_rt->set_size_delta({0.0f, theme.metrics.card_header_height + 4.0f});
-    header_obj->add_component<Image>()->color = theme.panel.header_bar;
+    // Zero when headerless, so the Viewport and scrollbar below reclaim the strip rather
+    // than leaving a gap where the bar would have been.
+    const float header_h = with_header ? theme.metrics.card_header_height + 4.0f : 0.0f;
 
-    auto title_obj = std::make_unique<SceneObject>("Title");
-    auto* title_rt = title_obj->add_component<RectTransform>();
-    title_rt->anchor_preset(AnchorPreset::StretchAll);
-    title_rt->set_offset_min({12.0f, 0.0f});
-    title_rt->set_offset_max({-12.0f, 0.0f});
-    auto* title_txt = title_obj->add_component<Text>();
-    apply_role_font(title_txt, theme, FontRole::Heading);
-    title_txt->text = title;
-    title_txt->color = theme.text.accent;
-    title_txt->horizontal_align = HorizontalAlign::Left;
-    title_txt->vertical_align = VerticalAlign::Middle;
-    header_obj->add_child(std::move(title_obj));
+    // Title header bar.
+    std::unique_ptr<SceneObject> header_obj;
+    if (with_header) {
+        header_obj = std::make_unique<SceneObject>("HeaderBar");
+        auto* header_rt = header_obj->add_component<RectTransform>();
+        header_rt->anchor_preset(AnchorPreset::StretchTop);
+        header_rt->set_size_delta({0.0f, header_h});
+        header_obj->add_component<Image>()->color = theme.panel.header_bar;
+
+        auto title_obj = std::make_unique<SceneObject>("Title");
+        auto* title_rt = title_obj->add_component<RectTransform>();
+        title_rt->anchor_preset(AnchorPreset::StretchAll);
+        title_rt->set_offset_min({12.0f, 0.0f});
+        title_rt->set_offset_max({-12.0f, 0.0f});
+        auto* title_txt = title_obj->add_component<Text>();
+        apply_role_font(title_txt, theme, FontRole::Heading);
+        title_txt->text = title;
+        title_txt->color = theme.text.accent;
+        title_txt->horizontal_align = HorizontalAlign::Left;
+        title_txt->vertical_align = VerticalAlign::Middle;
+        header_obj->add_child(std::move(title_obj));
+    }  // if (with_header)
 
     // Viewport -- leaves a strip on the right for the scrollbar built below.
     const float scrollbar_thickness = theme.metrics.scrollbar_thickness;
     constexpr float kScrollbarGap = 2.0f;
-    const float header_h = theme.metrics.card_header_height + 4.0f;
 
     auto vp_obj = std::make_unique<SceneObject>("Viewport");
     auto* vp_rt = vp_obj->add_component<RectTransform>();
@@ -219,7 +237,7 @@ inline SceneObject* make_scroll_view(BuildContext ctx, const std::string& name,
 
     auto* content_raw = content_obj.get();
     vp_obj->add_child(std::move(content_obj));
-    frame_obj->add_child(std::move(header_obj));
+    if (header_obj) frame_obj->add_child(std::move(header_obj));
     frame_obj->add_child(std::move(vp_obj));
     frame_obj->add_child(std::move(sb_obj));
 
@@ -298,6 +316,173 @@ inline SceneObject* make_card(BuildContext ctx, const std::string& name, const s
     card_obj->add_child(std::move(body_obj));
     ctx.parent->add_child(std::move(card_obj));
     return body_raw;
+}
+
+/**
+ * @struct CollapsibleOptions
+ * @brief Everything about a UIBuilder::collapsible() panel that isn't its name or title.
+ */
+struct CollapsibleOptions {
+    CollapseAxis axis = CollapseAxis::Vertical; /**< @brief Which way the panel folds. */
+    bool  start_expanded = true;                /**< @brief State applied by CollapsiblePanel::start(). */
+    bool  boxed = true;                         /**< @brief Paints theme.panel.panel behind the whole panel. */
+    float expanded_extent  = -1.0f;             /**< @brief Extent while open. Required (>0) for Horizontal; for
+                                                     Vertical, leave <0 and call CollapsibleHandle::fit(). */
+    float collapsed_extent = -1.0f;             /**< @brief Extent while folded. <0 derives one: the header
+                                                     height for Vertical, theme.collapsible.rail_width for
+                                                     Horizontal. */
+    /**
+     * @brief Node whose LayoutElement this panel resizes. Null uses the panel's own.
+     *
+     * For a sidebar built as a split_columns() Section this MUST be the section node --
+     * that is the node the parent split sizes. See CollapsiblePanel's class doc.
+     */
+    SceneObject* size_node = nullptr;
+    LayoutPadding body_padding{};               /**< @brief Padding inside the body's layout group. */
+    float body_spacing = -1.0f;                 /**< @brief <0 uses theme.metrics.row_spacing. */
+};
+
+/**
+ * @struct CollapsibleParts
+ * @brief The nodes make_collapsible() built, for UIBuilder::collapsible() to wrap.
+ */
+struct CollapsibleParts {
+    SceneObject*      node = nullptr;      /**< @brief The panel root. */
+    SceneObject*      header = nullptr;    /**< @brief The clickable header strip. */
+    SceneObject*      body = nullptr;      /**< @brief Where the caller adds content. */
+    CollapsiblePanel* component = nullptr; /**< @brief The behaviour, on `node`. */
+};
+
+/**
+ * @brief A titled panel whose body folds away when its header is clicked.
+ *
+ * Structurally make_card() with the header's static Text replaced by a full-width Button
+ * plus an indicator chevron, and with a VerticalLayoutGroup on the root so the header and
+ * body stack (rather than the body being anchored under a fixed-height header the way a
+ * card's is) -- that stacking is what lets the root shrink to just its header when the
+ * body drops out of layout.
+ *
+ * Deliberately does NOT hide the body, for the same reason make_dialog() doesn't hide a
+ * Modal and make_tab_view() doesn't call start() itself: the caller populates the body
+ * after this returns, and CollapsiblePanel::start() does the hiding once Scene::start()
+ * runs. A panel built after that call needs its own `node->start()`.
+ *
+ * @param ctx   Parent node + theme to build into.
+ * @param name  Root SceneObject name; the header is built as `name + "Header"`.
+ * @param title Header label.
+ * @param opts  See CollapsibleOptions.
+ * @return The built nodes; see CollapsibleParts.
+ */
+inline CollapsibleParts make_collapsible(BuildContext ctx, const std::string& name,
+                                         const std::string& title,
+                                         const CollapsibleOptions& opts) {
+    const UITheme& theme = *ctx.theme;
+    const float header_h = theme.metrics.card_header_height;
+    const float icon_sz = theme.icons.size;
+    const float indent = theme.collapsible.indent;
+
+    // The root stacks header-over-body in a VerticalLayoutGroup rather than using
+    // make_card()'s anchored Body, so that deactivating the body actually removes its
+    // height from the root's measure instead of leaving a header-sized hole.
+    auto root_obj = std::make_unique<SceneObject>(name);
+    auto* root_rt = root_obj->add_component<RectTransform>();
+    root_rt->anchor_preset(AnchorPreset::StretchAll);
+    root_rt->set_size_delta({0.0f, 0.0f});
+    if (opts.boxed) root_obj->add_component<Image>()->color = theme.panel.panel;
+
+    auto* root_group = root_obj->add_component<VerticalLayoutGroup>();
+    root_group->spacing = 0.0f;
+    root_group->child_force_expand_width = true;
+    root_group->child_force_expand_height = false;
+
+    // Always present, always written -- see CollapsiblePanel's class doc for why a
+    // measured-only panel is mis-sized by fit_content_height().
+    auto* root_le = root_obj->add_component<LayoutElement>();
+
+    auto header_obj = std::make_unique<SceneObject>(name + "Header");
+    auto* header_rt = header_obj->add_component<RectTransform>();
+    header_rt->set_size_delta({0.0f, header_h});
+    header_obj->add_component<LayoutElement>()->preferred_size = {-1.0f, header_h};
+    // Image before Button so Button::start()'s target_graphic auto-discovery finds it --
+    // the same ordering make_button() relies on.
+    header_obj->add_component<Image>()->color = theme.collapsible.header;
+    auto* header_btn = header_obj->add_component<Button>();
+    header_btn->colors.normal      = theme.collapsible.header;
+    header_btn->colors.highlighted = theme.collapsible.hover;
+    header_btn->colors.pressed     = theme.collapsible.press;
+    header_btn->colors.disabled    = theme.collapsible.header;
+
+    // Both header children are decorative: hittable = false keeps them from shadowing the
+    // header Button underneath, exactly as make_button()'s Label and make_dropdown()'s
+    // Arrow do.
+    Image* indicator = nullptr;
+    Sprite* expanded_sprite = IconLibrary::instance().icon(
+        opts.axis == CollapseAxis::Horizontal ? theme.icons.sidebar_collapse
+                                              : theme.icons.collapse_expanded);
+    Sprite* collapsed_sprite = IconLibrary::instance().icon(
+        opts.axis == CollapseAxis::Horizontal ? theme.icons.sidebar_expand
+                                              : theme.icons.collapse_collapsed);
+    if (expanded_sprite || collapsed_sprite) {
+        auto ind_obj = std::make_unique<SceneObject>("Indicator");
+        auto* ind_rt = ind_obj->add_component<RectTransform>();
+        ind_rt->anchor_preset(AnchorPreset::MiddleLeft);
+        ind_rt->set_size_delta({icon_sz, icon_sz});
+        ind_rt->set_anchored_position({indent, 0.0f});
+        ind_rt->hittable = false;
+        indicator = ind_obj->add_component<Image>();
+        indicator->color = theme.text.primary;
+        indicator->sprite = opts.start_expanded ? expanded_sprite : collapsed_sprite;
+        header_obj->add_child(std::move(ind_obj));
+    }
+
+    auto title_obj = std::make_unique<SceneObject>("Title");
+    auto* title_rt = title_obj->add_component<RectTransform>();
+    title_rt->anchor_preset(AnchorPreset::StretchAll);
+    title_rt->set_offset_min({indent + (indicator ? icon_sz + 6.0f : 0.0f), 0.0f});
+    title_rt->set_offset_max({-10.0f, 0.0f});
+    title_rt->hittable = false;
+    auto* title_txt = title_obj->add_component<Text>();
+    apply_role_font(title_txt, theme, FontRole::Heading);
+    title_txt->text = title;
+    title_txt->color = theme.text.primary;
+    title_txt->horizontal_align = HorizontalAlign::Left;
+    title_txt->vertical_align = VerticalAlign::Middle;
+    auto* title_raw = title_obj.get();
+    header_obj->add_child(std::move(title_obj));
+
+    auto* header_raw = header_obj.get();
+    root_obj->add_child(std::move(header_obj));
+
+    SceneObject* body_raw = make_vertical_layout(
+        ctx.into(root_obj.get()), "Body",
+        opts.body_spacing >= 0.0f ? opts.body_spacing : theme.metrics.row_spacing,
+        opts.body_padding);
+
+    auto* panel = root_obj->add_component<CollapsiblePanel>();
+    panel->axis = opts.axis;
+    panel->starts_expanded = opts.start_expanded;
+    panel->body = body_raw;
+    panel->header_button = header_btn;
+    panel->indicator = indicator;
+    panel->title_node = title_raw;
+    // A horizontal rail is narrower than its own title and Text does not clip itself, so
+    // the label would spill across whatever sits beside the collapsed panel.
+    panel->hide_title_when_collapsed = (opts.axis == CollapseAxis::Horizontal);
+    panel->expanded_sprite = expanded_sprite;
+    panel->collapsed_sprite = collapsed_sprite;
+    panel->expanded_extent = opts.expanded_extent;
+    panel->collapsed_extent = opts.collapsed_extent >= 0.0f
+        ? opts.collapsed_extent
+        : (opts.axis == CollapseAxis::Horizontal ? theme.collapsible.rail_width : header_h);
+    panel->size_target = opts.size_node ? opts.size_node->get_component<LayoutElement>() : root_le;
+
+    CollapsibleParts parts;
+    parts.node = root_obj.get();
+    parts.header = header_raw;
+    parts.body = body_raw;
+    parts.component = panel;
+    ctx.parent->add_child(std::move(root_obj));
+    return parts;
 }
 
 /** @brief A slim accent-barred section header, used to break up a long settings list. */

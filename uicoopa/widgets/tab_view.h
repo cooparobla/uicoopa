@@ -16,6 +16,8 @@
 #include <string>
 #include <vector>
 
+#include <uicoopa/widgets/detail/hidden_subtree.h>
+
 namespace coopa {
 namespace ui {
 
@@ -23,21 +25,17 @@ namespace detail_tabview {
 /**
  * @brief Runs SceneObject::start() over a subtree that is meant to end up hidden.
  *
- * SceneObject::start() early-returns on `!active_`, so a page built already hidden
- * would leave every widget inside it unwired (Button::target_graphic, ComboBox's
- * popup, SpinBox's steppers never resolved). This briefly activates the subtree,
- * starts it, then restores whatever active() flag it had. Safe to call again later
- * when Scene::start() reaches the same subtree, or immediately followed by hiding it
- * — every widget start() in this library is idempotent. A private duplicate of
- * coopa::ui::detail::start_hidden_subtree() (builder/detail/lifecycle.h) kept local
- * to this header so uicoopa/widgets/ has no dependency on uicoopa/builder/.
+ * Retained as this widget's long-standing spelling of the helper; the body now lives
+ * in widgets/detail/hidden_subtree.h, shared with ComboBox and every widget added since
+ * (see that file for why it sits under widgets/ and not builder/). The reason this
+ * TabView needs it is unchanged: a page built already hidden would leave every widget
+ * inside it unwired -- Button::target_graphic, a nested ComboBox's popup and SpinBox's
+ * steppers never resolved.
+ *
+ * @param obj Root of the subtree to start; null is a no-op.
  */
 inline void start_hidden_subtree(coopa::scene::SceneObject* obj) {
-    if (!obj) return;
-    bool was_active = obj->active();
-    obj->set_active(true);
-    obj->start();
-    obj->set_active(was_active);
+    detail_widgets::start_hidden_subtree(obj);
 }
 }  // namespace detail_tabview
 

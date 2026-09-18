@@ -157,6 +157,29 @@ inline Rect intersect(const Rect& a, const Rect& b) {
     return result;
 }
 
+/**
+ * @brief Slides `r` so it lies inside `bounds`, without resizing it.
+ *
+ * For floating elements that are positioned relative to something else and must not run off
+ * the canvas -- a tooltip near the right edge, a popup near the bottom. Translation only:
+ * keeping the size means a tooltip never reflows its text just because it drifted near an
+ * edge, which would be far more distracting than the nudge.
+ *
+ * An `r` larger than `bounds` on an axis is pinned to that axis's minimum edge rather than
+ * being pushed off the opposite one -- clamping the low edge last is what decides that.
+ *
+ * @param bounds The region to stay inside, typically CanvasComponent::root_rect().
+ * @param r The rect to move.
+ * @return `r` translated to fit.
+ */
+inline Rect clamp_inside(const Rect& bounds, const Rect& r) {
+    const glm::vec2 size = r.size();
+    glm::vec2 min = r.min;
+    min = glm::min(min, bounds.max - size);
+    min = glm::max(min, bounds.min);
+    return Rect{ min, min + size };
+}
+
 }  // namespace ui
 }  // namespace coopa
 

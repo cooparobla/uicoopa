@@ -161,6 +161,11 @@ struct IconStyle {
     std::string scroll_down{"chevron_down"};  /**< Vertical Scrollbar's bottom step button; omitted without an icon. */
     std::string scroll_left{"chevron_left"};  /**< Horizontal Scrollbar's left step button; omitted without an icon. */
     std::string scroll_right{"chevron_right"};/**< Horizontal Scrollbar's right step button; omitted without an icon. */
+    std::string collapse_expanded{"chevron_down"};   /**< Expanded CollapsiblePanel (Vertical axis); omitted (no indicator) without an icon. */
+    std::string collapse_collapsed{"chevron_right"}; /**< Collapsed CollapsiblePanel (Vertical axis); omitted without an icon. */
+    std::string sidebar_collapse{"chevron_left"};    /**< Expanded CollapsiblePanel (Horizontal axis) -- points the way it will fold. */
+    std::string sidebar_expand{"chevron_right"};     /**< Collapsed CollapsiblePanel (Horizontal axis) -- points the way it will unfold. */
+    std::string file_folder{"folder"};               /**< FileDialog's directory rows; falls back to no icon, leaving the label alone. */
 };
 
 /** @struct CursorRoleStyle
@@ -252,6 +257,78 @@ struct TabStyle {
 };
 
 /**
+ * @struct CollapsibleStyle
+ * @brief Header strip colors and metrics for CollapsiblePanel (widgets/collapsible_panel.h).
+ *
+ * Its own struct for the same reason every other widget family has one (SlotStyle,
+ * TabStyle, ...): one obvious place for a themed app to override this look, and a 1:1
+ * mirror of the `collapsible:` YAML block ui_theme_yaml.h parses.
+ *
+ * `header` deliberately defaults to the same value as PanelStyle::header_bar, so an
+ * un-themed collapsible section is indistinguishable from a make_card() header until
+ * the pointer is over it -- the fold affordance should not cost the panel its
+ * resemblance to every other titled strip in the UI. `hover`/`press` stay much closer
+ * to `header` than ButtonStyle's do to its own normal, because a full-width header
+ * lighting up as hard as a small button reads as a mode change rather than a hover.
+ */
+struct CollapsibleStyle {
+    glm::vec4 header{0.14f, 0.17f, 0.24f, 1.0f};
+    glm::vec4 hover{0.19f, 0.23f, 0.31f, 1.0f};
+    glm::vec4 press{0.11f, 0.13f, 0.18f, 1.0f};
+    float     rail_width = 28.0f;   /**< @brief Collapsed extent of a CollapseAxis::Horizontal panel. */
+    float     indent = 10.0f;       /**< @brief Left inset of the header's indicator chevron. */
+};
+
+/**
+ * @struct MenuStyle
+ * @brief Bar, title and popup colors for MenuBar (widgets/menu_bar.h).
+ *
+ * Its own struct for the same reason CollapsibleStyle above is. `popup_bg` defaults to
+ * ComboBoxStyle::popup_bg's value on purpose: a menu popup and a dropdown popup are the
+ * same object to a user, and nothing is gained by their differing by default.
+ */
+struct MenuStyle {
+    glm::vec4 bar{0.11f, 0.13f, 0.18f, 1.0f};        /**< Strip behind the menu titles. */
+    glm::vec4 title_normal{0.11f, 0.13f, 0.18f, 0.0f}; /**< Transparent: a title shows only the bar until hovered. */
+    glm::vec4 title_hover{0.20f, 0.23f, 0.29f, 1.0f};
+    glm::vec4 title_press{0.26f, 0.31f, 0.40f, 1.0f};
+    glm::vec4 popup_bg{0.15f, 0.17f, 0.22f, 0.98f};
+    glm::vec4 item_normal{0.15f, 0.17f, 0.22f, 0.0f};  /**< Transparent: items show the popup background until hovered. */
+    glm::vec4 item_hover{0.24f, 0.28f, 0.36f, 1.0f};
+    glm::vec4 item_press{0.30f, 0.35f, 0.45f, 1.0f};
+    glm::vec4 separator{0.25f, 0.28f, 0.35f, 1.0f};
+    float     bar_height = 26.0f;
+    float     item_height = 24.0f;
+    float     title_padding_x = 12.0f;
+};
+
+/**
+ * @struct TooltipStyle
+ * @brief Colors, geometry and timing for TooltipOverlay (widgets/tooltip_overlay.h).
+ *
+ * Its own struct for the same reason every other widget family has one (SlotStyle, TabStyle,
+ * ...): one obvious place for a themed app to override this look, and a 1:1 mirror of the
+ * `tooltip:` YAML block ui_theme_yaml.h parses.
+ *
+ * `bg` deliberately matches SlotStyle::tooltip_bg's value -- InventoryGrid grew its own
+ * hover tooltip before this general one existed, and the two should be indistinguishable
+ * until a theme says otherwise.
+ *
+ * `delay` is the part worth tuning rather than the colors. Too short and a tooltip flashes
+ * up while the pointer is merely crossing the panel on its way somewhere else; too long and
+ * nobody discovers they exist. Half a second is the usual desktop compromise.
+ */
+struct TooltipStyle {
+    glm::vec4 bg{0.05f, 0.06f, 0.08f, 0.95f};
+    glm::vec4 text{0.95f, 0.95f, 0.97f, 1.0f};
+    float     padding_x = 9.0f;      /**< @brief Horizontal inset from the bubble to its text. */
+    float     padding_y = 6.0f;      /**< @brief Vertical inset from the bubble to its text. */
+    float     max_width = 260.0f;    /**< @brief Wrap column; the bubble never exceeds this plus padding. */
+    float     delay = 0.5f;          /**< @brief Seconds hovered before the bubble appears. */
+    float     cursor_offset = 16.0f; /**< @brief Gap from the pointer, so the cursor never covers the text. */
+};
+
+/**
  * @struct HudStyle
  * @brief Colors and metrics for the gameplay-HUD family of builder helpers
  *        (builder/detail/hud.h): stat bars, the hotbar, the message log, and
@@ -335,6 +412,9 @@ struct UITheme {
     CursorStyle      cursor;
     MetricsStyle     metrics;
     TabStyle         tab;
+    CollapsibleStyle collapsible;
+    TooltipStyle     tooltip;
+    MenuStyle        menu;
     FocusStyle       focus;
     HudStyle         hud;
 

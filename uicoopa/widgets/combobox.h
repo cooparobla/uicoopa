@@ -17,6 +17,8 @@
 #include <vector>
 #include <algorithm>
 
+#include <uicoopa/widgets/detail/hidden_subtree.h>
+
 namespace coopa {
 namespace ui {
 
@@ -24,24 +26,18 @@ namespace detail_combobox {
 /**
  * @brief Runs SceneObject::start() over a subtree that is meant to end up hidden.
  *
- * SceneObject::start() early-returns on `!active_`, so a popup built already
- * hidden would leave every widget inside it unwired -- including each item's
- * gamepad Selectable (builder/detail/selectables.h), whose ONLY registration
- * path with NavigationContext is its own start(). This briefly activates the
- * subtree, starts it, then restores whatever active() flag it had. Safe to
- * call again later (every widget start() in this library is idempotent).
- * Identical in shape to detail_tabview::start_hidden_subtree() (tab_view.h) --
- * whose own doc comment already names this exact ComboBox popup case as
- * something that would be left unwired without it -- kept as its own local
- * duplicate for the same reason that one is: so uicoopa/widgets/ has no
- * dependency on uicoopa/builder/.
+ * Retained as this widget's long-standing spelling of the helper; the body now lives
+ * in widgets/detail/hidden_subtree.h, shared with TabView and every widget added since
+ * (see that file for why it sits under widgets/ and not builder/). The reason this
+ * ComboBox needs it is unchanged: a popup built already hidden would leave every widget
+ * inside it unwired -- including each item's gamepad Selectable
+ * (builder/detail/selectables.h), whose ONLY registration path with NavigationContext
+ * is its own start().
+ *
+ * @param obj Root of the subtree to start; null is a no-op.
  */
 inline void start_hidden_subtree(coopa::scene::SceneObject* obj) {
-    if (!obj) return;
-    bool was_active = obj->active();
-    obj->set_active(true);
-    obj->start();
-    obj->set_active(was_active);
+    detail_widgets::start_hidden_subtree(obj);
 }
 }  // namespace detail_combobox
 

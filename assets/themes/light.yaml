@@ -163,3 +163,12 @@ hud:
   log_fade_seconds: 1.0
   console_height: 220.0
   console_input_height: 26.0
+
+tooltip:
+  bg:   { r: 0.16, g: 0.17, b: 0.21, a: 0.96 }
+  text: { r: 0.96, g: 0.96, b: 0.98, a: 1.0 }
+  padding_x: 9.0
+  padding_y: 6.0
+  max_width: 260.0
+  delay: 0.5
+  cursor_offset: 16.0

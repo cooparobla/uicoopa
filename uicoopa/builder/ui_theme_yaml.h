@@ -181,6 +181,11 @@ inline void parse_theme(const fkyaml::node& root, UITheme& out) {
         if (n.contains("scroll_down"))  s.scroll_down  = n.at("scroll_down").get_value<std::string>();
         if (n.contains("scroll_left"))  s.scroll_left  = n.at("scroll_left").get_value<std::string>();
         if (n.contains("scroll_right")) s.scroll_right = n.at("scroll_right").get_value<std::string>();
+        if (n.contains("collapse_expanded"))  s.collapse_expanded  = n.at("collapse_expanded").get_value<std::string>();
+        if (n.contains("collapse_collapsed")) s.collapse_collapsed = n.at("collapse_collapsed").get_value<std::string>();
+        if (n.contains("sidebar_collapse"))   s.sidebar_collapse   = n.at("sidebar_collapse").get_value<std::string>();
+        if (n.contains("sidebar_expand"))     s.sidebar_expand     = n.at("sidebar_expand").get_value<std::string>();
+        if (n.contains("file_folder"))        s.file_folder        = n.at("file_folder").get_value<std::string>();
     }
     if (root.contains("cursor")) {
         const auto& n = root.at("cursor");
@@ -262,6 +267,42 @@ inline void parse_theme(const fkyaml::node& root, UITheme& out) {
         if (n.contains("selected"))       s.selected       = parse_theme_color(n.at("selected"), s.selected);
         if (n.contains("selected_hover")) s.selected_hover = parse_theme_color(n.at("selected_hover"), s.selected_hover);
         if (n.contains("indicator"))      s.indicator      = parse_theme_color(n.at("indicator"), s.indicator);
+    }
+    if (root.contains("tooltip")) {
+        const auto& n = root.at("tooltip");
+        auto& s = out.tooltip;
+        if (n.contains("bg"))            s.bg            = parse_theme_color(n.at("bg"), s.bg);
+        if (n.contains("text"))          s.text          = parse_theme_color(n.at("text"), s.text);
+        if (n.contains("padding_x"))     s.padding_x     = n.at("padding_x").get_value<float>();
+        if (n.contains("padding_y"))     s.padding_y     = n.at("padding_y").get_value<float>();
+        if (n.contains("max_width"))     s.max_width     = n.at("max_width").get_value<float>();
+        if (n.contains("delay"))         s.delay         = n.at("delay").get_value<float>();
+        if (n.contains("cursor_offset")) s.cursor_offset = n.at("cursor_offset").get_value<float>();
+    }
+    if (root.contains("collapsible")) {
+        const auto& n = root.at("collapsible");
+        auto& s = out.collapsible;
+        if (n.contains("header"))     s.header      = parse_theme_color(n.at("header"), s.header);
+        if (n.contains("hover"))      s.hover       = parse_theme_color(n.at("hover"), s.hover);
+        if (n.contains("press"))      s.press       = parse_theme_color(n.at("press"), s.press);
+        if (n.contains("rail_width")) s.rail_width  = n.at("rail_width").get_value<float>();
+        if (n.contains("indent"))     s.indent      = n.at("indent").get_value<float>();
+    }
+    if (root.contains("menu")) {
+        const auto& n = root.at("menu");
+        auto& s = out.menu;
+        if (n.contains("bar"))              s.bar              = parse_theme_color(n.at("bar"), s.bar);
+        if (n.contains("title_normal"))     s.title_normal     = parse_theme_color(n.at("title_normal"), s.title_normal);
+        if (n.contains("title_hover"))      s.title_hover      = parse_theme_color(n.at("title_hover"), s.title_hover);
+        if (n.contains("title_press"))      s.title_press      = parse_theme_color(n.at("title_press"), s.title_press);
+        if (n.contains("popup_bg"))         s.popup_bg         = parse_theme_color(n.at("popup_bg"), s.popup_bg);
+        if (n.contains("item_normal"))      s.item_normal      = parse_theme_color(n.at("item_normal"), s.item_normal);
+        if (n.contains("item_hover"))       s.item_hover       = parse_theme_color(n.at("item_hover"), s.item_hover);
+        if (n.contains("item_press"))       s.item_press       = parse_theme_color(n.at("item_press"), s.item_press);
+        if (n.contains("separator"))        s.separator        = parse_theme_color(n.at("separator"), s.separator);
+        if (n.contains("bar_height"))       s.bar_height       = n.at("bar_height").get_value<float>();
+        if (n.contains("item_height"))      s.item_height      = n.at("item_height").get_value<float>();
+        if (n.contains("title_padding_x"))  s.title_padding_x  = n.at("title_padding_x").get_value<float>();
     }
 }
 

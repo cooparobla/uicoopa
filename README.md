@@ -135,6 +135,15 @@ bar floating above it, plus a second `Transform`-mode canvas, driven by
   same render pass an existing 3D pass already opened** rather than clearing and owning its
   own — the render pass it's built against always clears on load, so a second pass would
   erase whatever was drawn before it.
+
+  **Destroying a texture requires telling it so.** Both of `UiPass`'s caches — the
+  descriptor-set cache in the underlying `TexturedQuad2DPass` and its own text-atlas set —
+  are keyed by `TextureView`, which is the raw `VkImageView` handle value, and a driver
+  hands a freed handle straight back to the next view created. Call
+  `unregister_texture(view)` before destroying a `Texture`, while no in-flight frame still
+  references it, or the *next* texture to land on that handle will silently be drawn
+  through the dead one's descriptor — showing the old image, or being sampled as R8
+  coverage if the handle used to belong to a glyph atlas.
 - **`texture_factory.h`** — builds a device-local Vulkan image from host pixel data
   (`Texture`/`TextureView` themselves come from gfxcoopa).
 - **`sprite.h`** — `Sprite`, a named sub-region of a texture, with optional 9-slice border
@@ -218,6 +227,41 @@ bar floating above it, plus a second `Transform`-mode canvas, driven by
   whose Escape/Up/Down are repurposed for cancel/history instead of TextEditBase's own
   revert-and-blur) and `Console` (toggle/focus/`ModalContext` lifecycle, scrollback, and a
   small named-command registry) — the backtick dev console; see `UIBuilder::add_console()`.
+- **`collapsible_panel.h`** — `CollapsiblePanel`, a titled panel whose body folds away when
+  its header is clicked, along a `CollapseAxis` of `Vertical` (a settings foldout) or
+  `Horizontal` (a sidebar shrinking to a rail). Always writes an explicit
+  `LayoutElement::preferred_size` rather than relying on the measure pass, because
+  `fit_content_height()` — which every `scroll_view` caller runs — measures a child that
+  reports nothing as a single row. See `UIBuilder::collapsible()`.
+- **`menu_bar.h`** — `Menu` and `MenuBar`: a strip of titles, each opening one popup column,
+  with at most one open at a time. The popup mechanism is `ComboBox`'s (`set_active()` on a
+  child node, lifted over the content by `RectTransform::z_order`); the click-outside
+  dismissal is new — an invisible full-canvas scrim modelled on the modal dialog's, since
+  `ComboBox` has never had one. See `UIBuilder::add_menu_bar()`.
+- **`file_browser.h`** — `FileBrowser`, the directory listing, navigation and selection
+  behind `UIBuilder::file_dialog()`'s modal. Its rows are a **fixed pool** that is painted
+  per page rather than rebuilt per directory: navigation runs inside a row Button's own
+  `on_click`, and `EventSystem::dispatch_chain_()` is iterating that row's `components()` by
+  reference at the time, so destroying it there is a use-after-free. Adding children
+  mid-dispatch is safe; destroying them is not.
+- **`tooltip.h`** — `Tooltip`, hover text carried by a node, plus `set_tooltip()` and
+  `with_tooltip()` for attaching it. It implements `IPointerHandler` and overrides
+  `wants_raycast()` — both purely so the node becomes a hover target: `Raycaster` only
+  records a node that wants a raycast, and `EventSystem::hovered_object()` reports the
+  nearest ancestor carrying a pointer handler. Together those make a *whole settings row*
+  hot, label included, rather than just the control on its right.
+- **`tooltip_overlay.h`** — `TooltipOverlay`, one per canvas, installed by
+  `UIBuilder::enable_tooltips()`. Polls `hovered_object()` from `update()`, walks up to the
+  nearest `Tooltip`, and after `theme.tooltip.delay` sizes a wrapped bubble to its text and
+  places it beside the pointer, clamped inside the canvas. Driven by that one poll rather
+  than per-widget hover signals, because only `Button` has any — `Slider`/`Toggle`/`SpinBox`/
+  `TextField` keep hover private and `ComboBox` isn't an `IPointerHandler` at all — so this
+  covers every widget, including future ones, with no widget changes.
+- **`detail/hidden_subtree.h`** — `start_hidden_subtree()`, one shared copy of the
+  "`SceneObject::start()` early-returns on `!active_`, so a subtree built hidden never wires
+  up" workaround that `ComboBox` and `TabView` each used to carry privately. Under
+  `widgets/` rather than `builder/` so it keeps the property those private copies existed
+  for: a widget header depends on nothing in `uicoopa/builder/`.
 
 ### Groups (`uicoopa/groups/`)
 - **`layout_group.h`** — `HorizontalLayoutGroup`/`VerticalLayoutGroup`: automatic child
@@ -235,7 +279,12 @@ bar floating above it, plus a second `Transform`-mode canvas, driven by
 - **`content_size_fitter.h`** — `ContentSizeFitter`, sizes its own `RectTransform` to fit its
   siblings' aggregate measured content.
 - **`scroll_rect.h`** — `ScrollRect`, a scrollable viewport over an oversized `content` rect
-  (drag and mouse-wheel), with `MovementType::{Unrestricted,Clamped,Elastic}`.
+  (drag and mouse-wheel), with `MovementType::{Unrestricted,Clamped,Elastic}`. It derives its
+  range from the content node's `size_delta`, so that has to be kept true: call
+  `fit_content_height()` once for a static list, or put a `ContentSizeFitter` on the content
+  node when children change height at runtime (a `CollapsiblePanel` folding open does exactly
+  that). `UIBuilder::scroll_view()` takes a trailing `with_header` flag — pass false when it
+  nests inside something that already has a title bar, so two header strips don't stack.
 
 ### Input (`uicoopa/input/`)
 - **`ui_input.h`** — `UiInput`, per-frame mouse/keyboard state in canvas pixel space, built
@@ -328,6 +377,98 @@ cols["Main"].add_label("Content");
 ```
 Returns a `SectionSet`: `operator[](index_or_name)` gives a `UIBuilder` over that section,
 `container()` gives the split's own container, and it's range-for iterable.
+
+#### Collapsible panels: `collapsible()`
+
+```cpp
+auto terrain = panel.collapsible("SecTerrain", "Terrain");   // starts expanded
+terrain.body().add_slider_row("Sea level", 0.0f, 1.0f, 0.25f);
+terrain.fit();                                                // AFTER populating -- see below
+```
+
+Returns a `CollapsibleHandle`: `body()`, `header()`, `component()`, and
+`expand()`/`collapse()`/`toggle()`/`is_expanded()`.
+
+`fit()` is not optional and not automatic. A panel cannot measure a body that the caller has
+not filled in yet, and a panel that reports no extent is measured as a single row by
+`fit_content_height()` — so `fit()` is the same explicit call-it-when-you-are-done contract
+`fit_content_height()` itself has.
+
+A sidebar that collapses sideways takes the options overload, and must be pointed at the
+node the parent actually sizes — for a `split_columns()` layout that is the **section**, not
+the panel inside it, because `child_distribute_by_weight` reads the section's
+`LayoutElement::preferred_size` directly:
+
+```cpp
+detail::CollapsibleOptions opts;
+opts.axis = CollapseAxis::Horizontal;
+opts.expanded_extent = 340.0f;
+opts.collapsed_extent = theme.collapsible.rail_width;
+opts.size_node = sidebar_section.node();
+auto side = sidebar_section.collapsible("Settings", "Map Settings", opts);
+```
+
+#### Menu bars: `add_menu_bar()`
+
+```cpp
+auto bar  = toolbar.add_menu_bar("Toolbar");
+auto file = bar.add_menu("File");
+file.add_item("Open...", [&]{ picker.open(); });
+file.add_separator();
+file.add_item("Quit", [&]{ ctx.window().set_should_close(true); });
+```
+
+`MenuBarHandle` vends `MenuHandle`s (`add_item`, `add_separator`, `open`/`close`/`toggle`),
+looks one up by title with `operator[]`, and closes everything with `close_all()`. An item's
+click runs its callback **first** and then closes the bar, so an action that opens a dialog
+does not leave its menu hanging open behind it.
+
+Two structural notes. Popups sit at `z_order` 100 and the strip at 95, which is what puts a
+menu over full-window content and lets its items win the raycast against whatever is
+underneath. And the scrim that closes a menu on an outside click is built as a child of the
+**canvas root**, not of the node `add_menu_bar()` was called on — a scrim only ever spans its
+own parent's rect (see `DialogMode::Modal`'s note), and a scrim parented to a 26px toolbar
+would catch clicks in the toolbar and nowhere else.
+
+#### Tooltips: `enable_tooltips()`
+
+```cpp
+root.enable_tooltips();                                   // once per canvas
+with_tooltip(panel.add_slider_row("Sea level", 0, 1, 0.25f),
+             "Water level on the 0-1 height scale.");     // returns the Slider*
+```
+
+`with_tooltip()` attaches to the `"<label>_Row"` node the `add_*_row()` helpers build, so the
+label half of the row is hoverable too, and returns its argument so it wraps a row call
+inline. `set_tooltip(node, text)` is the direct form for anything else.
+
+Bubbles draw at `z_order` 3000 — above dialogs and drag ghosts, below the software cursor —
+which also lifts them out of any ancestor `Mask`, so a tooltip on a row inside a scroll view
+is not clipped to the viewport. Colours, padding, wrap width and delay come from
+`UITheme::tooltip`.
+
+#### File dialogs: `file_dialog()`
+
+```cpp
+auto picker = root.file_dialog("Pick", "Import map", FileDialogMode::Open, {".yaml"});
+picker.on_confirm([&](const std::string& path) { load_map(path); });
+picker.open();                       // last directory, or the CWD on first open
+```
+
+Built on `dialog(..., DialogMode::Modal, ...)`, so it inherits the scrim, the `ModalContext`
+blocking and the open/close choke point; `FileBrowser` only adds the listing. `Open` mode
+rejects a confirm whose path does not exist and stays open; `Save` mode accepts a new name
+and appends the first filter extension when none was typed.
+
+One instance can serve several actions rather than building one dialog per menu entry —
+that is what `retarget()` and `disconnect_all()` are for:
+
+```cpp
+picker.disconnect_all();                                  // or every previous callback still fires
+picker.retarget(FileDialogMode::Save, {".png"});
+picker.on_confirm([&](const std::string& p) { write_png(p); });
+picker.open("", "layer.png");
+```
 
 #### Dialogs: `dialog()`
 

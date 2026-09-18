@@ -6722,6 +6722,495 @@ void test_ui_input_update_at_sets_canvas_position_directly() {
     ASSERT_VEC2_NEAR(ui.delta(), glm::vec2(8.0f, 0.0f), 1e-5f);
 }
 
+// --- CollapsiblePanel / MenuBar / FileBrowser -------------------------------
+
+void test_collapsible_hides_body_and_reports_collapsed_extent() {
+    // The two halves of a fold: the body leaves the layout, and the panel reports a
+    // smaller extent so whatever measures it (fit_content_height, a parent split) agrees.
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({400.0f, 600.0f});
+    UIBuilder builder(&root);
+
+    auto panel = builder.collapsible("Terrain", "Terrain");
+    panel.body().add_toggle_row("VSync", true);
+    panel.fit();
+    root.start();
+
+    auto* le = panel.node()->get_component<LayoutElement>();
+    ASSERT_TRUE(le != nullptr);
+    const float expanded_h = le->preferred_size.y;
+
+    ASSERT_TRUE(panel.is_expanded());
+    ASSERT_TRUE(panel.body().node()->active());
+
+    panel.toggle();
+    ASSERT_TRUE(!panel.is_expanded());
+    ASSERT_TRUE(!panel.body().node()->active());
+    // Collapsed height defaults to the header height, which must be strictly less than
+    // the expanded height fit() recorded -- otherwise nothing above would reflow.
+    ASSERT_TRUE(le->preferred_size.y < expanded_h);
+
+    panel.toggle();
+    ASSERT_TRUE(panel.is_expanded());
+    ASSERT_NEAR(le->preferred_size.y, expanded_h, 1e-4f);
+}
+
+void test_collapsible_inactive_body_drops_out_of_parent_layout() {
+    // The reason set_active() is the mechanism at all: a real layout pass must stop
+    // counting the body's height the moment it folds, so the sibling below slides up.
+    // Driven through the canvas rather than LayoutGroup::measure() directly, because
+    // preferred_of() reads RectTransform::measured() -- which only the canvas's measure
+    // pass populates.
+    SceneObject canvas_obj("Canvas");
+    canvas_obj.add_component<RectTransform>();
+    auto* canvas = canvas_obj.add_component<CanvasComponent>();
+    UIBuilder builder(&canvas_obj);
+
+    UIBuilder column = builder.vertical_layout("Column", 0.0f);
+    auto panel = column.collapsible("Sec", "Section");
+    panel.body().add_toggle_row("A", true);
+    panel.body().add_toggle_row("B", false);
+    panel.fit();
+    Text* below = column.add_label("Below");
+    canvas_obj.start();
+
+    canvas->rebuild_layout(800, 600);
+    auto* panel_rt = panel.node()->get_component<RectTransform>();
+    auto* below_rt = below->owner->get_component<RectTransform>();
+    const float expanded_h = panel_rt->rect().size().y;
+    const float below_y_expanded = below_rt->rect().min.y;
+
+    panel.collapse();
+    canvas->rebuild_layout(800, 600);
+    const float collapsed_h = panel_rt->rect().size().y;
+
+    ASSERT_TRUE(collapsed_h < expanded_h);
+    // The sibling underneath must actually move -- that is the visible payoff.
+    ASSERT_TRUE(below_rt->rect().min.y != below_y_expanded);
+}
+
+void test_collapsible_horizontal_resizes_the_named_size_node() {
+    // A sidebar is sized by its split Section, not by itself -- so the panel must be able
+    // to drive a LayoutElement other than its own.
+    SceneObject root("Root");
+    root.add_component<RectTransform>()->set_size_delta({1000.0f, 600.0f});
+    UIBuilder builder(&root);
+
+    SectionSet cols = builder.split_columns({ Section{"Sidebar", 0.0f, 320.0f},
+                                              Section{"Main", 1.0f} });
+    UIBuilder side = cols["Sidebar"];
+
+    detail::CollapsibleOptions opts;
+    opts.axis = CollapseAxis::Horizontal;
+    opts.expanded_extent = 320.0f;
+    opts.collapsed_extent = 28.0f;
+    opts.size_node = side.node();
+    auto panel = side.collapsible("Settings", "Settings", opts);
+    root.start();
+
+    auto* section_le = side.node()->get_component<LayoutElement>();
+    ASSERT_TRUE(section_le != nullptr);
+    ASSERT_NEAR(section_le->preferred_size.x, 320.0f, 1e-4f);
+
+    panel.collapse();
+    ASSERT_NEAR(section_le->preferred_size.x, 28.0f, 1e-4f);
+    // The rail itself stays visible -- only the body folds. That is the whole difference
+    // from the vertical axis.
+    ASSERT_TRUE(panel.node()->active());
+    ASSERT_TRUE(!panel.body().node()->active());
+
+    panel.expand();
+    ASSERT_NEAR(section_le->preferred_size.x, 320.0f, 1e-4f);
+}
+
+void test_menu_popup_starts_closed_and_opens_one_at_a_time() {
+    SceneObject canvas("Canvas");
+    canvas.add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+    canvas.add_component<CanvasComponent>();
+    UIBuilder builder(&canvas);
+
+    auto bar = builder.add_menu_bar("Toolbar");
+    auto file = bar.add_menu("File");
+    auto edit = bar.add_menu("Edit");
+    file.add_item("Open", nullptr);
+    edit.add_item("Undo", nullptr);
+    canvas.start();
+
+    ASSERT_TRUE(!file.is_open());
+    ASSERT_TRUE(!edit.is_open());
+
+    file.open();
+    ASSERT_TRUE(file.is_open());
+    ASSERT_TRUE(!edit.is_open());
+
+    // Opening a sibling must close the first -- that is the bar's entire job.
+    edit.open();
+    ASSERT_TRUE(!file.is_open());
+    ASSERT_TRUE(edit.is_open());
+
+    ASSERT_TRUE(bar.component()->open_index() == 1);
+    bar.close_all();
+    ASSERT_TRUE(bar.component()->open_index() == -1);
+}
+
+void test_menu_scrim_tracks_open_state_and_lives_on_the_canvas_root() {
+    // The scrim is what closes a menu on an outside click, and it can only do that over
+    // the whole window -- a scrim only ever spans its own parent's rect, so a scrim
+    // parented to the 26px bar would catch clicks in the bar and nowhere else.
+    SceneObject canvas("Canvas");
+    canvas.add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+    canvas.add_component<CanvasComponent>();
+    UIBuilder builder(&canvas);
+
+    UIBuilder strip = builder.vertical_layout("TopStrip", 0.0f);
+    auto bar = strip.add_menu_bar("Toolbar");
+    auto file = bar.add_menu("File");
+    file.add_item("Open", nullptr);
+    canvas.start();
+
+    SceneObject* scrim = bar.component()->scrim;
+    ASSERT_TRUE(scrim != nullptr);
+    ASSERT_TRUE(scrim->parent() == &canvas);   // not the strip it was built into
+    ASSERT_TRUE(!scrim->active());
+
+    file.open();
+    ASSERT_TRUE(scrim->active());
+
+    // Clicking the scrim is the outside click; it must close the menu and itself.
+    scrim->get_component<Button>()->on_click.emit();
+    ASSERT_TRUE(!file.is_open());
+    ASSERT_TRUE(!scrim->active());
+}
+
+void test_menu_item_click_runs_callback_then_closes_the_bar() {
+    SceneObject canvas("Canvas");
+    canvas.add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+    canvas.add_component<CanvasComponent>();
+    UIBuilder builder(&canvas);
+
+    auto bar = builder.add_menu_bar("Toolbar");
+    auto file = bar.add_menu("File");
+    int ran = 0;
+    bool open_while_running = false;
+    Button* item = file.add_item("Export", [&]() {
+        ++ran;
+        open_while_running = file.is_open();
+    });
+    canvas.start();
+
+    file.open();
+    ASSERT_TRUE(file.is_open());
+    item->on_click.emit();
+
+    ASSERT_TRUE(ran == 1);
+    // The callback runs first, then the menu closes -- so an action that opens a dialog
+    // never leaves its menu hanging open behind it.
+    ASSERT_TRUE(open_while_running);
+    ASSERT_TRUE(!file.is_open());
+}
+
+void test_file_browser_lists_directories_first_and_filters_files() {
+    // Both are global singletons that outlive a test's scene. ModalContext::push() walks
+    // the parent chain of FocusContext's focused object, so a stale focus left behind by
+    // an earlier test is dereferenced the moment this dialog opens. Same two-line guard
+    // the console test already uses, for the same reason.
+    ModalContext::instance().clear();
+    FocusContext::instance().clear_focus();
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path tmp = fs::temp_directory_path(ec) / "uicoopa_fd_list";
+    fs::remove_all(tmp, ec);
+    fs::create_directories(tmp / "sub", ec);
+    { std::ofstream(tmp / "b.yaml") << "x"; }
+    { std::ofstream(tmp / "a.yaml") << "x"; }
+    { std::ofstream(tmp / "c.png")  << "x"; }
+
+    SceneObject canvas("Canvas");
+    canvas.add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+    canvas.add_component<CanvasComponent>();
+    UIBuilder builder(&canvas);
+    auto fd = builder.file_dialog("Pick", "Pick", FileDialogMode::Open, {".yaml"});
+    canvas.start();
+
+    fd.open(tmp.string());
+    FileBrowser* fb = fd.component();
+
+    // "..", the directory, then the two .yaml files alphabetically -- c.png filtered out.
+    ASSERT_TRUE(fb->entry_count() == 4u);
+    ASSERT_TRUE(fb->rows[0].label->text == "..");
+    ASSERT_TRUE(fb->rows[1].label->text == "sub");
+    ASSERT_TRUE(fb->rows[2].label->text == "a.yaml");
+    ASSERT_TRUE(fb->rows[3].label->text == "b.yaml");
+    // Unused pool slots are hidden, never destroyed.
+    ASSERT_TRUE(!fb->rows[4].node->active());
+
+    fd.close();
+    fs::remove_all(tmp, ec);
+}
+
+void test_file_browser_navigates_and_confirms_without_destroying_rows() {
+    // Both are global singletons that outlive a test's scene. ModalContext::push() walks
+    // the parent chain of FocusContext's focused object, so a stale focus left behind by
+    // an earlier test is dereferenced the moment this dialog opens. Same two-line guard
+    // the console test already uses, for the same reason.
+    ModalContext::instance().clear();
+    FocusContext::instance().clear_focus();
+    // Navigation happens from inside a row Button's click. Destroying the row there would
+    // free the Button under its own running lambda, so the pool must survive it intact.
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path tmp = fs::temp_directory_path(ec) / "uicoopa_fd_nav";
+    fs::remove_all(tmp, ec);
+    fs::create_directories(tmp / "sub", ec);
+    { std::ofstream(tmp / "sub" / "world.yaml") << "x"; }
+
+    SceneObject canvas("Canvas");
+    canvas.add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+    canvas.add_component<CanvasComponent>();
+    UIBuilder builder(&canvas);
+    auto fd = builder.file_dialog("Pick", "Pick", FileDialogMode::Open, {".yaml"});
+
+    std::string confirmed;
+    fd.on_confirm([&](const std::string& p) { confirmed = p; });
+    canvas.start();
+
+    fd.open(tmp.string());
+    FileBrowser* fb = fd.component();
+    SceneObject* row1_node = fb->rows[1].node;
+    Button* row1_button = fb->rows[1].button;
+
+    // Slot 1 is "sub" -- clicking it navigates. Drive it the way the Button would.
+    fb->rows[1].button->on_click.emit();
+
+    // Same pool objects, repainted -- not rebuilt.
+    ASSERT_TRUE(fb->rows[1].node == row1_node);
+    ASSERT_TRUE(fb->rows[1].button == row1_button);
+    ASSERT_TRUE(fb->rows[1].label->text == "world.yaml");
+
+    // Clicking a file selects it into the name field rather than navigating.
+    fb->rows[1].button->on_click.emit();
+    ASSERT_TRUE(fd.name_field()->text() == "world.yaml");
+
+    fb->confirm();
+    ASSERT_TRUE(confirmed == (tmp / "sub" / "world.yaml").string());
+    ASSERT_TRUE(!fd.is_open());
+
+    fs::remove_all(tmp, ec);
+}
+
+void test_file_browser_open_mode_rejects_a_missing_path() {
+    // Both are global singletons that outlive a test's scene. ModalContext::push() walks
+    // the parent chain of FocusContext's focused object, so a stale focus left behind by
+    // an earlier test is dereferenced the moment this dialog opens. Same two-line guard
+    // the console test already uses, for the same reason.
+    ModalContext::instance().clear();
+    FocusContext::instance().clear_focus();
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path tmp = fs::temp_directory_path(ec) / "uicoopa_fd_missing";
+    fs::remove_all(tmp, ec);
+    fs::create_directories(tmp, ec);
+
+    SceneObject canvas("Canvas");
+    canvas.add_component<RectTransform>()->set_size_delta({800.0f, 600.0f});
+    canvas.add_component<CanvasComponent>();
+    UIBuilder builder(&canvas);
+    auto fd = builder.file_dialog("Pick", "Pick", FileDialogMode::Open, {".yaml"});
+
+    int fired = 0;
+    fd.on_confirm([&](const std::string&) { ++fired; });
+    canvas.start();
+
+    fd.open(tmp.string(), "nope.yaml");
+    fd.component()->confirm();
+    // Open mode's entire contract: a path that does not exist is not a confirmation, and
+    // the dialog stays up so the user can correct it.
+    ASSERT_TRUE(fired == 0);
+    ASSERT_TRUE(fd.is_open());
+
+    // Save mode accepts the same name, and supplies the default extension.
+    fd.retarget(FileDialogMode::Save, {".yaml"});
+    std::string confirmed;
+    fd.disconnect_all();
+    fd.on_confirm([&](const std::string& p) { confirmed = p; });
+    fd.name_field()->set_text("fresh", false);
+    fd.component()->confirm();
+    ASSERT_TRUE(confirmed == (tmp / "fresh.yaml").string());
+
+    fd.close();
+    fs::remove_all(tmp, ec);
+}
+
+// --- Tooltip / TooltipOverlay ----------------------------------------------
+
+/** @brief Builds a canvas with a tooltip overlay and one settings row, ready to hover. */
+struct TooltipFixture {
+    coopa::scene::Scene scene{"TooltipFixture"};
+    CanvasComponent* canvas = nullptr;
+    TooltipOverlay* overlay = nullptr;
+    Slider* slider = nullptr;
+    SceneObject* row = nullptr;
+    coopa::input::Input raw_input;
+
+    TooltipFixture() {
+        ModalContext::instance().clear();
+
+        auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+        canvas = canvas_obj->add_component<CanvasComponent>();
+        canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+        canvas->scaler.scale_factor = 1.0f;
+
+        UIBuilder builder(canvas_obj.get());
+        overlay = builder.enable_tooltips();
+        UIBuilder panel = builder.vertical_layout("Panel", 4.0f);
+        // A background behind the rows, as every real settings panel has. Without it the
+        // label-hover case passes for the wrong reason: nothing else is under the pointer,
+        // so even a row the raycaster never records still ends up in the hit chain. With it,
+        // a row that is not itself a raycast candidate loses the hit to this Image.
+        panel.with_background(glm::vec4(0.1f, 0.1f, 0.1f, 1.0f));
+        slider = with_tooltip(panel.add_slider_row("Sea level", 0.0f, 1.0f, 0.25f),
+                              "Water level on the 0-1 height scale.");
+        row = slider->owner->parent();
+
+        scene.add_root_object(std::move(canvas_obj));
+        scene.start();
+        canvas->set_viewport(800, 600);
+        scene.late_update(0.016f);
+    }
+
+    /** @brief Runs one frame with the pointer parked at `pos` (canvas space). */
+    void frame_at(glm::vec2 pos, float dt = 0.016f) {
+        canvas->set_world_input(raw_input, pos);
+        scene.update(dt);
+        scene.late_update(dt);
+    }
+};
+
+void test_tooltip_on_row_is_hovered_from_its_label_too() {
+    // The point of putting the Tooltip on the ROW rather than the control: a row's Label has
+    // no IPointerHandler of its own, so hovering it would resolve to nothing and only the
+    // right-hand control would ever show help.
+    TooltipFixture fx;
+
+    SceneObject* label = fx.row->find_descendant("Label");
+    ASSERT_TRUE(label != nullptr);
+    ASSERT_TRUE(fx.row->get_component<Tooltip>() != nullptr);
+
+    fx.frame_at(label->get_component<RectTransform>()->rect().center());
+    ASSERT_TRUE(fx.canvas->event_system().hovered_object() == fx.row);
+
+    // Over the control it resolves to the control (nearer in the chain) -- and the overlay
+    // still finds the row's Tooltip by walking up.
+    fx.frame_at(fx.slider->owner->get_component<RectTransform>()->rect().center());
+    ASSERT_TRUE(fx.canvas->event_system().hovered_object() == fx.slider->owner);
+}
+
+void test_tooltip_makes_a_graphicless_node_a_raycast_target() {
+    // The guarantee Tooltip::wants_raycast() exists for. Raycaster only records a node as a
+    // hit if one of its UIComponents wants a raycast -- Graphic reports raycast_target,
+    // everything else reports false. A settings row carries a layout group and a
+    // LayoutElement but no Graphic, so without this a row is invisible to the raycast and
+    // the pointer falls through to whatever panel background is behind it.
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    // A full-canvas background that WOULD win the hit if the bare node below did not.
+    auto* backdrop = canvas_obj->add_child(std::make_unique<SceneObject>("Backdrop"));
+    backdrop->add_component<RectTransform>()->anchor_preset(AnchorPreset::StretchAll);
+    backdrop->add_component<Image>()->color = glm::vec4(1.0f);
+
+    // No Image, no Text -- just a rect and a Tooltip, exactly like a settings row.
+    auto* bare = canvas_obj->add_child(std::make_unique<SceneObject>("BareRow"));
+    auto* bare_rt = bare->add_component<RectTransform>();
+    bare_rt->anchor_preset(AnchorPreset::MiddleCenter);
+    bare_rt->set_size_delta({100.0f, 40.0f});
+    set_tooltip(bare, "I have no graphic of my own.");
+
+    canvas_obj->start();
+    canvas->set_viewport(400, 400);
+    canvas->rebuild_layout(400, 400);
+
+    const RaycastHit hit = Raycaster::hit_test(*canvas_obj, bare_rt->rect().center());
+    ASSERT_TRUE(hit.object == bare);   // not the backdrop behind it
+}
+
+void test_tooltip_waits_for_the_delay_then_shows() {
+    TooltipFixture fx;
+    const float delay = ThemeLibrary::instance().active().tooltip.delay;
+    const glm::vec2 over = fx.slider->owner->get_component<RectTransform>()->rect().center();
+
+    // hovered_object() is written in late_update(), so the first frame over the row is the
+    // one that records it and the next is the first that can accumulate against it.
+    fx.frame_at(over);
+    fx.frame_at(over);
+    ASSERT_TRUE(!fx.overlay->node->active());
+
+    for (int i = 0; i < 10 && !fx.overlay->node->active(); ++i) {
+        fx.frame_at(over, delay);
+    }
+    ASSERT_TRUE(fx.overlay->node->active());
+    ASSERT_TRUE(fx.overlay->active() == fx.row->get_component<Tooltip>());
+    ASSERT_TRUE(fx.overlay->label->text == "Water level on the 0-1 height scale.");
+
+    // Moving off resets it, so the next row does not inherit the elapsed time. Parked far
+    // outside the canvas rather than at a corner: the panel stretches the full width, so a
+    // corner is still over the row.
+    fx.frame_at(glm::vec2(-1.0e6f));
+    fx.frame_at(glm::vec2(-1.0e6f));
+    ASSERT_TRUE(!fx.overlay->node->active());
+    ASSERT_TRUE(fx.overlay->active() == nullptr);
+    ASSERT_NEAR(fx.overlay->elapsed(), 0.0f, 1e-6f);
+}
+
+void test_tooltip_bubble_stays_inside_the_canvas() {
+    // The bubble is offset up-and-right of the pointer, so near the top-right corner it
+    // would run off the canvas without clamping.
+    TooltipFixture fx;
+    const float delay = ThemeLibrary::instance().active().tooltip.delay;
+
+    auto* row_rt = fx.row->get_component<RectTransform>();
+    // Park the row itself against the corner so hovering it puts the pointer there too.
+    row_rt->anchor_preset(AnchorPreset::TopRight);
+    row_rt->set_size_delta({120.0f, 24.0f});
+    fx.scene.late_update(0.016f);
+
+    const glm::vec2 over = row_rt->rect().center();
+    for (int i = 0; i < 12 && !fx.overlay->node->active(); ++i) {
+        fx.frame_at(over, delay);
+    }
+    ASSERT_TRUE(fx.overlay->node->active());
+
+    const Rect bubble = fx.overlay->rect->rect();
+    const Rect bounds = fx.canvas->root_rect();
+    ASSERT_TRUE(bubble.min.x >= bounds.min.x - 1e-3f);
+    ASSERT_TRUE(bubble.min.y >= bounds.min.y - 1e-3f);
+    ASSERT_TRUE(bubble.max.x <= bounds.max.x + 1e-3f);
+    ASSERT_TRUE(bubble.max.y <= bounds.max.y + 1e-3f);
+}
+
+void test_clamp_inside_translates_without_resizing() {
+    const Rect bounds{ {0.0f, 0.0f}, {100.0f, 100.0f} };
+
+    const Rect off_high = clamp_inside(bounds, Rect{ {95.0f, 95.0f}, {115.0f, 105.0f} });
+    ASSERT_VEC2_NEAR(off_high.size(), glm::vec2(20.0f, 10.0f), 1e-4f);
+    ASSERT_VEC2_NEAR(off_high.min, glm::vec2(80.0f, 90.0f), 1e-4f);
+
+    const Rect off_low = clamp_inside(bounds, Rect{ {-30.0f, -5.0f}, {-10.0f, 5.0f} });
+    ASSERT_VEC2_NEAR(off_low.min, glm::vec2(0.0f, 0.0f), 1e-4f);
+
+    // Already inside: untouched.
+    const Rect inside{ {10.0f, 10.0f}, {20.0f, 20.0f} };
+    const Rect same = clamp_inside(bounds, inside);
+    ASSERT_VEC2_NEAR(same.min, inside.min, 1e-4f);
+
+    // Larger than the bounds on an axis: pinned to the low edge rather than pushed off the
+    // far one, so an oversized bubble still shows its start.
+    const Rect huge = clamp_inside(bounds, Rect{ {50.0f, 0.0f}, {250.0f, 10.0f} });
+    ASSERT_NEAR(huge.min.x, 0.0f, 1e-4f);
+}
+
 void test_progress_bar_resolves_child_names_at_start() {
     // A YAML parser cannot take pointers to children: SceneLoader parses an object's
     // components BEFORE its children exist. ProgressBar therefore records names and resolves
@@ -6849,6 +7338,11 @@ void test_console_enter_submits_and_stays_editing() {
 
     console.close();
     ModalContext::instance().clear();
+    // Opening a console focuses its input field; left set, that pointer dangles the
+    // moment this scene is destroyed and crashes the next test that touches
+    // FocusContext at all (clear_focus() dynamic_casts through it). Same end-of-test
+    // cleanup the SpinBox fixture documents above.
+    FocusContext::instance().clear_focus();
 }
 
 void test_console_unknown_command_echoes_and_help_lists_registered() {
@@ -6875,6 +7369,11 @@ void test_console_unknown_command_echoes_and_help_lists_registered() {
         if (console.scrollback()->line(i) == "give - give <id> [n]") found_give_help = true;
     }
     ASSERT_TRUE(found_give_help);
+    // Opening a console focuses its input field; left set, that pointer dangles the
+    // moment this scene is destroyed and crashes the next test that touches
+    // FocusContext at all (clear_focus() dynamic_casts through it). Same end-of-test
+    // cleanup the SpinBox fixture documents above.
+    FocusContext::instance().clear_focus();
 }
 
 void test_console_history_up_down() {
@@ -6902,6 +7401,11 @@ void test_console_history_up_down() {
 
     console.close();
     ModalContext::instance().clear();
+    // Opening a console focuses its input field; left set, that pointer dangles the
+    // moment this scene is destroyed and crashes the next test that touches
+    // FocusContext at all (clear_focus() dynamic_casts through it). Same end-of-test
+    // cleanup the SpinBox fixture documents above.
+    FocusContext::instance().clear_focus();
 }
 
 /** @brief The real integration test (mirrors test_modal_blocks_pointer_dispatch_end_to_end):
@@ -6957,6 +7461,11 @@ void test_console_modal_blocks_hud_beneath() {
     ASSERT_TRUE(click_count == 2);
 
     ModalContext::instance().clear();
+    // Opening a console focuses its input field; left set, that pointer dangles the
+    // moment this scene is destroyed and crashes the next test that touches
+    // FocusContext at all (clear_focus() dynamic_casts through it). Same end-of-test
+    // cleanup the SpinBox fixture documents above.
+    FocusContext::instance().clear_focus();
 }
 
 /** @brief Console::~Console() removes `panel` from ModalContext's stack even though
@@ -6974,6 +7483,12 @@ void test_console_destructor_removes_modal_root() {
         ConsoleHandle console = builder.add_console("Console", raw_input);
         console.open();
         ASSERT_TRUE(ModalContext::instance().top() == console.component()->panel);
+        // Opening a console focuses its input field. Cleared HERE, inside the scope,
+        // rather than at the end of the test like its siblings: past the closing brace
+        // the focused object is already destroyed, and clear_focus() dynamic_casts
+        // through it. Left set either way it would crash the next test that touches
+        // FocusContext at all.
+        FocusContext::instance().clear_focus();
         // root_obj destructs here: children_ (ConsolePanel) before components_ (Console).
     }
     ASSERT_TRUE(ModalContext::instance().top() == nullptr);
@@ -7183,6 +7698,21 @@ int main() {
     RUN_TEST(test_world_canvas_does_not_disturb_screen_space_canvases);
     RUN_TEST(test_ui_input_update_at_sets_canvas_position_directly);
     RUN_TEST(test_progress_bar_resolves_child_names_at_start);
+
+    RUN_TEST(test_tooltip_on_row_is_hovered_from_its_label_too);
+    RUN_TEST(test_tooltip_makes_a_graphicless_node_a_raycast_target);
+    RUN_TEST(test_tooltip_waits_for_the_delay_then_shows);
+    RUN_TEST(test_tooltip_bubble_stays_inside_the_canvas);
+    RUN_TEST(test_clamp_inside_translates_without_resizing);
+    RUN_TEST(test_collapsible_hides_body_and_reports_collapsed_extent);
+    RUN_TEST(test_collapsible_inactive_body_drops_out_of_parent_layout);
+    RUN_TEST(test_collapsible_horizontal_resizes_the_named_size_node);
+    RUN_TEST(test_menu_popup_starts_closed_and_opens_one_at_a_time);
+    RUN_TEST(test_menu_scrim_tracks_open_state_and_lives_on_the_canvas_root);
+    RUN_TEST(test_menu_item_click_runs_callback_then_closes_the_bar);
+    RUN_TEST(test_file_browser_lists_directories_first_and_filters_files);
+    RUN_TEST(test_file_browser_navigates_and_confirms_without_destroying_rows);
+    RUN_TEST(test_file_browser_open_mode_rejects_a_missing_path);
 
     std::cout << "===========================================" << std::endl;
     std::cout << "Tests run: " << g_tests_run << ", Failed: " << g_tests_failed << std::endl;

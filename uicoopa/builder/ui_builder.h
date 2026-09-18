@@ -26,7 +26,10 @@
 #include <uicoopa/builder/detail/sections.h>
 #include <uicoopa/builder/detail/dialogs.h>
 #include <uicoopa/builder/detail/tabs.h>
+#include <uicoopa/builder/detail/menus.h>
+#include <uicoopa/builder/detail/file_dialog.h>
 #include <uicoopa/builder/detail/cursor.h>
+#include <uicoopa/builder/detail/tooltip.h>
 #include <uicoopa/builder/detail/navigation.h>
 #include <uicoopa/builder/detail/prompts.h>
 #include <uicoopa/input/nav_types.h>
@@ -53,6 +56,10 @@ namespace ui {
 class SectionSet;
 class TabSet;
 class DialogHandle;
+class CollapsibleHandle;
+class MenuHandle;
+class MenuBarHandle;
+class FileDialogHandle;
 class HotbarHandle;
 class ConsoleHandle;
 
@@ -144,14 +151,29 @@ public:
         return child_(detail::make_grid_layout(ctx_(), name, cell_size, spacing, padding));
     }
 
-    /** @brief A titled, scrollable frame. Returns a builder over its Content node. */
+    /**
+     * @brief A titled, scrollable frame. Returns a builder over its Content node.
+     *
+     * Populate the returned builder, then either call fit_content_height() on it once, or
+     * -- when the children's heights change at runtime, as a CollapsiblePanel's do -- add a
+     * ContentSizeFitter so the scroll range re-measures itself every frame. ScrollRect
+     * derives its range from the Content node's size_delta, which neither of those is
+     * optional for: without one the range stays 0 and nothing scrolls.
+     *
+     * @param with_header Whether to build the header bar. Pass false when this sits inside
+     *        something that already has a title strip, to avoid stacking two of them.
+     * @note `size.x` must be the real pixel width -- the frame cannot stretch horizontally.
+     *       See make_scroll_view()'s note.
+     */
     UIBuilder scroll_view(const std::string& name = "ScrollView",
                           const std::string& title = "",
                           glm::vec2 size = {450.0f, 680.0f},
                           AnchorPreset preset = AnchorPreset::TopLeft,
-                          glm::vec2 anchored_pos = {20.0f, -20.0f}) {
+                          glm::vec2 anchored_pos = {20.0f, -20.0f},
+                          bool with_header = true) {
         ensure_node_();
-        return child_(detail::make_scroll_view(ctx_(), name, title, size, preset, anchored_pos));
+        return child_(detail::make_scroll_view(ctx_(), name, title, size, preset, anchored_pos,
+                                               with_header));
     }
 
     /** @brief A titled card (header bar + body). Returns a builder over its Body node. */
@@ -251,6 +273,72 @@ public:
     TabSet tab_view(const std::string& name, const std::vector<std::string>& labels,
                     float tab_height = -1.0f, float tab_spacing = -1.0f);
 
+    /**
+     * @brief A titled panel under this node whose body folds away when its header is clicked.
+     *
+     * The returned handle's body() is where content goes. Call fit() on it once that
+     * content is in place, so the panel reports its real expanded extent -- see
+     * CollapsibleHandle::fit() and CollapsiblePanel's class doc for why that is explicit
+     * rather than measured.
+     *
+     * @param name  Root SceneObject name; the header is built as `name + "Header"`.
+     * @param title Header label.
+     * @param opts  Axis, initial state, extents, and (for a horizontally-collapsing
+     *              sidebar) which node's LayoutElement to resize. See CollapsibleOptions.
+     * @return A handle over the panel component, its header and its body.
+     */
+    CollapsibleHandle collapsible(const std::string& name, const std::string& title,
+                                  detail::CollapsibleOptions opts = {});
+
+    /**
+     * @brief collapsible() with only the initial state varied -- the common settings-section case.
+     * @param name  Root SceneObject name.
+     * @param title Header label.
+     * @param start_expanded Whether the body is visible before the first click.
+     * @return A handle over the panel component, its header and its body.
+     */
+    CollapsibleHandle collapsible(const std::string& name, const std::string& title,
+                                  bool start_expanded);
+
+    /**
+     * @brief A horizontal strip of menu titles under this node, each opening a popup column.
+     *
+     * Also builds an invisible click-catching scrim at the canvas root, so clicking
+     * anywhere outside an open menu closes it -- see MenuBar's class doc for why that
+     * scrim cannot live under this node.
+     *
+     * @param name        Strip SceneObject name; the scrim is `name + "Scrim"`.
+     * @param height      Strip height in canvas pixels; < 0 uses theme.menu.bar_height.
+     * @param popup_width Fixed width of every popup column, in canvas pixels.
+     * @return A handle that vends one MenuHandle per add_menu().
+     */
+    MenuBarHandle add_menu_bar(const std::string& name = "MenuBar",
+                               float height = -1.0f, float popup_width = 240.0f);
+
+    /**
+     * @brief A modal file browser built on dialog(): path readout, listing, name field, actions.
+     *
+     * Built closed (like every Modal dialog) and reopened via the returned handle. One
+     * instance can serve several menu entries -- reassign mode/extensions and reconnect
+     * on_confirm before each open() rather than building one dialog per action.
+     *
+     * @param name         Root SceneObject name.
+     * @param title        Header title, e.g. "Import map".
+     * @param mode         Open requires an existing file; Save accepts a new name.
+     * @param extensions   Lowercase, dot-included filters ({".yaml"}); empty shows every file.
+     * @param size         Frame size in canvas pixels.
+     * @param visible_rows Size of the row pool the listing is virtualized over -- this
+     *                     bounds the SceneObject count regardless of directory size. See
+     *                     FileBrowser's class doc for why the pool is fixed.
+     * @return A handle over the dialog and its FileBrowser.
+     */
+    FileDialogHandle file_dialog(const std::string& name,
+                                 const std::string& title = "Open File",
+                                 FileDialogMode mode = FileDialogMode::Open,
+                                 std::vector<std::string> extensions = {},
+                                 glm::vec2 size = {640.0f, 460.0f},
+                                 int visible_rows = 12);
+
     // --- Standard Widget Shorthand ---
 
     Text* add_label(const std::string& text,
@@ -331,6 +419,22 @@ public:
     CursorOverlay* enable_cursor(coopa::input::Input& input) {
         ensure_node_();
         return detail::make_cursor_overlay(ctx_(), input);
+    }
+
+    /**
+     * @brief Enables hover tooltips on this builder's canvas.
+     *
+     * Installs one bubble for the whole canvas; call it once, anywhere in the tree. The text
+     * itself is attached per-node with set_tooltip()/with_tooltip() (widgets/tooltip.h), so
+     * this can be called before or after the controls are built. Calling it twice is a no-op
+     * that returns the existing overlay.
+     *
+     * @return The installed TooltipOverlay, or nullptr if this builder isn't inside a
+     *         CanvasComponent's tree.
+     */
+    TooltipOverlay* enable_tooltips() {
+        ensure_node_();
+        return detail::make_tooltip_overlay(ctx_());
     }
 
     /**
@@ -976,6 +1080,272 @@ inline ConsoleHandle UIBuilder::add_console(const std::string& name, coopa::inpu
     ensure_node_();
     Console* console = detail::make_console(ctx_(), name, app_input, height);
     return ConsoleHandle(console, child_(console->owner));
+}
+
+/**
+ * @class CollapsibleHandle
+ * @brief A UIBuilder::collapsible() panel: its component, its header, and its body.
+ *
+ * Copyable value type of raw pointers plus one UIBuilder, exactly like DialogHandle and
+ * TabSet -- the panel's actual state lives on the CollapsiblePanel component, not here.
+ */
+class CollapsibleHandle {
+public:
+    CollapsibleHandle(CollapsiblePanel* component, coopa::scene::SceneObject* node,
+                      coopa::scene::SceneObject* header_node, UIBuilder body,
+                      const UITheme* theme, InputMode input_mode = InputMode::Pointer)
+        : component_(component), node_(node), header_node_(header_node), body_(body),
+          theme_(theme), input_mode_(input_mode) {}
+
+    CollapsiblePanel* component() const { return component_; }
+    coopa::scene::SceneObject* node() const { return node_; }
+    UIBuilder body() const { return body_; }
+
+    /** @brief A builder over the header strip. It carries no layout group -- anything added
+     *         here must be positioned explicitly via UIBuilder::at(). Reconstructed from a
+     *         raw pointer, so it keeps this panel's InputMode (see DialogHandle::header()). */
+    UIBuilder header() const { return UIBuilder(header_node_, theme_, input_mode_); }
+
+    /**
+     * @brief Measures the populated body and records the panel's expanded extent.
+     *
+     * Call once, after adding everything to body(). CollapsiblePanel cannot work this out
+     * for itself -- the body is populated after collapsible() returns -- and a panel that
+     * never reports an extent is measured as a single row by detail::fit_content_height(),
+     * which is what a scroll_view full of these sections runs. Same explicit
+     * call-it-when-you-are-done contract as UIBuilder::fit_content_height().
+     *
+     * No-op on the Horizontal axis, whose expanded extent is an authored width rather than
+     * a measured one (see CollapsibleOptions::expanded_extent).
+     */
+    void fit() const {
+        if (!component_ || !node_ || !theme_) return;
+        if (component_->axis == CollapseAxis::Horizontal) return;
+
+        coopa::scene::SceneObject* body_node = body_.node();
+        if (!body_node) return;
+        detail::fit_content_height(body_node, *theme_);
+
+        float body_h = 0.0f;
+        if (auto* brt = body_node->get_component<RectTransform>()) body_h = brt->size_delta().y;
+        if (auto* ble = body_node->get_component<LayoutElement>()) ble->preferred_size.y = body_h;
+
+        float header_h = theme_->metrics.card_header_height;
+        if (header_node_) {
+            if (auto* hle = header_node_->get_component<LayoutElement>()) {
+                if (hle->preferred_size.y > 0.0f) header_h = hle->preferred_size.y;
+            }
+        }
+        component_->expanded_extent = header_h + body_h;
+        component_->refresh_extent();
+    }
+
+    void expand() const   { if (component_) component_->expand(); }
+    void collapse() const { if (component_) component_->collapse(); }
+    void toggle() const   { if (component_) component_->toggle(); }
+    bool is_expanded() const { return component_ && component_->is_expanded(); }
+
+private:
+    CollapsiblePanel*          component_ = nullptr;
+    coopa::scene::SceneObject* node_ = nullptr;
+    coopa::scene::SceneObject* header_node_ = nullptr;
+    UIBuilder                  body_;
+    const UITheme*             theme_ = nullptr;
+    InputMode                  input_mode_ = InputMode::Pointer;
+};
+
+inline CollapsibleHandle UIBuilder::collapsible(const std::string& name, const std::string& title,
+                                               bool start_expanded) {
+    detail::CollapsibleOptions opts;
+    opts.start_expanded = start_expanded;
+    return collapsible(name, title, opts);
+}
+
+inline CollapsibleHandle UIBuilder::collapsible(const std::string& name, const std::string& title,
+                                               detail::CollapsibleOptions opts) {
+    ensure_node_();
+    detail::CollapsibleParts parts = detail::make_collapsible(ctx_(), name, title, opts);
+    return CollapsibleHandle(parts.component, parts.node, parts.header,
+                             child_(parts.body), theme_, input_mode_);
+}
+
+/**
+ * @class MenuHandle
+ * @brief One menu in a MenuBarHandle: append items and separators, or drive it open/closed.
+ */
+class MenuHandle {
+public:
+    MenuHandle(Menu* component, const UITheme* theme, InputMode input_mode = InputMode::Pointer)
+        : component_(component), theme_(theme), input_mode_(input_mode) {}
+
+    Menu* component() const { return component_; }
+    coopa::scene::SceneObject* node() const { return component_ ? component_->owner : nullptr; }
+    coopa::scene::SceneObject* popup() const { return component_ ? component_->popup_panel : nullptr; }
+
+    /**
+     * @brief Appends one clickable row. Its click runs `on_click`, then closes the menu.
+     * @param label    Row text.
+     * @param on_click Runs before the menu closes. May be null.
+     * @return The row's Button, or null when this handle is empty.
+     */
+    Button* add_item(const std::string& label, std::function<void()> on_click = nullptr) const {
+        if (!component_ || !theme_) return nullptr;
+        return detail::make_menu_item(detail::BuildContext{popup(), theme_, input_mode_},
+                                      component_, label, std::move(on_click));
+    }
+
+    /** @brief Appends a 1px divider between item groups. */
+    void add_separator() const {
+        if (!component_ || !theme_) return;
+        detail::make_menu_separator(detail::BuildContext{popup(), theme_, input_mode_}, component_);
+    }
+
+    void open() const   { if (component_) component_->open(); }
+    void close() const  { if (component_) component_->close(); }
+    void toggle() const { if (component_) component_->toggle(); }
+    bool is_open() const { return component_ && component_->is_open(); }
+
+private:
+    Menu*          component_ = nullptr;
+    const UITheme* theme_ = nullptr;
+    InputMode      input_mode_ = InputMode::Pointer;
+};
+
+/**
+ * @class MenuBarHandle
+ * @brief A UIBuilder::add_menu_bar() strip: add menus to it, or close whatever is open.
+ */
+class MenuBarHandle {
+public:
+    MenuBarHandle(MenuBar* component, UIBuilder node, float popup_width,
+                  const UITheme* theme, InputMode input_mode = InputMode::Pointer)
+        : component_(component), node_(node), popup_width_(popup_width),
+          theme_(theme), input_mode_(input_mode) {}
+
+    MenuBar* component() const { return component_; }
+    UIBuilder node() const { return node_; }
+
+    /**
+     * @brief Appends a titled menu to the strip.
+     * @param label Title text, and this menu's lookup key in operator[].
+     * @return A handle for appending its items.
+     */
+    MenuHandle add_menu(const std::string& label) const {
+        Menu* m = detail::make_menu(detail::BuildContext{node_.node(), theme_, input_mode_},
+                                    component_, label, popup_width_);
+        return MenuHandle(m, theme_, input_mode_);
+    }
+
+    /**
+     * @brief Looks a menu up by its title.
+     * @param label The title passed to add_menu().
+     * @return A handle over that menu.
+     * @throws std::runtime_error If no menu carries that title.
+     */
+    MenuHandle operator[](const std::string& label) const {
+        if (component_) {
+            for (Menu* m : component_->menus) {
+                if (m && m->label == label) return MenuHandle(m, theme_, input_mode_);
+            }
+        }
+        throw std::runtime_error("MenuBarHandle: no menu named '" + label + "'");
+    }
+
+    /** @brief How many menus the strip carries. */
+    std::size_t size() const { return component_ ? component_->menus.size() : 0; }
+
+    /** @brief Closes whichever menu is open and lowers the scrim. */
+    void close_all() const { if (component_) component_->close_all(); }
+
+private:
+    MenuBar*       component_ = nullptr;
+    UIBuilder      node_;
+    float          popup_width_ = 240.0f;
+    const UITheme* theme_ = nullptr;
+    InputMode      input_mode_ = InputMode::Pointer;
+};
+
+inline MenuBarHandle UIBuilder::add_menu_bar(const std::string& name, float height, float popup_width) {
+    ensure_node_();
+    detail::MenuBarParts parts = detail::make_menu_bar(ctx_(), name, height);
+    return MenuBarHandle(parts.component, child_(parts.node), popup_width, theme_, input_mode_);
+}
+
+/**
+ * @class FileDialogHandle
+ * @brief A UIBuilder::file_dialog(): its FileBrowser, and the Dialog it is built on.
+ */
+class FileDialogHandle {
+public:
+    FileDialogHandle(FileBrowser* component, DialogHandle dialog)
+        : component_(component), dialog_(dialog) {}
+
+    FileBrowser* component() const { return component_; }
+    DialogHandle dialog() const { return dialog_; }
+    coopa::scene::SceneObject* node() const { return dialog_.node(); }
+    TextField* name_field() const { return component_ ? component_->name_field : nullptr; }
+
+    /**
+     * @brief Opens the browser.
+     * @param directory Where to browse; empty keeps the last directory, or the process
+     *                  working directory on the first open.
+     * @param suggested_name Prefills the filename field; ignored when empty.
+     */
+    void open(const std::string& directory = "", const std::string& suggested_name = "") const {
+        if (component_) component_->open(directory, suggested_name);
+    }
+    void close() const { if (component_) component_->close(); }
+    bool is_open() const { return component_ && component_->is_open(); }
+
+    /**
+     * @brief Retargets this dialog before reopening it, so one instance serves several actions.
+     * @param mode       Open or Save.
+     * @param extensions Lowercase, dot-included filters; empty shows every file.
+     */
+    void retarget(FileDialogMode mode, std::vector<std::string> extensions) const {
+        if (!component_) return;
+        component_->mode = mode;
+        component_->extensions = std::move(extensions);
+    }
+
+    /**
+     * @brief Connects `cb` permanently to FileBrowser::on_confirm.
+     *
+     * The one-liner form, mirroring add_button(label, on_click). Use
+     * `component()->on_confirm.connect_scoped(...)` when the connection's lifetime matters,
+     * or `disconnect_all()` below when retargeting a shared dialog.
+     */
+    void on_confirm(std::function<void(const std::string&)> cb) const {
+        if (component_) component_->on_confirm.connect(std::move(cb));
+    }
+    /** @brief Connects `cb` permanently to FileBrowser::on_cancel. */
+    void on_cancel(std::function<void()> cb) const {
+        if (component_) component_->on_cancel.connect(std::move(cb));
+    }
+    /** @brief Drops every on_confirm/on_cancel connection -- call before retargeting. */
+    void disconnect_all() const {
+        if (!component_) return;
+        component_->on_confirm.disconnect_all();
+        component_->on_cancel.disconnect_all();
+    }
+
+private:
+    FileBrowser* component_ = nullptr;
+    DialogHandle dialog_;
+};
+
+inline FileDialogHandle UIBuilder::file_dialog(const std::string& name, const std::string& title,
+                                               FileDialogMode mode,
+                                               std::vector<std::string> extensions,
+                                               glm::vec2 size, int visible_rows) {
+    ensure_node_();
+    detail::FileDialogParts parts = detail::make_file_dialog(ctx_(), name, title, mode,
+                                                             std::move(extensions), size,
+                                                             visible_rows);
+    return FileDialogHandle(parts.component,
+                            DialogHandle(parts.dialog.node, parts.dialog.header,
+                                         child_(parts.dialog.body), parts.dialog.footer,
+                                         parts.dialog.close_button, theme_, input_mode_));
 }
 
 }  // namespace ui
