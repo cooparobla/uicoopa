@@ -18,12 +18,14 @@
 #include <uicoopa/widgets/button.h>
 #include <uicoopa/widgets/slider.h>
 #include <uicoopa/widgets/toggle.h>
+#include <uicoopa/widgets/number_field.h>
 #include <uicoopa/widgets/spinbox.h>
 #include <uicoopa/widgets/text_field.h>
 #include <uicoopa/widgets/combobox.h>
 #include <uicoopa/widgets/mask.h>
 #include <uicoopa/builder/detail/selectables.h>
 #include <algorithm>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <vector>
@@ -170,16 +172,105 @@ inline Button* make_button(BuildContext ctx, const std::string& label, ButtonRol
     return raw;
 }
 
-/** @brief A horizontal slider with track/fill/handle, wired to `on_change`. */
+/** @brief Private helper for make_slider() -- the widest the value field's readout can
+ *         ever get, measured from whichever of the two range extremes formats longer.
+ *         measure_role_text() returns {0,0} with no font loaded, so the theme's
+ *         field_width is the floor rather than a fallback special case. */
+inline float slider_field_width_(const UITheme& theme, float min_val, float max_val, int decimals) {
+    char lo[64];
+    char hi[64];
+    if (decimals <= 0) {
+        std::snprintf(lo, sizeof(lo), "%ld", static_cast<long>(std::round(min_val)));
+        std::snprintf(hi, sizeof(hi), "%ld", static_cast<long>(std::round(max_val)));
+    } else {
+        std::snprintf(lo, sizeof(lo), "%.*f", decimals, min_val);
+        std::snprintf(hi, sizeof(hi), "%.*f", decimals, max_val);
+    }
+    std::string widest = std::string(lo).size() >= std::string(hi).size() ? lo : hi;
+    float measured = measure_role_text(theme, FontRole::Numeric, widest).x + 12.0f;
+    return std::max(theme.slider.field_width, measured);
+}
+
+/** @brief Private helper for make_slider() -- the editable readout pinned to the slider's
+ *         right edge. Image and Text share one object so TextEditBase::resolve_edit_bg_()
+ *         finds the background to tint while editing (see widgets/text_edit_base.h). */
+inline NumberField* make_slider_value_field_(BuildContext ctx, SceneObject* slider_obj,
+                                             float field_width) {
+    const UITheme& theme = *ctx.theme;
+    auto obj = std::make_unique<SceneObject>("ValueField");
+    auto* rt = obj->add_component<RectTransform>();
+    rt->set_anchor_min({1.0f, 0.5f});
+    rt->set_anchor_max({1.0f, 0.5f});
+    rt->set_pivot({1.0f, 0.5f});
+    rt->set_size_delta({field_width, theme.spinbox.height});
+    obj->add_component<Image>()->color = theme.spinbox.bg;
+
+    auto* readout = obj->add_component<Text>();
+    apply_role_font(readout, theme, FontRole::Numeric);
+    readout->color = theme.text.primary;
+    readout->horizontal_align = HorizontalAlign::Center;
+    readout->vertical_align = VerticalAlign::Middle;
+
+    auto* field = obj->add_component<NumberField>();
+    field->label_text = readout;
+    field->selection_color = theme.text.selection;
+
+    auto* raw = field;
+    slider_obj->add_child(std::move(obj));
+    return raw;
+}
+
+/**
+ * @brief A horizontal slider with track/fill/handle, wired to `on_change`.
+ *
+ * Unless the theme turns it off (UITheme::SliderStyle::show_value_field) or `decimals` is
+ * Slider::kNoValueField, an editable NumberField is pinned to the slider's right edge and
+ * bound to the value in both directions -- drag the handle and the number follows;
+ * double-click the number, type and press Enter and the handle follows.
+ *
+ * @param ctx Build context (parent node and theme).
+ * @param name Name of the slider SceneObject; also what UIBuilder::get_value() looks up.
+ * @param min_val Range minimum.
+ * @param max_val Range maximum.
+ * @param initial_val Starting value, clamped and step-snapped by Slider::set_value().
+ * @param step Snap interval; 0 = continuous.
+ * @param on_change Called with the new value whenever it changes.
+ * @param decimals Value-field decimal places: -1 auto-picks int or 2dp from the range and
+ *        step (Slider::auto_decimals()), >= 0 forces that many, and Slider::kNoValueField
+ *        builds no field at all.
+ * @return The Slider component, owned by the scene tree.
+ */
 inline Slider* make_slider(BuildContext ctx, const std::string& name,
                            float min_val, float max_val, float initial_val, float step,
-                           std::function<void(float)> on_change) {
+                           std::function<void(float)> on_change, int decimals = -1) {
     const UITheme& theme = *ctx.theme;
+    bool with_field = theme.slider.show_value_field && decimals != Slider::kNoValueField;
+    int resolved_decimals = decimals >= 0 ? decimals : Slider::auto_decimals(min_val, max_val, step);
+    float field_width = with_field ? slider_field_width_(theme, min_val, max_val, resolved_decimals) : 0.0f;
+    float node_height = with_field ? std::max(theme.slider.height, theme.spinbox.height) : theme.slider.height;
+
     auto slider_obj = std::make_unique<SceneObject>(name);
-    slider_obj->add_component<RectTransform>()->set_size_delta({180.0f, theme.slider.height});
+    slider_obj->add_component<RectTransform>()->set_size_delta({180.0f, node_height});
     auto* le = slider_obj->add_component<LayoutElement>();
-    le->preferred_size = {180.0f, theme.slider.height};
+    le->preferred_size = {180.0f, node_height};
     le->flexible_size = {1.0f, 0.0f};
+
+    // The draggable extent. Without a value field it is the whole node, and the tree keeps
+    // the shape every hand-authored and YAML slider has: Track and Handle directly under
+    // the slider object, with Slider::track_rect left null.
+    SceneObject* area_obj = slider_obj.get();
+    RectTransform* area_rt = nullptr;
+    if (with_field) {
+        auto obj = std::make_unique<SceneObject>("SliderArea");
+        auto* rt = obj->add_component<RectTransform>();
+        rt->anchor_preset(AnchorPreset::StretchAll);
+        rt->set_offset_min({0.0f, 0.0f});
+        rt->set_offset_max({-(field_width + theme.slider.field_gap), 0.0f});
+        rt->hittable = false;  // Decorative -- the slider object itself owns the drag gesture.
+        area_rt = rt;
+        area_obj = obj.get();
+        slider_obj->add_child(std::move(obj));
+    }
 
     auto track_obj = std::make_unique<SceneObject>("Track");
     auto* track_rt = track_obj->add_component<RectTransform>();
@@ -210,14 +301,22 @@ inline Slider* make_slider(BuildContext ctx, const std::string& name,
     slider->step = step;
     slider->fill_rect = fill_rt;
     slider->handle_rect = handle_rt;
+    slider->track_rect = area_rt;
+    slider->decimals = resolved_decimals;
     slider->handle_colors.normal      = theme.slider.handle;
     slider->handle_colors.highlighted = theme.slider.handle_hover;
     slider->handle_colors.pressed     = theme.slider.handle_press;
     slider->handle_colors.disabled    = theme.slider.handle_disabled;
 
     track_obj->add_child(std::move(fill_obj));
-    slider_obj->add_child(std::move(track_obj));
-    slider_obj->add_child(std::move(handle_obj));
+    area_obj->add_child(std::move(track_obj));
+    area_obj->add_child(std::move(handle_obj));
+
+    if (with_field) {
+        slider->value_field = make_slider_value_field_(ctx, slider_obj.get(), field_width);
+        slider->bind_value_field();
+        slider->value_field->start();
+    }
 
     slider->set_value(initial_val, false);
     if (on_change) slider->on_value_changed.connect(std::move(on_change));

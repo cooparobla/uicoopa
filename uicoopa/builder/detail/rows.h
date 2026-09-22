@@ -37,8 +37,9 @@ inline BuildContext begin_row_(BuildContext ctx, const std::string& label, float
 
 inline Slider* make_slider_row(BuildContext ctx, const std::string& label,
                                float min_val, float max_val, float initial_val, float step,
-                               std::function<void(float)> on_change, float label_width) {
-    return make_slider(begin_row_(ctx, label, label_width), label, min_val, max_val, initial_val, step, std::move(on_change));
+                               std::function<void(float)> on_change, float label_width,
+                               int decimals = -1) {
+    return make_slider(begin_row_(ctx, label, label_width), label, min_val, max_val, initial_val, step, std::move(on_change), decimals);
 }
 
 inline Toggle* make_toggle_row(BuildContext ctx, const std::string& label, bool initial_val,

@@ -182,15 +182,20 @@ bar floating above it, plus a second `Transform`-mode canvas, driven by
 - **`toggle.h`** — `Toggle`, a checkbox/switch with a driven checkmark graphic and
   `Signal<bool> on_value_changed`.
 - **`slider.h`** — `Slider`, a draggable handle over a track/fill, with min/max/step and
-  `Signal<float> on_value_changed`.
+  `Signal<float> on_value_changed`. Carries an optional `NumberField` (`value_field`) that
+  shows the value and accepts a typed one, bound in both directions; `UIBuilder`'s sliders
+  build one by default — see `SliderStyle::show_value_field`.
 - **`scrollbar.h`** — `Scrollbar`, a draggable handle representing `ScrollRect`'s scroll
   position; usually auto-managed by a `ScrollRect` rather than built directly.
-- **`spinbox.h`** — `SpinBox`, a numeric stepper (`-`/readout/`+`) with click-to-edit text
-  entry, built on `TextEditBase`.
+- **`number_field.h`** — `NumberField`, a bounded number formatted into a `Text` (integer
+  or N decimals) that double-click opens for typing, built on `TextEditBase`;
+  `Signal<double> on_value_changed`. The readout a `Slider` binds to, and the base `SpinBox`
+  extends.
+- **`spinbox.h`** — `SpinBox`, a `NumberField` flanked by `-`/`+` stepper buttons.
 - **`text_field.h`** / **`text_edit_base.h`** — `TextField`, a free-form editable text box
   (double-click to enter edit mode, blinking caret, Shift-select, Escape to revert);
-  `TextEditBase` is the shared caret/selection/commit machinery `TextField` and `SpinBox`
-  both build on.
+  `TextEditBase` is the shared caret/selection/commit machinery `TextField` and
+  `NumberField` (so `SpinBox`) both build on.
 - **`combobox.h`** — `ComboBox`, a dropdown button with a `z_order`-elevated, self-masked
   popup list of items; `Signal<int, const std::string&> on_selection_changed`.
 - **`inventory_grid.h`** — `InventoryItem` (data model), `InventorySlot` (a drag source *and*
@@ -303,7 +308,7 @@ bar floating above it, plus a second `Transform`-mode canvas, driven by
   virtual on the same interface — see **Builder**'s `UITheme::cursor` section for what
   consumes it.
 - **`focus.h`** — `ITextInputHandler` and `FocusContext::instance()`, the process-wide
-  keyboard-focus singleton (`focused()`, `clear_focus()`) `TextField`/`SpinBox` register with.
+  keyboard-focus singleton (`focused()`, `clear_focus()`) `TextField`/`NumberField` register with.
 - **`modal_context.h`** — `ModalContext::instance()`, the process-wide stack of "blocking"
   subtree roots a `UIBuilder::dialog()`'s `Dialog` component pushes/pops itself onto (see
   **Dialogs**, below). `EventSystem::process()` reads it each frame: a pointer hit, an
@@ -670,7 +675,7 @@ byte-for-byte reproducibility.
 
 Which icon shows is driven by `CursorRole` (`input/event_system.h`) and a new
 `IPointerHandler::cursor_role()` virtual (default `CursorRole::Default`) that `Button`,
-`Toggle`, `Slider`, `Scrollbar`, and `TextEditBase` (so `TextField`/`SpinBox`) override,
+`Toggle`, `Slider`, `Scrollbar`, and `TextEditBase` (so `TextField`/`NumberField`) override,
 returning `Disabled` instead of their usual `Pointer`/`Text` when `interactable` is false.
 `CursorOverlay::update()` reads whichever handler is on `EventSystem::hovered_object()` each
 frame. Position tracking is zero-lag (written from `update()`, which the whole scene finishes

@@ -558,6 +558,12 @@
                 </li>
                 
                 <li class="nav-item">
+                    <a class="nav-link " href="class_NumberField.html">
+                        <span class="badge">C++</span>NumberField
+                    </a>
+                </li>
+                
+                <li class="nav-item">
                     <a class="nav-link " href="class_PanelStyle.html">
                         <span class="badge">C++</span>PanelStyle
                     </a>
@@ -1049,7 +1055,7 @@
     <div style="margin-bottom: 16px;">
         <span style="font-weight: 600; color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase;">Inherits:</span>
         
-        <code>coopa::ui::TextEditBase</code>
+        <code>coopa::ui::NumberField</code>
         
     </div>
     
@@ -1062,9 +1068,8 @@
     
     
     <div class="card docstring">
-        <p>Compound numeric stepper widget that manages min/max bounds and step increments.</p>
-<p>Connects to optional child decrement/increment buttons and a text label, updating the display and emitting on_value_changed whenever the number is modified.</p>
-<p>Double-clicking the number itself (not the +/- buttons) opens keyboard editing  the same TextEditBase shell TextField uses (see widgets/text_field.h), including its blinking caret. Typed characters are filtered so only a valid number can ever be composed (digits, a single leading '-', and — only when decimals &gt; 0 — a single '.'), Enter or clicking away commits it, Escape discards it. See TextEditBase's on_pointer_double_click()/on_char()/on_key(); SpinBox supplies only accept_char() and on_edit_committed()/on_edit_reverted() below.</p>
+        <p>Compound numeric stepper: a NumberField flanked by decrement/increment buttons.</p>
+<p>Connects to optional child decrement/increment buttons, each stepping the value by one <code>step</code>. Everything else  bounds, formatting, the signal, and double-click-to-type keyboard editing  comes from NumberField (see widgets/number_field.h).</p>
     </div>
     
     
@@ -1075,8 +1080,7 @@
             <div class="mermaid">
                 graph LR
     SpinBox --> Button
-    SpinBox --> Text
-    SpinBox --> TextEditBase
+    SpinBox --> NumberField
             </div>
         </div>
     </section>
@@ -1196,166 +1200,6 @@
             
         </div>
         
-        <div class="card" id="method_value">
-            <h3 style="margin-top: 0; font-family: var(--font-mono);">
-                
-                <span class="badge" style="background-color: var(--border-color); color: var(--text-main);">const</span> 
-                value
-            </h3>
-            
-            <div class="signature-panel">
-                <span class="kt">double</span><span class="w"> </span><span class="n">value</span><span class="p">()</span><span class="w"> </span><span class="k">const</span>
-
-            </div>
-            
-            
-            
-            
-            
-            
-            <div style="margin-top: 16px; font-size: 0.9rem;">
-                <strong>Returns:</strong> <code style="color: var(--primary-color);">double</code>
-            </div>
-            
-        </div>
-        
-        <div class="card" id="method_set_range">
-            <h3 style="margin-top: 0; font-family: var(--font-mono);">
-                
-                
-                set_range
-            </h3>
-            
-            <div class="signature-panel">
-                <span class="kt">void</span><span class="w"> </span><span class="n">set_range</span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="n">min_val</span><span class="p">,</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">max_val</span><span class="p">)</span>
-
-            </div>
-            
-            
-            
-            
-            <h4 style="font-size: 0.9rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-top: 16px;">Parameters</h4>
-            <table class="params-table">
-                <thead>
-                    <tr>
-                        <th>Parameter</th>
-                        <th>Type</th>
-                        <th>Default</th>
-                        <th>Description</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    
-                    <tr>
-                        <td class="param-name">min_val</td>
-                        <td class="param-type">double</td>
-                        <td class="param-type" style="color: var(--text-muted);"></td>
-                        <td></td>
-                    </tr>
-                    
-                    <tr>
-                        <td class="param-name">max_val</td>
-                        <td class="param-type">double</td>
-                        <td class="param-type" style="color: var(--text-muted);"></td>
-                        <td></td>
-                    </tr>
-                    
-                </tbody>
-            </table>
-            
-            
-            
-        </div>
-        
-        <div class="card" id="method_set_value">
-            <h3 style="margin-top: 0; font-family: var(--font-mono);">
-                
-                
-                set_value
-            </h3>
-            
-            <div class="signature-panel">
-                <span class="kt">void</span><span class="w"> </span><span class="n">set_value</span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="n">val</span><span class="p">,</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">notify</span><span class="o">=</span><span class="nb">true</span><span class="p">)</span>
-
-            </div>
-            
-            
-            
-            
-            <h4 style="font-size: 0.9rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-top: 16px;">Parameters</h4>
-            <table class="params-table">
-                <thead>
-                    <tr>
-                        <th>Parameter</th>
-                        <th>Type</th>
-                        <th>Default</th>
-                        <th>Description</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    
-                    <tr>
-                        <td class="param-name">val</td>
-                        <td class="param-type">double</td>
-                        <td class="param-type" style="color: var(--text-muted);"></td>
-                        <td></td>
-                    </tr>
-                    
-                    <tr>
-                        <td class="param-name">notify</td>
-                        <td class="param-type">bool</td>
-                        <td class="param-type" style="color: var(--text-muted);">true</td>
-                        <td></td>
-                    </tr>
-                    
-                </tbody>
-            </table>
-            
-            
-            
-        </div>
-        
-        <div class="card" id="method_step_by">
-            <h3 style="margin-top: 0; font-family: var(--font-mono);">
-                
-                
-                step_by
-            </h3>
-            
-            <div class="signature-panel">
-                <span class="kt">void</span><span class="w"> </span><span class="n">step_by</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">steps</span><span class="p">)</span>
-
-            </div>
-            
-            
-            
-            
-            <h4 style="font-size: 0.9rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-top: 16px;">Parameters</h4>
-            <table class="params-table">
-                <thead>
-                    <tr>
-                        <th>Parameter</th>
-                        <th>Type</th>
-                        <th>Default</th>
-                        <th>Description</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    
-                    <tr>
-                        <td class="param-name">steps</td>
-                        <td class="param-type">int</td>
-                        <td class="param-type" style="color: var(--text-muted);"></td>
-                        <td></td>
-                    </tr>
-                    
-                </tbody>
-            </table>
-            
-            
-            
-        </div>
-        
         <div class="card" id="method_start">
             <h3 style="margin-top: 0; font-family: var(--font-mono);">
                 
@@ -1365,25 +1209,6 @@
             
             <div class="signature-panel">
                 <span class="kt">void</span><span class="w"> </span><span class="n">start</span><span class="p">()</span><span class="w"> </span><span class="k">override</span>
-
-            </div>
-            
-            
-            
-            
-            
-            
-        </div>
-        
-        <div class="card" id="method_update_visuals">
-            <h3 style="margin-top: 0; font-family: var(--font-mono);">
-                
-                
-                update_visuals
-            </h3>
-            
-            <div class="signature-panel">
-                <span class="kt">void</span><span class="w"> </span><span class="n">update_visuals</span><span class="p">()</span>
 
             </div>
             
@@ -1414,55 +1239,6 @@
                 <tbody>
                     
                     <tr>
-                        <td class="param-name">ValueChangedSignal</td>
-                        <td class="param-type">coopa::event::Signal< double ></td>
-                        <td class="param-type" style="color: var(--text-muted);"></td>
-                        <td></td>
-                    </tr>
-                    
-                    <tr>
-                        <td class="param-name">min_value</td>
-                        <td class="param-type">double</td>
-                        <td class="param-type" style="color: var(--text-muted);">0.0</td>
-                        <td></td>
-                    </tr>
-                    
-                    <tr>
-                        <td class="param-name">max_value</td>
-                        <td class="param-type">double</td>
-                        <td class="param-type" style="color: var(--text-muted);">100.0</td>
-                        <td></td>
-                    </tr>
-                    
-                    <tr>
-                        <td class="param-name">step</td>
-                        <td class="param-type">double</td>
-                        <td class="param-type" style="color: var(--text-muted);">1.0</td>
-                        <td></td>
-                    </tr>
-                    
-                    <tr>
-                        <td class="param-name">decimals</td>
-                        <td class="param-type">int</td>
-                        <td class="param-type" style="color: var(--text-muted);">0</td>
-                        <td></td>
-                    </tr>
-                    
-                    <tr>
-                        <td class="param-name">prefix</td>
-                        <td class="param-type">std::string</td>
-                        <td class="param-type" style="color: var(--text-muted);"></td>
-                        <td></td>
-                    </tr>
-                    
-                    <tr>
-                        <td class="param-name">suffix</td>
-                        <td class="param-type">std::string</td>
-                        <td class="param-type" style="color: var(--text-muted);"></td>
-                        <td></td>
-                    </tr>
-                    
-                    <tr>
                         <td class="param-name">dec_button</td>
                         <td class="param-type">Button *</td>
                         <td class="param-type" style="color: var(--text-muted);">nullptr</td>
@@ -1486,20 +1262,6 @@
                     <tr>
                         <td class="param-name">inc_name</td>
                         <td class="param-type">std::string</td>
-                        <td class="param-type" style="color: var(--text-muted);"></td>
-                        <td></td>
-                    </tr>
-                    
-                    <tr>
-                        <td class="param-name">label_name</td>
-                        <td class="param-type">std::string</td>
-                        <td class="param-type" style="color: var(--text-muted);"></td>
-                        <td></td>
-                    </tr>
-                    
-                    <tr>
-                        <td class="param-name">on_value_changed</td>
-                        <td class="param-type">ValueChangedSignal</td>
                         <td class="param-type" style="color: var(--text-muted);"></td>
                         <td></td>
                     </tr>

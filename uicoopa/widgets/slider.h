@@ -13,6 +13,7 @@
 #include <uicoopa/widgets/image.h>
 #include <uicoopa/widgets/mask.h>
 #include <uicoopa/widgets/color_transition.h>
+#include <uicoopa/widgets/number_field.h>
 #include <coopa/event/signal.h>
 #include <coopa/event/event_bus.h>
 #include <coopa/scene/scene.h>
@@ -30,10 +31,18 @@ namespace ui {
  *
  * Can optionally drive a fill RectTransform and a handle RectTransform to visually represent
  * the current value. Emits a typed Signal<float> and also publishes to the Scene's EventBus.
+ *
+ * An optional NumberField (`value_field`) shows the value as text and lets the user type an
+ * exact one; the two stay in sync in both directions. The themed builder factory
+ * (builder/detail/widgets.h's make_slider) wires one up by default.
  */
 class Slider : public UIComponent, public IPointerHandler {
 public:
     using ValueChangedSignal = coopa::event::Signal<float>;
+
+    /** @brief `decimals` sentinel meaning "no value field at all" -- read by make_slider(),
+     *         which then builds the bare track/fill/handle tree. */
+    static constexpr int kNoValueField = -2;
 
     bool            interactable = true;
     float           min_value    = 0.0f;
@@ -45,6 +54,23 @@ public:
     RectTransform*  handle_rect  = nullptr; /**< Optional handle/knob RectTransform. */
     std::string     fill_name;              /**< Resolved by name in start() if fill_rect is null. */
     std::string     handle_name;            /**< Resolved by name in start() if handle_rect is null. */
+
+    /**
+     * @brief The draggable extent, when it is narrower than the slider object itself --
+     *        as it is once a value field sits alongside the track. Null means the whole
+     *        of the owner's own rect is draggable.
+     */
+    RectTransform*  track_rect   = nullptr;
+    std::string     track_name;             /**< Resolved by name in start() if track_rect is null. */
+
+    /** @brief Optional numeric readout/editor, kept in sync with the value in both
+     *         directions (see start()). Its own bounds, step and decimals are overwritten
+     *         from this slider's in start(). */
+    NumberField*    value_field  = nullptr;
+    std::string     value_field_name;       /**< Resolved by name in start() if value_field is null. */
+
+    /** @brief Decimal places the value field shows; -1 resolves to auto_decimals() in start(). */
+    int             decimals     = -1;
 
     /**
      * @brief Hover/press tint applied to the handle's Image (auto-discovered as
@@ -65,6 +91,24 @@ public:
     CursorRole cursor_role() const override { return interactable ? CursorRole::Pointer : CursorRole::Disabled; }
 
     float value() const { return value_; }
+
+    /**
+     * @brief How many decimals a value field should show for a range that was never told
+     *        explicitly: none when the slider can only ever land on whole numbers, two
+     *        otherwise.
+     *
+     * @param min_val Range minimum.
+     * @param max_val Range maximum.
+     * @param step_val Snap interval; 0 (continuous) is never whole-number-only.
+     * @return 0 or 2.
+     */
+    static int auto_decimals(float min_val, float max_val, float step_val) {
+        bool whole = step_val > 0.0f &&
+                     step_val == std::floor(step_val) &&
+                     min_val == std::floor(min_val) &&
+                     max_val == std::floor(max_val);
+        return whole ? 0 : 2;
+    }
 
     float normalized_value() const {
         float range = max_value - min_value;
@@ -107,6 +151,34 @@ public:
         set_value(min_value + norm * (max_value - min_value), notify);
     }
 
+    /**
+     * @brief Copies this slider's range, step and resolved decimals onto `value_field` and
+     *        wires the two together: the field pushes committed edits in, update_visuals()
+     *        pushes every change (drag, gamepad, set_value() from app code) back out.
+     *
+     * Called from start(); also safe to call directly right after assigning `value_field`,
+     * which is what make_slider() does so a freshly built slider reads correctly before the
+     * scene has started. Re-binding replaces the previous connection.
+     */
+    void bind_value_field() {
+        if (!value_field) return;
+        value_field->min_value = std::min(min_value, max_value);
+        value_field->max_value = std::max(min_value, max_value);
+        value_field->step      = step > 0.0f ? step : (max_value - min_value) * 0.05f;
+        value_field->decimals  = decimals >= 0 ? decimals : auto_decimals(min_value, max_value, step);
+        field_conn_ = value_field->on_value_changed.connect([this](double v) {
+            if (syncing_) return;
+            syncing_ = true;
+            set_value(static_cast<float>(v));
+            syncing_ = false;
+            // Unconditional, not just when set_value() reported a change: typing 37 into a
+            // step=10 slider snaps to 40, and typing 37 again after that changes nothing at
+            // all -- either way the box must end up showing the snapped number, not 37.
+            sync_field_();
+        });
+        sync_field_();
+    }
+
     void start() override {
         if (!fill_rect && owner && !fill_name.empty()) {
             if (auto* child = owner->find_descendant(fill_name)) {
@@ -118,17 +190,30 @@ public:
                 handle_rect = child->get_component<RectTransform>();
             }
         }
+        if (!track_rect && owner && !track_name.empty()) {
+            if (auto* child = owner->find_descendant(track_name)) {
+                track_rect = child->get_component<RectTransform>();
+            }
+        }
+        if (!value_field && owner && !value_field_name.empty()) {
+            if (auto* child = owner->find_descendant(value_field_name)) {
+                value_field = child->get_component<NumberField>();
+            }
+        }
         if (handle_rect && handle_rect->owner) {
             handle_image_ = handle_rect->owner->get_component<Image>();
         }
+        bind_value_field();
         // The handle's anchor is centered exactly AT the t=0/t=1 endpoints (see
         // update_visuals below), so half its fixed pixel width necessarily
         // overhangs the slider's own rect at either extreme — clip it there
         // rather than letting it spill onto whatever sits next to the slider
         // (e.g. a scrollbar). Track/Fill/Handle are already hittable=false, so
         // this only affects drawn geometry, never hit-testing.
-        if (owner && !owner->get_component<Mask>()) {
-            owner->add_component<Mask>();
+        if (auto* frame = track_rect_()) {
+            if (frame->owner && !frame->owner->get_component<Mask>()) {
+                frame->owner->add_component<Mask>();
+            }
         }
         update_visuals();
     }
@@ -158,14 +243,14 @@ public:
     }
 
     void on_pointer_down(const PointerEventData& data) override {
-        if (!interactable) return;
+        if (!interactable || !over_track_(data.position)) return;
         data.consume();
         dragging_ = true;
         update_from_pointer(data.position);
     }
 
     void on_drag(const PointerEventData& data) override {
-        if (!interactable || !dragging_) return;
+        if (!interactable || !dragging_) return;  // Drag tracks the cursor outside the track once started.
         data.consume();
         update_from_pointer(data.position);
     }
@@ -198,17 +283,41 @@ public:
             }
             handle_rect->set_anchored_position({0.0f, 0.0f});
         }
+        sync_field_();
     }
 
 private:
     float value_    = 0.0f;
     bool  dragging_ = false;
     bool  hovered_  = false;
+    bool  syncing_  = false; /**< Guards the value_field round trip against re-entry. */
     Image* handle_image_ = nullptr;
+    coopa::event::ScopedConnection field_conn_;
+
+    /** @brief The rect the value maps onto: the explicit track when one is set, else the
+     *         owner's own rect (every slider built before there was a value field). */
+    RectTransform* track_rect_() const {
+        if (track_rect) return track_rect;
+        return owner ? owner->get_component<RectTransform>() : nullptr;
+    }
+
+    /** @brief Whether a press at `cursor_pos` should start a drag. Pointer events bubble,
+     *         so a click on the value field alongside the track reaches this handler too --
+     *         and must not make the slider jump. */
+    bool over_track_(const glm::vec2& cursor_pos) const {
+        auto* rt = track_rect_();
+        return rt && contains(rt->rect(), cursor_pos);
+    }
+
+    void sync_field_() {
+        if (!value_field || syncing_) return;
+        syncing_ = true;
+        value_field->set_value(static_cast<double>(value_), false);
+        syncing_ = false;
+    }
 
     void update_from_pointer(const glm::vec2& cursor_pos) {
-        if (!owner) return;
-        auto* rt = owner->get_component<RectTransform>();
+        auto* rt = track_rect_();
         if (!rt) return;
 
         Rect r = rt->rect();

@@ -558,6 +558,12 @@
                 </li>
                 
                 <li class="nav-item">
+                    <a class="nav-link " href="class_NumberField.html">
+                        <span class="badge">C++</span>NumberField
+                    </a>
+                </li>
+                
+                <li class="nav-item">
                     <a class="nav-link " href="class_PanelStyle.html">
                         <span class="badge">C++</span>PanelStyle
                     </a>
@@ -1690,6 +1696,13 @@
                 </li>
                 
                 <li style="margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+                    <a href="class_NumberField.html" style="font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                        <span class="badge" style="font-size: 0.7rem; padding: 1px 6px;">C++</span>
+                        NumberField
+                    </a>
+                </li>
+                
+                <li style="margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
                     <a href="class_PanelStyle.html" style="font-weight: 600; display: flex; align-items: center; gap: 8px;">
                         <span class="badge" style="font-size: 0.7rem; padding: 1px 6px;">C++</span>
                         PanelStyle
@@ -2341,6 +2354,8 @@
     NavigationDriver --> NavInputMapper
     NavigationDriver --> NavigationContext
     NavigationDriver --> Selectable
+    NumberField --> Text
+    NumberField --> TextEditBase
     ProgressBar --> Text
     RectTransform --> Rect
     RectTransform --> RectParams
@@ -2355,12 +2370,12 @@
     Selectable --> NavigationContext
     Slider --> ColorTransition
     Slider --> Graphic
+    Slider --> NumberField
     Slider --> PointerEventData
     Slider --> RectTransform
     SoundLibrary --> SoundDef
     SpinBox --> Button
-    SpinBox --> Text
-    SpinBox --> TextEditBase
+    SpinBox --> NumberField
     SpriteSheet --> SpriteSheetDesc
     TabSet --> TabView
     TabSet --> UIBuilder

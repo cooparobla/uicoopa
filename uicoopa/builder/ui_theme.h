@@ -100,6 +100,13 @@ struct SliderStyle {
     glm::vec4 handle_disabled{0.90f, 0.92f, 0.98f, 0.4f};
     float     height = 18.0f;
     float     handle_width = 14.0f;
+
+    /** @brief Whether make_slider() builds the editable value field alongside the track. */
+    bool      show_value_field = true;
+    /** @brief Floor for the value field's width; widened to fit the formatted extremes. */
+    float     field_width = 56.0f;
+    /** @brief Horizontal gap between the track and the value field. */
+    float     field_gap = 6.0f;
 };
 
 /** @struct ToggleStyle

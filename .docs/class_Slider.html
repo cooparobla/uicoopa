@@ -558,6 +558,12 @@
                 </li>
                 
                 <li class="nav-item">
+                    <a class="nav-link " href="class_NumberField.html">
+                        <span class="badge">C++</span>NumberField
+                    </a>
+                </li>
+                
+                <li class="nav-item">
                     <a class="nav-link " href="class_PanelStyle.html">
                         <span class="badge">C++</span>PanelStyle
                     </a>
@@ -1066,6 +1072,7 @@
     <div class="card docstring">
         <p>Interactive slider component that drives a normalized or ranged value via drag input.</p>
 <p>Can optionally drive a fill RectTransform and a handle RectTransform to visually represent the current value. Emits a typed Signal<float> and also publishes to the Scene's EventBus.</p>
+<p>An optional NumberField (<code>value_field</code>) shows the value as text and lets the user type an exact one; the two stay in sync in both directions. The themed builder factory (builder/detail/widgets.h's make_slider) wires one up by default.</p>
     </div>
     
     
@@ -1077,6 +1084,7 @@
                 graph LR
     Slider --> ColorTransition
     Slider --> Graphic
+    Slider --> NumberField
     Slider --> PointerEventData
     Slider --> RectTransform
             </div>
@@ -1435,6 +1443,30 @@
             
         </div>
         
+        <div class="card" id="method_bind_value_field">
+            <h3 style="margin-top: 0; font-family: var(--font-mono);">
+                
+                
+                bind_value_field
+            </h3>
+            
+            <div class="signature-panel">
+                <span class="kt">void</span><span class="w"> </span><span class="n">bind_value_field</span><span class="p">()</span>
+
+            </div>
+            
+            
+            <div class="docstring" style="margin-top: 16px; margin-bottom: 16px;">
+                <p>Copies this slider's range, step and resolved decimals onto <code>value_field</code> and wires the two together: the field pushes committed edits in, update_visuals() pushes every change (drag, gamepad, set_value() from app code) back out.</p>
+<p>Called from start(); also safe to call directly right after assigning <code>value_field</code>, which is what make_slider() does so a freshly built slider reads correctly before the scene has started. Re-binding replaces the previous connection.</p>
+            </div>
+            
+            
+            
+            
+            
+        </div>
+        
         <div class="card" id="method_start">
             <h3 style="margin-top: 0; font-family: var(--font-mono);">
                 
@@ -1653,6 +1685,69 @@
             
         </div>
         
+        <div class="card" id="method_auto_decimals">
+            <h3 style="margin-top: 0; font-family: var(--font-mono);">
+                <span class="badge" style="background-color: var(--border-color); color: var(--text-main);">static</span> 
+                
+                auto_decimals
+            </h3>
+            
+            <div class="signature-panel">
+                <span class="k">static</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">auto_decimals</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">min_val</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">max_val</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">step_val</span><span class="p">)</span>
+
+            </div>
+            
+            
+            <div class="docstring" style="margin-top: 16px; margin-bottom: 16px;">
+                <p>How many decimals a value field should show for a range that was never told explicitly: none when the slider can only ever land on whole numbers, two otherwise.</p>
+            </div>
+            
+            
+            
+            <h4 style="font-size: 0.9rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-top: 16px;">Parameters</h4>
+            <table class="params-table">
+                <thead>
+                    <tr>
+                        <th>Parameter</th>
+                        <th>Type</th>
+                        <th>Default</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                    <tr>
+                        <td class="param-name">min_val</td>
+                        <td class="param-type">float</td>
+                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td>Range minimum.</td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">max_val</td>
+                        <td class="param-type">float</td>
+                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td>Range maximum.</td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">step_val</td>
+                        <td class="param-type">float</td>
+                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td>Snap interval; 0 (continuous) is never whole-number-only.</td>
+                    </tr>
+                    
+                </tbody>
+            </table>
+            
+            
+            
+            <div style="margin-top: 16px; font-size: 0.9rem;">
+                <strong>Returns:</strong> <code style="color: var(--primary-color);">int</code>
+            </div>
+            
+        </div>
+        
     </section>
     
     
@@ -1677,6 +1772,13 @@
                         <td class="param-type">coopa::event::Signal< float ></td>
                         <td class="param-type" style="color: var(--text-muted);"></td>
                         <td></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">kNoValueField</td>
+                        <td class="param-type">constexpr int</td>
+                        <td class="param-type" style="color: var(--text-muted);">-2</td>
+                        <td><p><code>decimals</code> sentinel meaning "no value field at all"  read by make_slider(), which then builds the bare track/fill/handle tree.</p></td>
                     </tr>
                     
                     <tr>
@@ -1740,6 +1842,41 @@
                         <td class="param-type">std::string</td>
                         <td class="param-type" style="color: var(--text-muted);"></td>
                         <td><p>Resolved by name in start() if handle_rect is null.</p></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">track_rect</td>
+                        <td class="param-type">RectTransform *</td>
+                        <td class="param-type" style="color: var(--text-muted);">nullptr</td>
+                        <td><p>The draggable extent, when it is narrower than the slider object itself  as it is once a value field sits alongside the track. Null means the whole of the owner's own rect is draggable.</p></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">track_name</td>
+                        <td class="param-type">std::string</td>
+                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td><p>Resolved by name in start() if track_rect is null.</p></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">value_field</td>
+                        <td class="param-type">NumberField *</td>
+                        <td class="param-type" style="color: var(--text-muted);">nullptr</td>
+                        <td><p>Optional numeric readout/editor, kept in sync with the value in both directions (see start()). Its own bounds, step and decimals are overwritten from this slider's in start().</p></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">value_field_name</td>
+                        <td class="param-type">std::string</td>
+                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td><p>Resolved by name in start() if value_field is null.</p></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">decimals</td>
+                        <td class="param-type">int</td>
+                        <td class="param-type" style="color: var(--text-muted);">-1</td>
+                        <td><p>Decimal places the value field shows; -1 resolves to auto_decimals() in start().</p></td>
                     </tr>
                     
                     <tr>

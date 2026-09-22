@@ -558,6 +558,12 @@
                 </li>
                 
                 <li class="nav-item">
+                    <a class="nav-link " href="class_NumberField.html">
+                        <span class="badge">C++</span>NumberField
+                    </a>
+                </li>
+                
+                <li class="nav-item">
                     <a class="nav-link " href="class_PanelStyle.html">
                         <span class="badge">C++</span>PanelStyle
                     </a>
@@ -3184,10 +3190,14 @@ panel.add_toggle_row("VSync",true);</code></p>
             </h3>
             
             <div class="signature-panel">
-                <span class="n">Slider</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">add_slider</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="o">&amp;</span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">min_val</span><span class="o">=</span><span class="mf">0.0f</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">max_val</span><span class="o">=</span><span class="mf">1.0f</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">initial_val</span><span class="o">=</span><span class="mf">0.0f</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">step</span><span class="o">=</span><span class="mf">0.0f</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">function</span><span class="o">&lt;</span><span class="w"> </span><span class="kt">void</span><span class="p">(</span><span class="kt">float</span><span class="p">)</span><span class="o">&gt;</span><span class="w"> </span><span class="n">on_change</span><span class="o">=</span><span class="nb">nullptr</span><span class="p">)</span>
+                <span class="n">Slider</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">add_slider</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="o">&amp;</span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">min_val</span><span class="o">=</span><span class="mf">0.0f</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">max_val</span><span class="o">=</span><span class="mf">1.0f</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">initial_val</span><span class="o">=</span><span class="mf">0.0f</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">step</span><span class="o">=</span><span class="mf">0.0f</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">function</span><span class="o">&lt;</span><span class="w"> </span><span class="kt">void</span><span class="p">(</span><span class="kt">float</span><span class="p">)</span><span class="o">&gt;</span><span class="w"> </span><span class="n">on_change</span><span class="o">=</span><span class="nb">nullptr</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">decimals</span><span class="o">=</span><span class="mi">-1</span><span class="p">)</span>
 
             </div>
             
+            
+            <div class="docstring" style="margin-top: 16px; margin-bottom: 16px;">
+                <p>A horizontal slider carrying an editable value field on its right edge.</p>
+            </div>
             
             
             
@@ -3243,6 +3253,13 @@ panel.add_toggle_row("VSync",true);</code></p>
                         <td class="param-type">std::function< void(float)></td>
                         <td class="param-type" style="color: var(--text-muted);">nullptr</td>
                         <td></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">decimals</td>
+                        <td class="param-type">int</td>
+                        <td class="param-type" style="color: var(--text-muted);">-1</td>
+                        <td>Decimal places the value field shows: -1 auto-picks an integer or two decimals from the range and step (Slider::auto_decimals()), >= 0 forces that many, and Slider::kNoValueField leaves the slider bare.</td>
                     </tr>
                     
                 </tbody>
@@ -4051,10 +4068,14 @@ panel.add_toggle_row("VSync",true);</code></p>
             </h3>
             
             <div class="signature-panel">
-                <span class="n">Slider</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">add_slider_row</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="o">&amp;</span><span class="n">label</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">min_val</span><span class="o">=</span><span class="mf">0.0f</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">max_val</span><span class="o">=</span><span class="mf">1.0f</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">initial_val</span><span class="o">=</span><span class="mf">0.0f</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">step</span><span class="o">=</span><span class="mf">0.0f</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">function</span><span class="o">&lt;</span><span class="w"> </span><span class="kt">void</span><span class="p">(</span><span class="kt">float</span><span class="p">)</span><span class="o">&gt;</span><span class="w"> </span><span class="n">on_change</span><span class="o">=</span><span class="nb">nullptr</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">label_width</span><span class="o">=</span><span class="mf">-1.0f</span><span class="p">)</span>
+                <span class="n">Slider</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">add_slider_row</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="o">&amp;</span><span class="n">label</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">min_val</span><span class="o">=</span><span class="mf">0.0f</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">max_val</span><span class="o">=</span><span class="mf">1.0f</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">initial_val</span><span class="o">=</span><span class="mf">0.0f</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">step</span><span class="o">=</span><span class="mf">0.0f</span><span class="p">,</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">function</span><span class="o">&lt;</span><span class="w"> </span><span class="kt">void</span><span class="p">(</span><span class="kt">float</span><span class="p">)</span><span class="o">&gt;</span><span class="w"> </span><span class="n">on_change</span><span class="o">=</span><span class="nb">nullptr</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">label_width</span><span class="o">=</span><span class="mf">-1.0f</span><span class="p">,</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">decimals</span><span class="o">=</span><span class="mi">-1</span><span class="p">)</span>
 
             </div>
             
+            
+            <div class="docstring" style="margin-top: 16px; margin-bottom: 16px;">
+                <p>A labelled row holding a slider and its editable value field.</p>
+            </div>
             
             
             
@@ -4117,6 +4138,13 @@ panel.add_toggle_row("VSync",true);</code></p>
                         <td class="param-type">float</td>
                         <td class="param-type" style="color: var(--text-muted);">-1.0f</td>
                         <td></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">decimals</td>
+                        <td class="param-type">int</td>
+                        <td class="param-type" style="color: var(--text-muted);">-1</td>
+                        <td>Decimal places the value field shows: -1 auto-picks an integer or two decimals from the range and step (Slider::auto_decimals()), >= 0 forces that many, and Slider::kNoValueField leaves the slider bare.</td>
                     </tr>
                     
                 </tbody>

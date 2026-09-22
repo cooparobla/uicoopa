@@ -64,6 +64,7 @@
 #include <uicoopa/widgets/slider.h>
 #include <uicoopa/widgets/progress_bar.h>
 #include <uicoopa/widgets/toggle.h>
+#include <uicoopa/widgets/number_field.h>
 #include <uicoopa/widgets/spinbox.h>
 #include <uicoopa/widgets/combobox.h>
 #include <uicoopa/widgets/inventory_grid.h>
@@ -780,8 +781,11 @@ inline void register_ui_components() {
         if (node.contains("min")) s->min_value = node.at("min").get_value<float>();
         if (node.contains("max")) s->max_value = node.at("max").get_value<float>();
         if (node.contains("step")) s->step = node.at("step").get_value<float>();
+        if (node.contains("decimals")) s->decimals = node.at("decimals").get_value<int>();
         if (node.contains("fill")) s->fill_name = node.at("fill").get_value<std::string>();
         if (node.contains("handle")) s->handle_name = node.at("handle").get_value<std::string>();
+        if (node.contains("track")) s->track_name = node.at("track").get_value<std::string>();
+        if (node.contains("field")) s->value_field_name = node.at("field").get_value<std::string>();
         if (node.contains("direction")) {
             std::string d = node.at("direction").get_value<std::string>();
             if (d == "RightToLeft") s->direction = SliderDirection::RightToLeft;
@@ -825,6 +829,21 @@ inline void register_ui_components() {
         if (node.contains("checkmark")) t->checkmark_name = node.at("checkmark").get_value<std::string>();
         if (node.contains("hide_when_off")) t->hide_when_off = node.at("hide_when_off").get_value<bool>();
         if (node.contains("is_on")) t->set_is_on(node.at("is_on").get_value<bool>(), false);
+    });
+
+    // NumberField sits next to SpinBox deliberately: SpinBox is a NumberField plus the two
+    // stepper buttons, so the two parsers share every key but dec_button/inc_button.
+    SceneLoader::register_component_parser("NumberField", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
+        auto* nf = obj.add_component<NumberField>();
+        if (node.contains("interactable")) nf->interactable = node.at("interactable").get_value<bool>();
+        if (node.contains("min")) nf->min_value = node.at("min").get_value<double>();
+        if (node.contains("max")) nf->max_value = node.at("max").get_value<double>();
+        if (node.contains("step")) nf->step = node.at("step").get_value<double>();
+        if (node.contains("decimals")) nf->decimals = node.at("decimals").get_value<int>();
+        if (node.contains("prefix")) nf->prefix = node.at("prefix").get_value<std::string>();
+        if (node.contains("suffix")) nf->suffix = node.at("suffix").get_value<std::string>();
+        if (node.contains("label")) nf->label_name = node.at("label").get_value<std::string>();
+        if (node.contains("value")) nf->set_value(node.at("value").get_value<double>(), false);
     });
 
     SceneLoader::register_component_parser("SpinBox", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {

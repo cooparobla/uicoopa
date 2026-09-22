@@ -372,11 +372,18 @@ public:
         return detail::make_button(ctx_(), label, role, std::move(on_click));
     }
 
+    /**
+     * @brief A horizontal slider carrying an editable value field on its right edge.
+     *
+     * @param decimals Decimal places the value field shows: -1 auto-picks an integer or
+     *        two decimals from the range and step (Slider::auto_decimals()), >= 0 forces
+     *        that many, and Slider::kNoValueField leaves the slider bare.
+     */
     Slider* add_slider(const std::string& name,
                        float min_val = 0.0f, float max_val = 1.0f, float initial_val = 0.0f, float step = 0.0f,
-                       std::function<void(float)> on_change = nullptr) {
+                       std::function<void(float)> on_change = nullptr, int decimals = -1) {
         ensure_node_();
-        return detail::make_slider(ctx_(), name, min_val, max_val, initial_val, step, std::move(on_change));
+        return detail::make_slider(ctx_(), name, min_val, max_val, initial_val, step, std::move(on_change), decimals);
     }
 
     Toggle* add_toggle(const std::string& name, bool initial_val = false, const std::string& label = "",
@@ -556,11 +563,19 @@ public:
 
     // --- Form / Settings Row Helpers ---
 
+    /**
+     * @brief A labelled row holding a slider and its editable value field.
+     *
+     * @param decimals Decimal places the value field shows: -1 auto-picks an integer or
+     *        two decimals from the range and step (Slider::auto_decimals()), >= 0 forces
+     *        that many, and Slider::kNoValueField leaves the slider bare.
+     */
     Slider* add_slider_row(const std::string& label,
                            float min_val = 0.0f, float max_val = 1.0f, float initial_val = 0.0f, float step = 0.0f,
-                           std::function<void(float)> on_change = nullptr, float label_width = -1.0f) {
+                           std::function<void(float)> on_change = nullptr, float label_width = -1.0f,
+                           int decimals = -1) {
         ensure_node_();
-        return detail::make_slider_row(ctx_(), label, min_val, max_val, initial_val, step, std::move(on_change), resolve_label_width_(label_width));
+        return detail::make_slider_row(ctx_(), label, min_val, max_val, initial_val, step, std::move(on_change), resolve_label_width_(label_width), decimals);
     }
 
     Toggle* add_toggle_row(const std::string& label, bool initial_val = false,

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IconLibrary - uicoopa Documentation</title>
+    <title>NumberField - uicoopa Documentation</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -354,7 +354,7 @@
                 </li>
                 
                 <li class="nav-item">
-                    <a class="nav-link active" href="class_IconLibrary.html">
+                    <a class="nav-link " href="class_IconLibrary.html">
                         <span class="badge">C++</span>IconLibrary
                     </a>
                 </li>
@@ -558,7 +558,7 @@
                 </li>
                 
                 <li class="nav-item">
-                    <a class="nav-link " href="class_NumberField.html">
+                    <a class="nav-link active" href="class_NumberField.html">
                         <span class="badge">C++</span>NumberField
                     </a>
                 </li>
@@ -1033,7 +1033,7 @@
     <div class="main-wrapper">
         <header class="header">
             <div style="font-weight: 500; font-size: 0.9rem; color: var(--text-muted);">
-                Documentation &raquo; IconLibrary
+                Documentation &raquo; NumberField
             </div>
         </header>
         
@@ -1047,22 +1047,30 @@
         </span>
     </div>
     
-    <h1>class IconLibrary</h1>
+    <h1>class NumberField</h1>
     
     
     
+    
+    <div style="margin-bottom: 16px;">
+        <span style="font-weight: 600; color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase;">Inherits:</span>
+        
+        <code>coopa::ui::TextEditBase</code>
+        
+    </div>
     
     
     
     <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 24px; font-family: var(--font-mono);">
-        Defined in: uicoopa/render/icon_library.h
+        Defined in: uicoopa/widgets/number_field.h
     </div>
     
     
     
     <div class="card docstring">
-        <p>Loads sprite sheets through a coopa::asset::AssetManager and publishes their entries as pointer-stable, mutable Sprites.</p>
-<p>Non-owning of the AssetManager/Device/Allocator/CommandPool it's configured with  the application must keep them alive for as long as IconLibrary is used, and must call clear() before they're destroyed (mirrors UIResourceCache::clear()'s contract exactly).</p>
+        <p>A bounded number displayed through a <code>Text</code> and editable with the keyboard.</p>
+<p>Holds the numeric state  min/max bounds, a step increment, and how many decimals the readout shows  and formats it into <code>label_text</code> via update_visuals(). SpinBox extends this with -/+ stepper buttons (see widgets/spinbox.h); Slider binds one as its value readout (see widgets/slider.h).</p>
+<p>Double-clicking the number opens keyboard editing  the TextEditBase shell TextField also uses (see widgets/text_field.h), including its blinking caret. Typed characters are filtered so only a valid number can ever be composed (digits, a single leading '-', and  only when decimals &gt; 0  a single '.'), Enter or clicking away commits it, Escape discards it. See TextEditBase's on_pointer_double_click()/on_char()/on_key(); this class supplies only accept_char() and on_edit_committed()/on_edit_reverted() below.</p>
     </div>
     
     
@@ -1072,9 +1080,10 @@
         <div class="card mermaid-container" style="padding: 24px; display: flex; justify-content: center; align-items: center; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; position: relative; height: 400px;">
             <div class="mermaid">
                 graph LR
-    CursorOverlay --> IconLibrary
-    InventorySlot --> IconLibrary
-    UIResourceCache --> IconLibrary
+    NumberField --> Text
+    NumberField --> TextEditBase
+    Slider --> NumberField
+    SpinBox --> NumberField
             </div>
         </div>
     </section>
@@ -1090,15 +1099,15 @@
     <section>
         <h2>Methods</h2>
         
-        <div class="card" id="method_instance">
+        <div class="card" id="method_NumberField">
             <h3 style="margin-top: 0; font-family: var(--font-mono);">
-                <span class="badge" style="background-color: var(--border-color); color: var(--text-main);">static</span> 
                 
-                instance
+                
+                NumberField
             </h3>
             
             <div class="signature-panel">
-                <span class="k">static</span><span class="w"> </span><span class="n">IconLibrary</span><span class="w"> </span><span class="o">&amp;</span><span class="w"> </span><span class="n">instance</span><span class="p">()</span>
+                <span class="n">NumberField</span><span class="p">()</span><span class="o">=</span><span class="k">default</span>
 
             </div>
             
@@ -1106,29 +1115,21 @@
             
             
             
-            
-            <div style="margin-top: 16px; font-size: 0.9rem;">
-                <strong>Returns:</strong> <code style="color: var(--primary-color);">IconLibrary &</code>
-            </div>
             
         </div>
         
-        <div class="card" id="method_configure">
+        <div class="card" id="method_NumberField">
             <h3 style="margin-top: 0; font-family: var(--font-mono);">
                 
                 
-                configure
+                NumberField
             </h3>
             
             <div class="signature-panel">
-                <span class="kt">void</span><span class="w"> </span><span class="n">configure</span><span class="p">(</span><span class="n">coopa</span><span class="o">::</span><span class="n">asset</span><span class="o">::</span><span class="n">AssetManager</span><span class="w"> </span><span class="o">&amp;</span><span class="n">assets</span><span class="p">,</span><span class="w"> </span><span class="n">coopa</span><span class="o">::</span><span class="n">gfx</span><span class="o">::</span><span class="n">core</span><span class="o">::</span><span class="n">Device</span><span class="w"> </span><span class="o">&amp;</span><span class="n">device</span><span class="p">,</span><span class="w"> </span><span class="n">coopa</span><span class="o">::</span><span class="n">gfx</span><span class="o">::</span><span class="n">memory</span><span class="o">::</span><span class="n">Allocator</span><span class="w"> </span><span class="o">&amp;</span><span class="n">allocator</span><span class="p">,</span><span class="w"> </span><span class="n">coopa</span><span class="o">::</span><span class="n">gfx</span><span class="o">::</span><span class="n">command</span><span class="o">::</span><span class="n">CommandPool</span><span class="w"> </span><span class="o">&amp;</span><span class="n">cmd_pool</span><span class="p">)</span>
+                <span class="n">NumberField</span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="n">min_val</span><span class="p">,</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">max_val</span><span class="p">,</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">initial_val</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">step_val</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
 
             </div>
             
-            
-            <div class="docstring" style="margin-top: 16px; margin-bottom: 16px;">
-                <p>Registers SpriteSheetLoader on <code>assets</code>. Call once at startup, before any add_sheet() call that uses this manager.</p>
-            </div>
             
             
             
@@ -1145,30 +1146,30 @@
                 <tbody>
                     
                     <tr>
-                        <td class="param-name">assets</td>
-                        <td class="param-type">coopa::asset::AssetManager &</td>
+                        <td class="param-name">min_val</td>
+                        <td class="param-type">double</td>
                         <td class="param-type" style="color: var(--text-muted);"></td>
                         <td></td>
                     </tr>
                     
                     <tr>
-                        <td class="param-name">device</td>
-                        <td class="param-type">coopa::gfx::core::Device &</td>
+                        <td class="param-name">max_val</td>
+                        <td class="param-type">double</td>
                         <td class="param-type" style="color: var(--text-muted);"></td>
                         <td></td>
                     </tr>
                     
                     <tr>
-                        <td class="param-name">allocator</td>
-                        <td class="param-type">coopa::gfx::memory::Allocator &</td>
-                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td class="param-name">initial_val</td>
+                        <td class="param-type">double</td>
+                        <td class="param-type" style="color: var(--text-muted);">0.0</td>
                         <td></td>
                     </tr>
                     
                     <tr>
-                        <td class="param-name">cmd_pool</td>
-                        <td class="param-type">coopa::gfx::command::CommandPool &</td>
-                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td class="param-name">step_val</td>
+                        <td class="param-type">double</td>
+                        <td class="param-type" style="color: var(--text-muted);">1.0</td>
                         <td></td>
                     </tr>
                     
@@ -1179,86 +1180,64 @@
             
         </div>
         
-        <div class="card" id="method_add_sheet">
-            <h3 style="margin-top: 0; font-family: var(--font-mono);">
-                
-                
-                add_sheet
-            </h3>
-            
-            <div class="signature-panel">
-                <span class="kt">bool</span><span class="w"> </span><span class="n">add_sheet</span><span class="p">(</span><span class="n">coopa</span><span class="o">::</span><span class="n">asset</span><span class="o">::</span><span class="n">AssetManager</span><span class="w"> </span><span class="o">&amp;</span><span class="n">assets</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="o">&amp;</span><span class="n">virtual_path</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="o">&amp;</span><span class="n">prefix</span><span class="o">=</span><span class="s">&quot;&quot;</span><span class="p">)</span>
-
-            </div>
-            
-            
-            <div class="docstring" style="margin-top: 16px; margin-bottom: 16px;">
-                <p>Loads a sheet synchronously through <code>assets</code> and publishes its entries.</p>
-<p>Each entry is registered under its bare name (e.g. "arrow_left") and, if <code>prefix</code> is non-empty, also under "<prefix>arrow_left"  so a second sheet can supply its own "arrow_left" under a distinct prefix without permanently losing the first sheet's entry, even though the bare name is last-write-wins.</p>
-            </div>
-            
-            
-            
-            <h4 style="font-size: 0.9rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-top: 16px;">Parameters</h4>
-            <table class="params-table">
-                <thead>
-                    <tr>
-                        <th>Parameter</th>
-                        <th>Type</th>
-                        <th>Default</th>
-                        <th>Description</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    
-                    <tr>
-                        <td class="param-name">assets</td>
-                        <td class="param-type">coopa::asset::AssetManager &</td>
-                        <td class="param-type" style="color: var(--text-muted);"></td>
-                        <td>Manager to load through; must have had configure() called on it.</td>
-                    </tr>
-                    
-                    <tr>
-                        <td class="param-name">virtual_path</td>
-                        <td class="param-type">const std::string &</td>
-                        <td class="param-type" style="color: var(--text-muted);"></td>
-                        <td>Descriptor (.yaml) or bare image path, e.g. "icons/icons.yaml".</td>
-                    </tr>
-                    
-                    <tr>
-                        <td class="param-name">prefix</td>
-                        <td class="param-type">const std::string &</td>
-                        <td class="param-type" style="color: var(--text-muted);">""</td>
-                        <td>Optional name prefix, e.g. "game/" -> "game/arrow_left".</td>
-                    </tr>
-                    
-                </tbody>
-            </table>
-            
-            
-            
-            <div style="margin-top: 16px; font-size: 0.9rem;">
-                <strong>Returns:</strong> <code style="color: var(--primary-color);">bool</code>
-            </div>
-            
-        </div>
-        
-        <div class="card" id="method_icon">
+        <div class="card" id="method_type_name">
             <h3 style="margin-top: 0; font-family: var(--font-mono);">
                 
                 <span class="badge" style="background-color: var(--border-color); color: var(--text-main);">const</span> 
-                icon
+                type_name
             </h3>
             
             <div class="signature-panel">
-                <span class="n">Sprite</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">icon</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="o">&amp;</span><span class="n">name</span><span class="p">)</span><span class="w"> </span><span class="k">const</span>
+                <span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">type_name</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">override</span>
 
             </div>
             
             
-            <div class="docstring" style="margin-top: 16px; margin-bottom: 16px;">
-                <p>Looks up a published icon.</p>
+            
+            
+            
+            
+            <div style="margin-top: 16px; font-size: 0.9rem;">
+                <strong>Returns:</strong> <code style="color: var(--primary-color);">std::string</code>
             </div>
+            
+        </div>
+        
+        <div class="card" id="method_value">
+            <h3 style="margin-top: 0; font-family: var(--font-mono);">
+                
+                <span class="badge" style="background-color: var(--border-color); color: var(--text-main);">const</span> 
+                value
+            </h3>
+            
+            <div class="signature-panel">
+                <span class="kt">double</span><span class="w"> </span><span class="n">value</span><span class="p">()</span><span class="w"> </span><span class="k">const</span>
+
+            </div>
+            
+            
+            
+            
+            
+            
+            <div style="margin-top: 16px; font-size: 0.9rem;">
+                <strong>Returns:</strong> <code style="color: var(--primary-color);">double</code>
+            </div>
+            
+        </div>
+        
+        <div class="card" id="method_set_range">
+            <h3 style="margin-top: 0; font-family: var(--font-mono);">
+                
+                
+                set_range
+            </h3>
+            
+            <div class="signature-panel">
+                <span class="kt">void</span><span class="w"> </span><span class="n">set_range</span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="n">min_val</span><span class="p">,</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">max_val</span><span class="p">)</span>
+
+            </div>
+            
             
             
             
@@ -1275,8 +1254,15 @@
                 <tbody>
                     
                     <tr>
-                        <td class="param-name">name</td>
-                        <td class="param-type">const std::string &</td>
+                        <td class="param-name">min_val</td>
+                        <td class="param-type">double</td>
+                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">max_val</td>
+                        <td class="param-type">double</td>
                         <td class="param-type" style="color: var(--text-muted);"></td>
                         <td></td>
                     </tr>
@@ -1286,55 +1272,132 @@
             
             
             
-            <div style="margin-top: 16px; font-size: 0.9rem;">
-                <strong>Returns:</strong> <code style="color: var(--primary-color);">Sprite *</code>
-            </div>
-            
         </div>
         
-        <div class="card" id="method_has_icons">
+        <div class="card" id="method_set_value">
             <h3 style="margin-top: 0; font-family: var(--font-mono);">
                 
-                <span class="badge" style="background-color: var(--border-color); color: var(--text-main);">const</span> 
-                has_icons
+                
+                set_value
             </h3>
             
             <div class="signature-panel">
-                <span class="kt">bool</span><span class="w"> </span><span class="n">has_icons</span><span class="p">()</span><span class="w"> </span><span class="k">const</span>
+                <span class="kt">void</span><span class="w"> </span><span class="n">set_value</span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="n">val</span><span class="p">,</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">notify</span><span class="o">=</span><span class="nb">true</span><span class="p">)</span>
+
+            </div>
+            
+            
+            
+            
+            <h4 style="font-size: 0.9rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-top: 16px;">Parameters</h4>
+            <table class="params-table">
+                <thead>
+                    <tr>
+                        <th>Parameter</th>
+                        <th>Type</th>
+                        <th>Default</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                    <tr>
+                        <td class="param-name">val</td>
+                        <td class="param-type">double</td>
+                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">notify</td>
+                        <td class="param-type">bool</td>
+                        <td class="param-type" style="color: var(--text-muted);">true</td>
+                        <td></td>
+                    </tr>
+                    
+                </tbody>
+            </table>
+            
+            
+            
+        </div>
+        
+        <div class="card" id="method_step_by">
+            <h3 style="margin-top: 0; font-family: var(--font-mono);">
+                
+                
+                step_by
+            </h3>
+            
+            <div class="signature-panel">
+                <span class="kt">void</span><span class="w"> </span><span class="n">step_by</span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">steps</span><span class="p">)</span>
+
+            </div>
+            
+            
+            
+            
+            <h4 style="font-size: 0.9rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-top: 16px;">Parameters</h4>
+            <table class="params-table">
+                <thead>
+                    <tr>
+                        <th>Parameter</th>
+                        <th>Type</th>
+                        <th>Default</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                    <tr>
+                        <td class="param-name">steps</td>
+                        <td class="param-type">int</td>
+                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td></td>
+                    </tr>
+                    
+                </tbody>
+            </table>
+            
+            
+            
+        </div>
+        
+        <div class="card" id="method_start">
+            <h3 style="margin-top: 0; font-family: var(--font-mono);">
+                
+                
+                start
+            </h3>
+            
+            <div class="signature-panel">
+                <span class="kt">void</span><span class="w"> </span><span class="n">start</span><span class="p">()</span><span class="w"> </span><span class="k">override</span>
+
+            </div>
+            
+            
+            
+            
+            
+            
+        </div>
+        
+        <div class="card" id="method_update_visuals">
+            <h3 style="margin-top: 0; font-family: var(--font-mono);">
+                
+                
+                update_visuals
+            </h3>
+            
+            <div class="signature-panel">
+                <span class="kt">void</span><span class="w"> </span><span class="n">update_visuals</span><span class="p">()</span>
 
             </div>
             
             
             <div class="docstring" style="margin-top: 16px; margin-bottom: 16px;">
-                <p>True once at least one icon has been published.</p>
-            </div>
-            
-            
-            
-            
-            
-            <div style="margin-top: 16px; font-size: 0.9rem;">
-                <strong>Returns:</strong> <code style="color: var(--primary-color);">bool</code>
-            </div>
-            
-        </div>
-        
-        <div class="card" id="method_clear">
-            <h3 style="margin-top: 0; font-family: var(--font-mono);">
-                
-                
-                clear
-            </h3>
-            
-            <div class="signature-panel">
-                <span class="kt">void</span><span class="w"> </span><span class="n">clear</span><span class="p">()</span>
-
-            </div>
-            
-            
-            <div class="docstring" style="margin-top: 16px; margin-bottom: 16px;">
-                <p>Drops every AssetHandle, disconnects every hot-reload subscription, and frees every owned Sprite.</p>
-<p>This is a process-wide singleton holding GPU-resident payloads (via its AssetHandles) and Sprite copies  call this before the AssetManager it was configured with is shut down and before its Device/Allocator are destroyed, mirroring UIResourceCache::clear()'s contract.</p>
+                <p>Formats the current value into <code>label_text</code> as <code>prefix + number + suffix</code>, rounded to a whole number when decimals &lt;= 0.</p>
+<p>A no-op while editing(): <code>label_text</code> then shows the live typing buffer, and a value pushed in from elsewhere (a bound Slider being dragged, say) must not overwrite what the user is halfway through typing.</p>
             </div>
             
             
@@ -1347,6 +1410,88 @@
     
     
     <!-- Members -->
+    
+    <section>
+        <h2>Attributes / Member Variables</h2>
+        <div class="card" style="padding: 0; overflow-x: auto;">
+            <table class="params-table" style="margin: 0;">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Default</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+                    <tr>
+                        <td class="param-name">ValueChangedSignal</td>
+                        <td class="param-type">coopa::event::Signal< double ></td>
+                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">min_value</td>
+                        <td class="param-type">double</td>
+                        <td class="param-type" style="color: var(--text-muted);">0.0</td>
+                        <td></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">max_value</td>
+                        <td class="param-type">double</td>
+                        <td class="param-type" style="color: var(--text-muted);">100.0</td>
+                        <td></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">step</td>
+                        <td class="param-type">double</td>
+                        <td class="param-type" style="color: var(--text-muted);">1.0</td>
+                        <td></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">decimals</td>
+                        <td class="param-type">int</td>
+                        <td class="param-type" style="color: var(--text-muted);">0</td>
+                        <td></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">prefix</td>
+                        <td class="param-type">std::string</td>
+                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">suffix</td>
+                        <td class="param-type">std::string</td>
+                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">label_name</td>
+                        <td class="param-type">std::string</td>
+                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td><p>Resolved by name in start() if label_text is null. Leave empty when the readout Text sits on this same object  start() falls back to that.</p></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="param-name">on_value_changed</td>
+                        <td class="param-type">ValueChangedSignal</td>
+                        <td class="param-type" style="color: var(--text-muted);"></td>
+                        <td></td>
+                    </tr>
+                    
+                </tbody>
+            </table>
+        </div>
+    </section>
     
 </article>
 

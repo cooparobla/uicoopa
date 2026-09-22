@@ -1,6 +1,6 @@
 /**
  * @file values.h
- * @brief UIBuilder's by-name value query/mutation dispatch over Slider/SpinBox/Toggle/ComboBox/Text.
+ * @brief UIBuilder's by-name value query/mutation dispatch over Slider/NumberField/Toggle/ComboBox/Text.
  */
 
 #ifndef UICOOPA_BUILDER_DETAIL_VALUES_H
@@ -8,6 +8,7 @@
 
 #include <uicoopa/widgets/slider.h>
 #include <uicoopa/widgets/toggle.h>
+#include <uicoopa/widgets/number_field.h>
 #include <uicoopa/widgets/spinbox.h>
 #include <uicoopa/widgets/text_field.h>
 #include <uicoopa/widgets/combobox.h>
@@ -41,12 +42,12 @@ T get_value(SceneObject* node, const std::string& name) {
 
     if constexpr (std::is_same_v<T, float>) {
         if (auto* s = target->get_component<Slider>()) return s->value();
-        if (auto* sp = target->get_component<SpinBox>()) return static_cast<float>(sp->value());
-        throw std::runtime_error("Component on " + name + " is not a Slider or SpinBox");
+        if (auto* sp = target->get_component<NumberField>()) return static_cast<float>(sp->value());
+        throw std::runtime_error("Component on " + name + " is not a Slider or NumberField");
     } else if constexpr (std::is_same_v<T, double>) {
-        if (auto* sp = target->get_component<SpinBox>()) return sp->value();
+        if (auto* sp = target->get_component<NumberField>()) return sp->value();
         if (auto* s = target->get_component<Slider>()) return static_cast<double>(s->value());
-        throw std::runtime_error("Component on " + name + " is not a SpinBox or Slider");
+        throw std::runtime_error("Component on " + name + " is not a NumberField or Slider");
     } else if constexpr (std::is_same_v<T, bool>) {
         if (auto* t = target->get_component<Toggle>()) return t->is_on();
         throw std::runtime_error("Component on " + name + " is not a Toggle");
@@ -61,7 +62,7 @@ T get_value(SceneObject* node, const std::string& name) {
         throw std::runtime_error("Component on " + name + " is not a TextField, ComboBox, or Text");
     } else if constexpr (std::is_same_v<T, int>) {
         if (auto* c = target->get_component<ComboBox>()) return c->current_index();
-        if (auto* sp = target->get_component<SpinBox>()) return static_cast<int>(std::round(sp->value()));
+        if (auto* sp = target->get_component<NumberField>()) return static_cast<int>(std::round(sp->value()));
         if (auto* s = target->get_component<Slider>()) return static_cast<int>(std::round(s->value()));
         throw std::runtime_error("Component on " + name + " cannot provide int value");
     } else {
@@ -72,13 +73,13 @@ T get_value(SceneObject* node, const std::string& name) {
 inline void set_value(SceneObject* node, const std::string& name, float val) {
     if (auto* target = find_target(node, name)) {
         if (auto* s = target->get_component<Slider>()) s->set_value(val);
-        else if (auto* sp = target->get_component<SpinBox>()) sp->set_value(val);
+        else if (auto* sp = target->get_component<NumberField>()) sp->set_value(val);
     }
 }
 
 inline void set_value(SceneObject* node, const std::string& name, double val) {
     if (auto* target = find_target(node, name)) {
-        if (auto* sp = target->get_component<SpinBox>()) sp->set_value(val);
+        if (auto* sp = target->get_component<NumberField>()) sp->set_value(val);
         else if (auto* s = target->get_component<Slider>()) s->set_value(static_cast<float>(val));
     }
 }
@@ -109,7 +110,7 @@ inline void set_value(SceneObject* node, const std::string& name, const std::str
 inline void set_value(SceneObject* node, const std::string& name, int val) {
     if (auto* target = find_target(node, name)) {
         if (auto* c = target->get_component<ComboBox>()) c->set_current_index(val);
-        else if (auto* sp = target->get_component<SpinBox>()) sp->set_value(val);
+        else if (auto* sp = target->get_component<NumberField>()) sp->set_value(val);
         else if (auto* s = target->get_component<Slider>()) s->set_value(static_cast<float>(val));
     }
 }

@@ -3030,6 +3030,66 @@
     "desc": "Clears held/timer state e.g. on release, or on window focus loss."
   },
   {
+    "name": "NumberField",
+    "kind": "Class",
+    "url": "class_NumberField.html",
+    "desc": "A bounded number displayed through a Text and editable with the keyboard. Holds the numeric state min/max bounds, a s..."
+  },
+  {
+    "name": "NumberField::NumberField",
+    "kind": "Method",
+    "url": "class_NumberField.html#method_NumberField",
+    "desc": ""
+  },
+  {
+    "name": "NumberField::NumberField",
+    "kind": "Method",
+    "url": "class_NumberField.html#method_NumberField",
+    "desc": ""
+  },
+  {
+    "name": "NumberField::type_name",
+    "kind": "Method",
+    "url": "class_NumberField.html#method_type_name",
+    "desc": ""
+  },
+  {
+    "name": "NumberField::value",
+    "kind": "Method",
+    "url": "class_NumberField.html#method_value",
+    "desc": ""
+  },
+  {
+    "name": "NumberField::set_range",
+    "kind": "Method",
+    "url": "class_NumberField.html#method_set_range",
+    "desc": ""
+  },
+  {
+    "name": "NumberField::set_value",
+    "kind": "Method",
+    "url": "class_NumberField.html#method_set_value",
+    "desc": ""
+  },
+  {
+    "name": "NumberField::step_by",
+    "kind": "Method",
+    "url": "class_NumberField.html#method_step_by",
+    "desc": ""
+  },
+  {
+    "name": "NumberField::start",
+    "kind": "Method",
+    "url": "class_NumberField.html#method_start",
+    "desc": ""
+  },
+  {
+    "name": "NumberField::update_visuals",
+    "kind": "Method",
+    "url": "class_NumberField.html#method_update_visuals",
+    "desc": "Formats the current value into label_text as prefix + number + suffix, rounded to a whole number when decimals &lt;= ..."
+  },
+  {
     "name": "PanelStyle",
     "kind": "Class",
     "url": "class_PanelStyle.html",
@@ -3696,6 +3756,12 @@
     "desc": ""
   },
   {
+    "name": "Slider::bind_value_field",
+    "kind": "Method",
+    "url": "class_Slider.html#method_bind_value_field",
+    "desc": "Copies this slider's range, step and resolved decimals onto value_field and wires the two together: the field pushes ..."
+  },
+  {
     "name": "Slider::start",
     "kind": "Method",
     "url": "class_Slider.html#method_start",
@@ -3742,6 +3808,12 @@
     "kind": "Method",
     "url": "class_Slider.html#method_update_visuals",
     "desc": ""
+  },
+  {
+    "name": "Slider::auto_decimals",
+    "kind": "Method",
+    "url": "class_Slider.html#method_auto_decimals",
+    "desc": "How many decimals a value field should show for a range that was never told explicitly: none when the slider can only..."
   },
   {
     "name": "SliderStyle",
@@ -3819,7 +3891,7 @@
     "name": "SpinBox",
     "kind": "Class",
     "url": "class_SpinBox.html",
-    "desc": "Compound numeric stepper widget that manages min/max bounds and step increments. Connects to optional child decrement..."
+    "desc": "Compound numeric stepper: a NumberField flanked by decrement/increment buttons. Connects to optional child decrement/..."
   },
   {
     "name": "SpinBox::SpinBox",
@@ -3840,39 +3912,9 @@
     "desc": ""
   },
   {
-    "name": "SpinBox::value",
-    "kind": "Method",
-    "url": "class_SpinBox.html#method_value",
-    "desc": ""
-  },
-  {
-    "name": "SpinBox::set_range",
-    "kind": "Method",
-    "url": "class_SpinBox.html#method_set_range",
-    "desc": ""
-  },
-  {
-    "name": "SpinBox::set_value",
-    "kind": "Method",
-    "url": "class_SpinBox.html#method_set_value",
-    "desc": ""
-  },
-  {
-    "name": "SpinBox::step_by",
-    "kind": "Method",
-    "url": "class_SpinBox.html#method_step_by",
-    "desc": ""
-  },
-  {
     "name": "SpinBox::start",
     "kind": "Method",
     "url": "class_SpinBox.html#method_start",
-    "desc": ""
-  },
-  {
-    "name": "SpinBox::update_visuals",
-    "kind": "Method",
-    "url": "class_SpinBox.html#method_update_visuals",
     "desc": ""
   },
   {
@@ -4731,7 +4773,7 @@
     "name": "UIBuilder::add_slider",
     "kind": "Method",
     "url": "class_UIBuilder.html#method_add_slider",
-    "desc": ""
+    "desc": "A horizontal slider carrying an editable value field on its right edge."
   },
   {
     "name": "UIBuilder::add_toggle",
@@ -4821,7 +4863,7 @@
     "name": "UIBuilder::add_slider_row",
     "kind": "Method",
     "url": "class_UIBuilder.html#method_add_slider_row",
-    "desc": ""
+    "desc": "A labelled row holding a slider and its editable value field."
   },
   {
     "name": "UIBuilder::add_toggle_row",
@@ -5673,7 +5715,7 @@
     "name": "coopa::ui::detail::attach_selectable",
     "kind": "Function",
     "url": "scope_coopa__ui__detail.html#func_attach_selectable",
-    "desc": "Left/Right step by one increment (SpinBox::step_by(), consumed same as Slider's Left/Right); Confirm opens keyboard e..."
+    "desc": "Left/Right step by one increment (NumberField::step_by(), consumed same as Slider's Left/Right); Confirm opens keyboa..."
   },
   {
     "name": "coopa::ui::detail::attach_selectable",
@@ -5820,10 +5862,22 @@
     "desc": "A clickable button with a centered label, styled from the given ButtonRole's ButtonStyle."
   },
   {
+    "name": "coopa::ui::detail::slider_field_width_",
+    "kind": "Function",
+    "url": "scope_coopa__ui__detail.html#func_slider_field_width_",
+    "desc": "Private helper for make_slider() the widest the value field's readout can ever get, measured from whichever of the tw..."
+  },
+  {
+    "name": "coopa::ui::detail::make_slider_value_field_",
+    "kind": "Function",
+    "url": "scope_coopa__ui__detail.html#func_make_slider_value_field_",
+    "desc": "Private helper for make_slider() the editable readout pinned to the slider's right edge. Image and Text share one obj..."
+  },
+  {
     "name": "coopa::ui::detail::make_slider",
     "kind": "Function",
     "url": "scope_coopa__ui__detail.html#func_make_slider",
-    "desc": "A horizontal slider with track/fill/handle, wired to on_change."
+    "desc": "A horizontal slider with track/fill/handle, wired to on_change. Unless the theme turns it off (UITheme::SliderStyle::..."
   },
   {
     "name": "coopa::ui::detail::make_toggle",

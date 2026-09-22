@@ -134,6 +134,9 @@ inline void parse_theme(const fkyaml::node& root, UITheme& out) {
         if (n.contains("handle_disabled")) s.handle_disabled = parse_theme_color(n.at("handle_disabled"), s.handle_disabled);
         if (n.contains("height"))          s.height          = n.at("height").get_value<float>();
         if (n.contains("handle_width"))    s.handle_width    = n.at("handle_width").get_value<float>();
+        if (n.contains("show_value_field")) s.show_value_field = n.at("show_value_field").get_value<bool>();
+        if (n.contains("field_width"))     s.field_width     = n.at("field_width").get_value<float>();
+        if (n.contains("field_gap"))       s.field_gap       = n.at("field_gap").get_value<float>();
     }
     if (root.contains("toggle")) {
         const auto& n = root.at("toggle");

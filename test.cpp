@@ -2162,6 +2162,162 @@ static coopa::input::KeyEvent make_shift_key_(coopa::input::Key key) {
     return coopa::input::KeyEvent{ key, 0, coopa::input::KeyAction::Press, coopa::input::Mods::Shift };
 }
 
+struct SliderTestFixture {
+    std::unique_ptr<SceneObject> canvas_obj;
+    CanvasComponent* canvas = nullptr;
+    Slider* slider = nullptr;
+};
+
+/** @brief A canvas-resolved slider row, so track/field rects are real and hit-testable. */
+static SliderTestFixture make_slider_fixture(float min_v, float max_v, float initial, float step,
+                                             int decimals = -1) {
+    FocusContext::instance().clear_focus();  // guard against leftover state from another test
+
+    SliderTestFixture fx;
+    fx.canvas_obj = std::make_unique<SceneObject>("Canvas");
+    fx.canvas = fx.canvas_obj->add_component<CanvasComponent>();
+    fx.canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    fx.canvas->scaler.scale_factor = 1.0f;
+
+    auto* root = fx.canvas_obj->add_child(std::make_unique<SceneObject>("Root"));
+    root->add_component<RectTransform>()->set_size_delta({400.0f, 200.0f});
+
+    UIBuilder builder(root);
+    fx.slider = builder.add_slider("Amount", min_v, max_v, initial, step, nullptr, decimals);
+    fx.slider->start();
+
+    fx.canvas->rebuild_layout(400, 200);
+    return fx;
+}
+
+void test_slider_auto_decimals_picks_int_or_float() {
+    // Whole bounds AND a whole step -- the value can only ever land on an integer.
+    ASSERT_TRUE(Slider::auto_decimals(0.0f, 50.0f, 1.0f) == 0);
+    ASSERT_TRUE(Slider::auto_decimals(-10.0f, 10.0f, 5.0f) == 0);
+    // Continuous, or snapping to fractions, or fractional bounds.
+    ASSERT_TRUE(Slider::auto_decimals(0.0f, 1.0f, 0.0f) == 2);
+    ASSERT_TRUE(Slider::auto_decimals(0.0f, 10.0f, 0.5f) == 2);
+    ASSERT_TRUE(Slider::auto_decimals(0.0f, 1.5f, 1.0f) == 2);
+}
+
+void test_slider_value_field_formats_int_and_float_ranges() {
+    auto ints = make_slider_fixture(0.0f, 50.0f, 10.0f, 1.0f);
+    ASSERT_TRUE(ints.slider->value_field != nullptr);
+    ASSERT_TRUE(ints.slider->value_field->decimals == 0);
+    ASSERT_TRUE(ints.slider->value_field->label_text->text == "10");
+
+    auto floats = make_slider_fixture(0.0f, 1.0f, 0.8f, 0.0f);
+    ASSERT_TRUE(floats.slider->value_field->decimals == 2);
+    ASSERT_TRUE(floats.slider->value_field->label_text->text == "0.80");
+
+    // An explicit decimals argument wins over the inference.
+    auto forced = make_slider_fixture(0.0f, 50.0f, 10.0f, 1.0f, /*decimals=*/3);
+    ASSERT_TRUE(forced.slider->value_field->label_text->text == "10.000");
+}
+
+void test_slider_value_field_tracks_the_slider() {
+    auto fx = make_slider_fixture(0.0f, 100.0f, 0.0f, 0.0f);
+    auto* field = fx.slider->value_field;
+
+    fx.slider->set_value(42.0f);
+    ASSERT_NEAR(field->value(), 42.0, 1e-4);
+    ASSERT_TRUE(field->label_text->text == "42.00");
+
+    // Dragging the handle drives it the same way.
+    auto* area = fx.slider->track_rect;
+    ASSERT_TRUE(area != nullptr);
+    PointerEventData down;
+    down.position = area->rect().center();
+    fx.slider->on_pointer_down(down);
+    ASSERT_NEAR(field->value(), 50.0, 1e-3);
+    fx.slider->on_pointer_up(down);
+}
+
+void test_slider_commits_typed_value_and_echoes_the_snapped_one() {
+    auto fx = make_slider_fixture(0.0f, 100.0f, 0.0f, 10.0f);
+    auto* field = fx.slider->value_field;
+
+    int callback_hits = 0;
+    fx.slider->on_value_changed.connect([&](float) { ++callback_hits; });
+
+    PointerEventData dbl;
+    dbl.position = field->label_text->owner->get_component<RectTransform>()->rect().center();
+    field->on_pointer_double_click(dbl);
+    ASSERT_TRUE(field->editing());
+
+    field->on_char('3');
+    field->on_char('7');
+    field->on_key(make_key_(coopa::input::Key::Enter));
+
+    // step == 10 snaps 37 to 40, and the box must show the snapped number, not what was typed.
+    ASSERT_NEAR(fx.slider->value(), 40.0f, 1e-4f);
+    ASSERT_NEAR(field->value(), 40.0, 1e-4);
+    ASSERT_TRUE(field->label_text->text == "40");
+    ASSERT_TRUE(callback_hits == 1);
+
+    // Typing a value that snaps back to where it already is still clears the buffer.
+    field->on_pointer_double_click(dbl);
+    field->on_char('3');
+    field->on_char('8');
+    field->on_key(make_key_(coopa::input::Key::Enter));
+    ASSERT_NEAR(fx.slider->value(), 40.0f, 1e-4f);
+    ASSERT_TRUE(field->label_text->text == "40");
+    ASSERT_TRUE(callback_hits == 1);
+}
+
+void test_slider_press_over_the_value_field_does_not_move_the_value() {
+    auto fx = make_slider_fixture(0.0f, 100.0f, 25.0f, 0.0f);
+    auto* field_rt = fx.slider->value_field->owner->get_component<RectTransform>();
+
+    // The field is a child of the slider object, so its clicks bubble to the slider's own
+    // IPointerHandler -- which must decline anything landing outside the track.
+    PointerEventData down;
+    down.position = field_rt->rect().center();
+    fx.slider->on_pointer_down(down);
+    ASSERT_NEAR(fx.slider->value(), 25.0f, 1e-4f);
+
+    down.position = fx.slider->track_rect->rect().center();
+    fx.slider->on_pointer_down(down);
+    ASSERT_NEAR(fx.slider->value(), 50.0f, 1e-3f);
+    fx.slider->on_pointer_up(down);
+}
+
+void test_slider_field_yields_to_an_active_edit() {
+    auto fx = make_slider_fixture(0.0f, 100.0f, 10.0f, 0.0f);
+    auto* field = fx.slider->value_field;
+
+    PointerEventData dbl;
+    dbl.position = field->label_text->owner->get_component<RectTransform>()->rect().center();
+    field->on_pointer_double_click(dbl);
+    field->on_char('9');
+
+    // Dragging the slider while the user is mid-type must not overwrite the buffer.
+    fx.slider->set_value(77.0f);
+    ASSERT_TRUE(field->label_text->text == "9");
+
+    field->on_key(make_key_(coopa::input::Key::Escape));
+    ASSERT_TRUE(field->label_text->text == "77.00");
+}
+
+void test_slider_without_value_field_keeps_the_bare_tree() {
+    auto fx = make_slider_fixture(0.0f, 1.0f, 0.5f, 0.0f, Slider::kNoValueField);
+
+    ASSERT_TRUE(fx.slider->value_field == nullptr);
+    ASSERT_TRUE(fx.slider->track_rect == nullptr);
+    ASSERT_TRUE(fx.slider->owner->find_descendant("ValueField") == nullptr);
+    ASSERT_TRUE(fx.slider->owner->find_descendant("SliderArea") == nullptr);
+    // Track and Handle stay direct children, and the clipping Mask stays on the slider node.
+    ASSERT_TRUE(fx.slider->owner->find_child("Track") != nullptr);
+    ASSERT_TRUE(fx.slider->owner->find_child("Handle") != nullptr);
+    ASSERT_TRUE(fx.slider->owner->get_component<Mask>() != nullptr);
+
+    PointerEventData down;
+    down.position = fx.slider->owner->get_component<RectTransform>()->rect().center();
+    fx.slider->on_pointer_down(down);
+    ASSERT_NEAR(fx.slider->value(), 0.5f, 1e-3f);
+    fx.slider->on_pointer_up(down);
+}
+
 void test_spinbox_double_click_gated_to_value_text_area() {
     auto fx = make_spinbox_fixture(0.0, 100.0, 5.0, 1.0);
 
@@ -2579,6 +2735,18 @@ void test_ui_builder_hierarchy_and_value_getters() {
     auto row_slider = settings.add_slider_row("Brightness", 0.0f, 1.0f, 0.8f);
     ASSERT_NEAR(row_slider->value(), 0.8f, 1e-4f);
     ASSERT_NEAR(settings.get_value<float>("Brightness"), 0.8f, 1e-4f);
+
+    // The slider's value field is a NumberField descendant, which get_value/set_value also
+    // dispatch on -- the by-name lookup must still land on the Slider, not the readout.
+    ASSERT_TRUE(row_slider->value_field != nullptr);
+    settings.set_value("Brightness", 0.25f);
+    ASSERT_NEAR(row_slider->value(), 0.25f, 1e-4f);
+    ASSERT_NEAR(settings.get_value<float>("Brightness"), 0.25f, 1e-4f);
+    ASSERT_NEAR(row_slider->value_field->value(), 0.25, 1e-4);
+
+    // The row node name every by-label lookup relies on is unchanged by the field.
+    ASSERT_TRUE(settings.node()->find_descendant("Brightness_Row") != nullptr);
+    ASSERT_TRUE(row_slider->owner->parent()->name() == "Brightness_Row");
 }
 
 void test_drag_drop_and_inventory_grid() {
@@ -2666,6 +2834,22 @@ scene:
               max: 100
               step: 2
               value: 14
+        - name: MyBoundSlider
+          components:
+            - type: RectTransform
+            - type: Slider
+              min: 0
+              max: 200
+              step: 10
+              value: 60
+              decimals: 1
+              field: BoundReadout
+          children:
+            - name: BoundReadout
+              components:
+                - type: RectTransform
+                - type: Text
+                - type: NumberField
         - name: MyComboBox
           components:
             - type: RectTransform
@@ -2694,6 +2878,19 @@ scene:
     ASSERT_NEAR(slider->max_value, 50.0f, 1e-4f);
     ASSERT_NEAR(slider->step, 5.0f, 1e-4f);
     ASSERT_NEAR(slider->value(), 25.0f, 1e-4f);
+
+    // A Slider that names a NumberField descendant binds to it in start().
+    auto* bound_obj = scene.find_object("MyBoundSlider");
+    ASSERT_TRUE(bound_obj != nullptr);
+    auto* bound = bound_obj->get_component<Slider>();
+    ASSERT_TRUE(bound != nullptr && bound->value_field != nullptr);
+    ASSERT_TRUE(bound->value_field->decimals == 1);
+    ASSERT_TRUE(bound->value_field->label_text != nullptr);
+    ASSERT_TRUE(bound->value_field->label_text->text == "60.0");
+    bound->set_value(130.0f);
+    ASSERT_TRUE(bound->value_field->label_text->text == "130.0");
+    bound->value_field->set_value(90.0);
+    ASSERT_NEAR(bound->value(), 90.0f, 1e-4f);
 
     auto* toggle_obj = scene.find_object("MyToggle");
     ASSERT_TRUE(toggle_obj != nullptr);
@@ -7553,6 +7750,13 @@ int main() {
     RUN_TEST(test_slider_value_mapping_and_stepping);
     RUN_TEST(test_slider_mask_auto_added_for_handle_clipping);
     RUN_TEST(test_slider_hover_press_color_transition);
+    RUN_TEST(test_slider_auto_decimals_picks_int_or_float);
+    RUN_TEST(test_slider_value_field_formats_int_and_float_ranges);
+    RUN_TEST(test_slider_value_field_tracks_the_slider);
+    RUN_TEST(test_slider_commits_typed_value_and_echoes_the_snapped_one);
+    RUN_TEST(test_slider_press_over_the_value_field_does_not_move_the_value);
+    RUN_TEST(test_slider_field_yields_to_an_active_edit);
+    RUN_TEST(test_slider_without_value_field_keeps_the_bare_tree);
     RUN_TEST(test_toggle_interaction_and_signals);
     RUN_TEST(test_toggle_hover_press_color_transition_and_no_side_effects);
     RUN_TEST(test_spinbox_stepping_and_bounds);

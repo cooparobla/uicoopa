@@ -19,6 +19,7 @@
 #include <uicoopa/widgets/button.h>
 #include <uicoopa/widgets/slider.h>
 #include <uicoopa/widgets/toggle.h>
+#include <uicoopa/widgets/number_field.h>
 #include <uicoopa/widgets/spinbox.h>
 #include <uicoopa/widgets/text_field.h>
 #include <uicoopa/widgets/combobox.h>
@@ -55,6 +56,10 @@ inline Selectable* attach_selectable(SceneObject* node, Slider* slider) {
     auto* sel = node->add_component<Selectable>();
     sel->is_interactable = [slider] { return slider->interactable; };
     sel->on_nav = [slider](NavAction action) -> bool {
+        if (action == NavAction::Confirm && slider->value_field) {
+            slider->value_field->begin_editing();
+            return true;
+        }
         if (action != NavAction::Left && action != NavAction::Right) return false;
         float range = slider->max_value - slider->min_value;
         float step = slider->step > 0.0f ? slider->step : range * 0.05f;
@@ -78,11 +83,11 @@ inline Selectable* attach_selectable(SceneObject* node, Toggle* toggle) {
     return sel;
 }
 
-/** @brief Left/Right step by one increment (SpinBox::step_by(), consumed same as
+/** @brief Left/Right step by one increment (NumberField::step_by(), consumed same as
  *         Slider's Left/Right); Confirm opens keyboard editing via the public
  *         begin_editing() forwarder (widgets/text_edit_base.h) -- the gamepad
  *         equivalent of the double-click that normally starts an edit. */
-inline Selectable* attach_selectable(SceneObject* node, SpinBox* spin) {
+inline Selectable* attach_selectable(SceneObject* node, NumberField* spin) {
     auto* sel = node->add_component<Selectable>();
     sel->is_interactable = [spin] { return spin->interactable; };
     sel->on_nav = [spin](NavAction action) -> bool {
