@@ -145,41 +145,81 @@ inline glm::vec3 rgb_to_hsv(const glm::vec3& c) {
 }
 
 // =====================================================================================
+// Icons (drawn by imm_icons.h, included at the end of this file)
+// =====================================================================================
+
+/** @brief The vector icon set; see imm_icons.h for what each looks like. */
+enum class Icon : int {
+    None = 0,
+    // object types
+    Cube, Mesh, Sphere, Cylinder, Plane, Empty, Sun, PointLight, SpotLight, EnvLight, Camera, Terrain, Object,
+    // data / properties
+    Material, Texture, World, Scene, Collection, Physics, Collider, Rigidbody, Component, Script, Render, Output, Tool, Gear,
+    // visibility
+    Eye, EyeClosed, Monitor, MonitorOff, Check, Lock,
+    // tools
+    SelectBox, Cursor, Move, Rotate, Scale, Transform, Extrude, Inset, Bevel, Knife,
+    // modes
+    Vertex, Edge, Face, ObjectMode, EditMode,
+    // shading / overlays / view
+    ShadeWire, ShadeSolid, ShadeMaterial, ShadeRendered, Overlays, XRay, Grid, Snap, Pivot, Orientation, ViewCamera, Ortho,
+    Persp, Zoom, Hand,
+    // playback
+    Play, Pause, Step, Stop,
+    // files
+    Folder, File, Image, Search, Filter, Asset, Console, Save, Package,
+    // actions / status
+    Plus, X, Trash, Duplicate, Link, ArrowRight, ArrowDown, Dots, Undo, Redo, Restart, Info, Warning, Error,
+    MouseLeft, MouseMiddle, MouseRight, Keyboard,
+};
+
+class Context;
+/** @brief Draws `icon` fitted (square, centred) into `b`. Defined in imm_icons.h. */
+void draw_icon(Context& ctx, Icon icon, const Box& b, const glm::vec4& color);
+
+// =====================================================================================
 // Style
 // =====================================================================================
 
-/** @brief Sizes and colours for every imm widget. */
+/** @brief Sizes and colours for every imm widget. Defaults: Blender 2.8+'s dark theme. */
 struct Style {
-    float font_size   = 13.0f;
-    float row_height  = 22.0f;
+    float font_size   = 12.0f;
+    float row_height  = 21.0f;
     float padding     = 6.0f;
-    float spacing     = 4.0f;
-    float indent      = 14.0f;
-    float label_ratio = 0.40f;   ///< Property rows: fraction of the row width given to the label.
-    float scrollbar   = 8.0f;
+    float spacing     = 3.0f;
+    float indent      = 16.0f;
+    float label_ratio = 0.46f;   ///< Property rows: fraction of the row width given to the label.
+    float scrollbar   = 7.0f;
+    float rounding    = 4.0f;    ///< Widget corner radius.
 
-    glm::vec4 window_bg     {0.11f, 0.12f, 0.14f, 1.0f};
-    glm::vec4 panel_bg      {0.15f, 0.16f, 0.19f, 1.0f};
-    glm::vec4 panel_alt     {0.13f, 0.14f, 0.17f, 1.0f};
-    glm::vec4 header        {0.19f, 0.21f, 0.26f, 1.0f};
-    glm::vec4 header_hover  {0.24f, 0.27f, 0.33f, 1.0f};
-    glm::vec4 border        {0.07f, 0.08f, 0.09f, 1.0f};
-    glm::vec4 text          {0.90f, 0.91f, 0.93f, 1.0f};
-    glm::vec4 text_dim      {0.58f, 0.61f, 0.67f, 1.0f};
-    glm::vec4 text_disabled {0.40f, 0.42f, 0.46f, 1.0f};
-    glm::vec4 accent        {0.96f, 0.56f, 0.20f, 1.0f};
-    glm::vec4 button        {0.23f, 0.25f, 0.30f, 1.0f};
-    glm::vec4 button_hover  {0.30f, 0.33f, 0.40f, 1.0f};
-    glm::vec4 button_active {0.18f, 0.19f, 0.23f, 1.0f};
-    glm::vec4 field         {0.09f, 0.10f, 0.12f, 1.0f};
-    glm::vec4 field_hover   {0.12f, 0.13f, 0.16f, 1.0f};
-    glm::vec4 selection     {0.85f, 0.45f, 0.12f, 0.55f};
-    glm::vec4 row_hover     {1.0f, 1.0f, 1.0f, 0.05f};
-    glm::vec4 popup_bg      {0.12f, 0.13f, 0.16f, 0.98f};
-    glm::vec4 scroll_grab   {0.32f, 0.34f, 0.40f, 1.0f};
-    glm::vec4 axis_x        {0.86f, 0.30f, 0.30f, 1.0f};
-    glm::vec4 axis_y        {0.45f, 0.78f, 0.30f, 1.0f};
-    glm::vec4 axis_z        {0.32f, 0.52f, 0.92f, 1.0f};
+    glm::vec4 window_bg     {0.114f, 0.114f, 0.114f, 1.0f};   ///< #1d1d1d -- gaps between areas
+    glm::vec4 panel_bg      {0.188f, 0.188f, 0.188f, 1.0f};   ///< #303030 -- editor background
+    glm::vec4 panel_alt     {0.157f, 0.157f, 0.157f, 1.0f};   ///< #282828 -- regions, headers' base
+    glm::vec4 header        {0.239f, 0.239f, 0.239f, 1.0f};   ///< #3d3d3d -- area headers, sub-panel headers
+    glm::vec4 header_hover  {0.290f, 0.290f, 0.290f, 1.0f};
+    glm::vec4 subpanel      {0.212f, 0.212f, 0.212f, 1.0f};   ///< sub-panel body
+    glm::vec4 border        {0.090f, 0.090f, 0.090f, 1.0f};
+    glm::vec4 text          {0.902f, 0.902f, 0.902f, 1.0f};   ///< #e6e6e6
+    glm::vec4 text_dim      {0.651f, 0.651f, 0.651f, 1.0f};
+    glm::vec4 text_disabled {0.440f, 0.440f, 0.440f, 1.0f};
+    glm::vec4 accent        {0.278f, 0.447f, 0.702f, 1.0f};   ///< #4772b3 -- Blender's UI blue
+    glm::vec4 button        {0.329f, 0.329f, 0.329f, 1.0f};   ///< #545454
+    glm::vec4 button_hover  {0.396f, 0.396f, 0.396f, 1.0f};
+    glm::vec4 button_active {0.278f, 0.447f, 0.702f, 1.0f};
+    glm::vec4 field         {0.114f, 0.114f, 0.114f, 1.0f};   ///< text / number fields #1d1d1d
+    glm::vec4 field_hover   {0.157f, 0.157f, 0.157f, 1.0f};
+    glm::vec4 number        {0.329f, 0.329f, 0.329f, 1.0f};   ///< number sliders #545454
+    glm::vec4 number_hover  {0.396f, 0.396f, 0.396f, 1.0f};
+    glm::vec4 selection     {0.278f, 0.447f, 0.702f, 0.85f};  ///< selected rows (active)
+    glm::vec4 selection_dim {0.200f, 0.302f, 0.502f, 0.85f};  ///< selected rows (not active)
+    glm::vec4 row_hover     {1.0f, 1.0f, 1.0f, 0.06f};
+    glm::vec4 popup_bg      {0.094f, 0.094f, 0.094f, 0.97f};  ///< menus #181818
+    glm::vec4 scroll_grab   {0.40f, 0.40f, 0.40f, 0.8f};
+    glm::vec4 axis_x        {1.000f, 0.200f, 0.322f, 1.0f};   ///< #ff3352
+    glm::vec4 axis_y        {0.545f, 0.863f, 0.000f, 1.0f};   ///< #8bdc00
+    glm::vec4 axis_z        {0.157f, 0.565f, 1.000f, 1.0f};   ///< #2890ff
+    glm::vec4 object_selected {0.945f, 0.345f, 0.000f, 1.0f}; ///< #f15800 -- viewport selection
+    glm::vec4 object_active   {1.000f, 0.667f, 0.251f, 1.0f}; ///< #ffaa40 -- viewport active object
     glm::vec4 warning       {0.98f, 0.80f, 0.30f, 1.0f};
     glm::vec4 error         {0.95f, 0.38f, 0.35f, 1.0f};
 
@@ -423,17 +463,32 @@ public:
     void end_frame() {
         // Tooltip, top-most.
         if (!tooltip_.empty() && !drag_.active) {
-            const float pad = style.padding;
-            const float w = text.width(tooltip_, style.font_size) + pad * 2;
-            const float h = text.line_height(style.font_size) + pad * 1.5f;
-            Box b{in_.mouse.x + 14, in_.mouse.y + 18, w, h};
+            // Line 0 is the title (bright); further lines are description (dim) -- Blender's layout.
+            std::vector<std::string> lines;
+            size_t start = 0;
+            while (start <= tooltip_.size()) {
+                const size_t nl = tooltip_.find('\n', start);
+                lines.push_back(tooltip_.substr(start, nl == std::string::npos ? std::string::npos : nl - start));
+                if (nl == std::string::npos) break;
+                start = nl + 1;
+            }
+            const float pad = style.padding + 2;
+            const float lh = text.line_height(style.font_size) + 2;
+            float w = 0;
+            for (const auto& l : lines) w = std::max(w, text.width(l, style.font_size));
+            w += pad * 2;
+            const float h = lh * lines.size() + pad * 1.4f;
+            Box b{in_.mouse.x + 14, in_.mouse.y + 20, w, h};
             if (b.right() > size_.x) b.x = size_.x - b.w - 2;
-            if (b.bottom() > size_.y) b.y = in_.mouse.y - h - 4;
+            if (b.bottom() > size_.y) b.y = in_.mouse.y - h - 6;
             dl_->set_z_order(kTooltipZ);
             push_clip_raw_(Box{0, 0, size_.x, size_.y});
-            fill(b, style.popup_bg);
-            outline(b, style.border);
-            draw_text({b.x + pad, b.y + pad * 0.75f}, tooltip_, style.text);
+            shadow(b, style.rounding + 2);
+            fill_rounded(b, style.popup_bg, style.rounding + 1);
+            outline_rounded(b, with_alpha(glm::vec4(1), 0.08f), style.rounding + 1);
+            for (size_t i = 0; i < lines.size(); ++i) {
+                draw_text({b.x + pad, b.y + pad * 0.7f + lh * i}, lines[i], i == 0 ? style.text : style.text_dim);
+            }
             pop_clip_();
         }
         // Drag payload preview, top-most.
@@ -442,7 +497,7 @@ public:
             push_clip_raw_(Box{0, 0, size_.x, size_.y});
             const float w = text.width(drag_.label, style.font_size) + style.padding * 2;
             Box b{in_.mouse.x + 12, in_.mouse.y + 6, w, style.row_height};
-            fill(b, with_alpha(style.header, 0.92f));
+            fill_rounded(b, with_alpha(style.header, 0.95f), style.rounding);
             draw_text({b.x + style.padding, b.y + (b.h - text.line_height(style.font_size)) * 0.5f}, drag_.label, style.text);
             pop_clip_();
         }
@@ -559,11 +614,23 @@ public:
         return last_item_.hovered && in_.released[static_cast<int>(b)] && press_origin_hit_(b, last_item_.rect);
     }
 
-    /** @brief Shows `text` as a tooltip if the last item has been hovered for a moment. */
+    /**
+     * @brief Shows a tooltip if the last item has been hovered for a moment. A '\n' splits a
+     *        bright title line from dim description lines, as Blender's tooltips do.
+     */
     void tooltip(std::string_view tip) {
         if (!last_item_.hovered) return;
         if (tooltip_target_ != last_item_.id) { tooltip_target_ = last_item_.id; tooltip_start_ = time_; }
         if (time_ - tooltip_start_ > 0.45) tooltip_ = std::string(tip);
+    }
+    /** @brief The tooltip shown this frame ("" if none) -- valid until the next begin_frame. */
+    const std::string& tooltip_text() const { return tooltip_; }
+    /** @brief A Blender-style tooltip: "Title  (Shortcut)" then a description line. */
+    void tooltip(std::string_view title, std::string_view shortcut_text, std::string_view description) {
+        std::string t(title);
+        if (!shortcut_text.empty()) t += "   " + std::string(shortcut_text);
+        if (!description.empty()) t += "\n" + std::string(description);
+        tooltip(t);
     }
 
     // -------------------------------------------------------------------------------
@@ -596,6 +663,86 @@ public:
         if (open) triangle({m.x - r, m.y - r * 0.6f}, {m.x + r, m.y - r * 0.6f}, {m.x, m.y + r * 0.7f}, c);
         else      triangle({m.x - r * 0.6f, m.y - r}, {m.x - r * 0.6f, m.y + r}, {m.x + r * 0.7f, m.y}, c);
     }
+    /** @brief Filled disc. */
+    void circle(glm::vec2 c, float r, const glm::vec4& col, int segments = 0) {
+        if (r <= 0.0f || col.a <= 0.0f) return;
+        if (segments <= 0) segments = std::clamp(static_cast<int>(r * 1.5f), 10, 40);
+        for (int i = 0; i < segments; ++i) {
+            const float a0 = 6.2831853f * i / segments, a1 = 6.2831853f * (i + 1) / segments;
+            triangle(c, c + glm::vec2(std::cos(a0), std::sin(a0)) * r, c + glm::vec2(std::cos(a1), std::sin(a1)) * r, col);
+        }
+    }
+    /** @brief Circle outline `t` pixels thick. */
+    void ring(glm::vec2 c, float r, float t, const glm::vec4& col, int segments = 0) {
+        if (r <= 0.0f || col.a <= 0.0f) return;
+        if (segments <= 0) segments = std::clamp(static_cast<int>(r * 1.5f), 12, 48);
+        for (int i = 0; i < segments; ++i) {
+            const float a0 = 6.2831853f * i / segments, a1 = 6.2831853f * (i + 1) / segments;
+            line(c + glm::vec2(std::cos(a0), std::sin(a0)) * r, c + glm::vec2(std::cos(a1), std::sin(a1)) * r, col, t);
+        }
+    }
+
+    /** @brief Rounded-rect corner flags for fill_rounded() (combine with |). */
+    enum Corners : int { kTL = 1, kTR = 2, kBR = 4, kBL = 8, kAll = 15, kTop = 3, kBottom = 12, kLeft = 9, kRight = 6 };
+
+    /** @brief A filled rectangle with rounded corners (`r` < 0: the style's radius). */
+    void fill_rounded(const Box& b, const glm::vec4& c, float r = -1.0f, int corners = kAll) {
+        if (b.empty() || c.a <= 0.0f) return;
+        if (r < 0) r = style.rounding;
+        r = std::min({r, b.w * 0.5f, b.h * 0.5f});
+        if (r < 0.75f || corners == 0) { fill(b, c); return; }
+        fill({b.x + r, b.y, b.w - 2 * r, b.h}, c);
+        fill({b.x, b.y + r, r, b.h - 2 * r}, c);
+        fill({b.right() - r, b.y + r, r, b.h - 2 * r}, c);
+        const glm::vec2 cs[4] = {{b.x + r, b.y + r}, {b.right() - r, b.y + r}, {b.right() - r, b.bottom() - r}, {b.x + r, b.bottom() - r}};
+        const float start[4] = {3.14159265f, 4.71238898f, 0.0f, 1.57079633f};
+        for (int k = 0; k < 4; ++k) {
+            if (!(corners & (1 << k))) {
+                const float qx = (k == 0 || k == 3) ? b.x : b.right() - r;
+                const float qy = (k == 0 || k == 1) ? b.y : b.bottom() - r;
+                fill({qx, qy, r, r}, c);
+                continue;
+            }
+            const int n = std::clamp(static_cast<int>(r), 3, 8);
+            for (int i = 0; i < n; ++i) {
+                const float a0 = start[k] + 1.5707963f * i / n, a1 = start[k] + 1.5707963f * (i + 1) / n;
+                triangle(cs[k], cs[k] + glm::vec2(std::cos(a0), std::sin(a0)) * r, cs[k] + glm::vec2(std::cos(a1), std::sin(a1)) * r, c);
+            }
+        }
+    }
+    /** @brief A rounded-rect outline. */
+    void outline_rounded(const Box& b, const glm::vec4& c, float r = -1.0f, float t = 1.0f, int corners = kAll) {
+        if (b.empty() || c.a <= 0.0f) return;
+        if (r < 0) r = style.rounding;
+        r = std::min({r, b.w * 0.5f, b.h * 0.5f});
+        const float h = t * 0.5f;
+        const float rl = (corners & kTL) ? r : 0, rr = (corners & kTR) ? r : 0, br = (corners & kBR) ? r : 0, bl = (corners & kBL) ? r : 0;
+        line({b.x + rl, b.y + h}, {b.right() - rr, b.y + h}, c, t);
+        line({b.x + bl, b.bottom() - h}, {b.right() - br, b.bottom() - h}, c, t);
+        line({b.x + h, b.y + rl}, {b.x + h, b.bottom() - bl}, c, t);
+        line({b.right() - h, b.y + rr}, {b.right() - h, b.bottom() - br}, c, t);
+        auto corner = [&](glm::vec2 cc, float rad, float a) {
+            if (rad <= 0) return;
+            for (int i = 0; i < 4; ++i) {
+                const float a0 = a + 1.5707963f * i / 4, a1 = a + 1.5707963f * (i + 1) / 4;
+                line(cc + glm::vec2(std::cos(a0), std::sin(a0)) * (rad - h), cc + glm::vec2(std::cos(a1), std::sin(a1)) * (rad - h), c, t);
+            }
+        };
+        corner({b.x + rl, b.y + rl}, rl, 3.14159265f);
+        corner({b.right() - rr, b.y + rr}, rr, 4.71238898f);
+        corner({b.right() - br, b.bottom() - br}, br, 0.0f);
+        corner({b.x + bl, b.bottom() - bl}, bl, 1.57079633f);
+    }
+    /** @brief A soft drop shadow under a floating box (menus, tooltips). */
+    void shadow(const Box& b, float r = 6.0f) {
+        for (int i = 3; i >= 1; --i) {
+            const float g = i * 2.0f;
+            fill_rounded({b.x - g + 2, b.y - g + 4, b.w + g * 2 - 4, b.h + g * 2 - 4}, glm::vec4(0, 0, 0, 0.09f), r + g);
+        }
+    }
+    /** @brief Draws an icon (see imm_icons.h) fitted into `b`. */
+    void icon(Icon i, const Box& b, const glm::vec4& c) { draw_icon(*this, i, b, c); }
+
     void gradient(const Box& b, const glm::vec4& tl, const glm::vec4& tr, const glm::vec4& br, const glm::vec4& bl) {
         dl_->set_texture(dl_->default_texture());
         dl_->add_quad_gradient(flip_(b.pos()), flip_({b.right(), b.y}), flip_({b.right(), b.bottom()}),
@@ -718,7 +865,7 @@ public:
                     const float ny = std::clamp((in_.mouse.y - scroll_grab_offset_ - track.y) / (track.h - grab_h), 0.0f, 1.0f);
                     *l.scroll_y = ny * max_scroll;
                 }
-                fill(grab, active_id_ == sid || hovered ? style.header_hover : style.scroll_grab);
+                fill_rounded(grab, active_id_ == sid || hovered ? style.text_dim : style.scroll_grab, grab.w * 0.5f);
             }
             *l.scroll_y = std::clamp(*l.scroll_y, 0.0f, max_scroll);
         }
@@ -730,9 +877,9 @@ public:
         fill(rect, style.panel_bg);
         Box body = rect;
         if (!title.empty()) {
-            Box bar{rect.x, rect.y, rect.w, style.row_height};
+            Box bar{rect.x, rect.y, rect.w, style.row_height + 3};
             fill(bar, style.header);
-            text_in(bar, title, style.text_dim);
+            text_in(bar, title, style.text);
             body = {rect.x, rect.y + bar.h, rect.w, rect.h - bar.h};
         }
         begin_region(id, body, true);
@@ -782,17 +929,76 @@ public:
     }
 
     /** @brief A push button. @return True when clicked. */
-    bool button(std::string_view lbl, float w = -1.0f, bool enabled = true) {
+    bool button(std::string_view lbl, float w = -1.0f, bool enabled = true, Icon ic = Icon::None) {
         const Id id = get_id(lbl);
         const std::string_view shown = label_text(lbl);
-        if (w < 0) w = text_width(shown) + style.padding * 3;
+        const float iw = ic != Icon::None ? style.row_height - 4 : 0.0f;
+        if (w < 0) w = text_width(shown) + style.padding * 3 + iw;
         Box b = next_box(style.row_height, w);
         bool hovered = false, held = false;
         const bool clicked = enabled && behavior_(id, b, hovered, held);
-        fill(b, !enabled ? style.button_active : held ? style.button_active : hovered ? style.button_hover : style.button);
-        text_in(b, shown, enabled ? style.text : style.text_disabled, 0.0f, true);
+        fill_rounded(b, !enabled ? style.panel_alt : held ? style.button_active : hovered ? style.button_hover : style.button);
+        const glm::vec4 tc = enabled ? style.text : style.text_disabled;
+        if (ic != Icon::None) {
+            const float tw = text_width(shown);
+            const float total = iw + (tw > 0 ? tw + 4 : 0);
+            const float x0 = b.x + (b.w - total) * 0.5f;
+            icon(ic, {x0, b.y + 2, iw, b.h - 4}, tc);
+            if (!shown.empty()) text_in({x0 + iw + 4, b.y, b.w, b.h}, shown, tc, 0.0f);
+        } else {
+            text_in(b, shown, tc, 0.0f, true);
+        }
         set_last_(id, b, hovered);
         return clicked;
+    }
+
+    /**
+     * @brief A square icon button, Blender-style: transparent until hovered, filled when `on`.
+     * @param tip      Tooltip ("Title\nDescription"); shown after a short hover.
+     * @param corners  fill_rounded() corner flags, for joined button groups.
+     * @param box      Explicit placement; default: the next layout box.
+     */
+    bool icon_button(std::string_view id_str, Icon ic, std::string_view tip = {}, bool on = false, float size = 0.0f,
+                     int corners = kAll, std::optional<Box> box = std::nullopt, bool framed = false) {
+        const Id id = get_id(id_str);
+        if (size <= 0) size = style.row_height;
+        Box b = box ? *box : next_box(size, size);
+        bool hovered = false, held = false;
+        const bool clicked = behavior_(id, b, hovered, held);
+        if (on) fill_rounded(b, held ? with_alpha(style.accent, 0.8f) : style.accent, -1, corners);
+        else if (framed) fill_rounded(b, held ? style.button_active : hovered ? style.button_hover : style.button, -1, corners);
+        else if (hovered) fill_rounded(b, held ? style.button_active : with_alpha(glm::vec4(1), 0.10f), -1, corners);
+        const float pad = std::max(2.0f, b.h * 0.16f);
+        icon(ic, b.shrink(pad), style.text);
+        set_last_(id, b, hovered);
+        if (!tip.empty()) tooltip(tip);
+        return clicked;
+    }
+
+    /**
+     * @brief Blender's joined button row (shading modes, select modes): icons share one
+     *        rounded frame, the active one highlighted. @return True when the choice changed.
+     */
+    bool icon_group(std::string_view id_str, const std::vector<std::pair<Icon, std::string>>& items, int* active,
+                    std::optional<Box> where = std::nullopt, float size = 0.0f) {
+        if (size <= 0) size = style.row_height;
+        const float w = size * static_cast<float>(items.size());
+        const Box b = where ? *where : next_box(size, w);
+        push_id(id_str);
+        fill_rounded(b, style.button);
+        bool changed = false;
+        for (int i = 0; i < static_cast<int>(items.size()); ++i) {
+            int corners = 0;
+            if (i == 0) corners |= kLeft;
+            if (i + 1 == static_cast<int>(items.size())) corners |= kRight;
+            const Box cell{b.x + i * size, b.y, size, b.h};
+            if (icon_button(items[i].second, items[i].first, items[i].second, *active == i, size, corners, cell)) {
+                if (*active != i) { *active = i; changed = true; }
+            }
+            if (i > 0) fill({cell.x, cell.y + 3, 1, cell.h - 6}, with_alpha(glm::vec4(0, 0, 0, 1), 0.35f));
+        }
+        pop_id();
+        return changed;
     }
 
     /** @brief A toggle-able button (toolbar). @return True when clicked. */
@@ -803,8 +1009,8 @@ public:
         Box b = next_box(style.row_height, w);
         bool hovered = false, held = false;
         const bool clicked = behavior_(id, b, hovered, held);
-        fill(b, on ? with_alpha(style.accent, held ? 0.6f : 0.8f) : held ? style.button_active : hovered ? style.button_hover : style.button);
-        text_in(b, shown, on ? glm::vec4(0.08f, 0.08f, 0.09f, 1.0f) : style.text, 0.0f, true);
+        fill_rounded(b, on ? style.accent : held ? style.button_active : hovered ? style.button_hover : style.button);
+        text_in(b, shown, style.text, 0.0f, true);
         set_last_(id, b, hovered);
         return clicked;
     }
@@ -819,23 +1025,43 @@ public:
         const bool clicked = behavior_(id, b, hovered, held);
         if (clicked) *value = !*value;
         Box cb{b.x, b.y + 4, box, box};
-        fill(cb, hovered ? style.field_hover : style.field);
-        outline(cb, style.border);
-        if (*value) fill(cb.shrink(3), style.accent);
+        draw_check_(cb, *value, hovered);
         if (!shown.empty()) text_in({cb.right() + style.spacing * 2, b.y, b.w, b.h}, shown, style.text, 0.0f);
         set_last_(id, b, hovered);
         return clicked;
     }
 
     /** @brief A full-width row that can be selected. @return True when clicked. */
-    bool selectable(std::string_view lbl, bool selected, float w = 0.0f) {
+    bool selectable(std::string_view lbl, bool selected, float w = 0.0f, Icon ic = Icon::None) {
         const Id id = get_id(lbl);
         Box b = next_box(style.row_height, w);
         bool hovered = false, held = false;
         const bool clicked = behavior_(id, b, hovered, held);
-        if (selected) fill(b, style.selection);
-        else if (hovered) fill(b, style.row_hover);
-        text_in(b, label_text(lbl), style.text);
+        if (selected) fill_rounded(b, style.selection, 3);
+        else if (hovered) fill_rounded(b, style.row_hover, 3);
+        float x = b.x;
+        if (ic != Icon::None) { icon(ic, {b.x + 3, b.y + 3, b.h - 6, b.h - 6}, style.text); x += b.h; }
+        text_in({x, b.y, b.right() - x, b.h}, label_text(lbl), style.text, ic != Icon::None ? 2.0f : -1.0f);
+        set_last_(id, b, hovered);
+        return clicked;
+    }
+
+    /**
+     * @brief A large tile (asset browser grid): an icon over a label. @return True when clicked.
+     */
+    bool tile(std::string_view id_str, Icon ic, std::string_view lbl, bool selected, float w, float h, const glm::vec4* tint = nullptr) {
+        const Id id = get_id(id_str);
+        Box b = next_box(h, w);
+        bool hovered = false, held = false;
+        const bool clicked = behavior_(id, b, hovered, held);
+        if (selected) fill_rounded(b, style.selection_dim, 4);
+        else if (hovered) fill_rounded(b, style.row_hover, 4);
+        const float is = std::min(b.w - 16, b.h - 26);
+        fill_rounded({b.x + (b.w - is) * 0.5f - 2, b.y + 4, is + 4, is + 4}, with_alpha(glm::vec4(0, 0, 0, 1), 0.18f), 4);
+        icon(ic, {b.x + (b.w - is) * 0.5f + is * 0.15f, b.y + 6 + is * 0.15f, is * 0.7f, is * 0.7f}, tint ? *tint : style.text);
+        std::string shown(label_text(lbl));
+        while (shown.size() > 3 && text_width(shown) > b.w - 6) shown = shown.substr(0, shown.size() - 4) + "..";
+        text_in({b.x, b.bottom() - 20, b.w, 18}, shown, selected ? style.text : style.text_dim, 0, true);
         set_last_(id, b, hovered);
         return clicked;
     }
@@ -843,8 +1069,8 @@ public:
     /** @brief A horizontal progress/value bar. */
     void progress(float t, std::string_view overlay = {}) {
         Box b = next_box(style.row_height - 4);
-        fill(b, style.field);
-        fill({b.x, b.y, b.w * std::clamp(t, 0.0f, 1.0f), b.h}, with_alpha(style.accent, 0.8f));
+        fill_rounded(b, style.field);
+        fill_rounded({b.x, b.y, b.w * std::clamp(t, 0.0f, 1.0f), b.h}, style.accent);
         if (!overlay.empty()) text_in(b, overlay, style.text, 0.0f, true);
     }
 
@@ -861,7 +1087,12 @@ public:
         Box row = next_box(h);
         const float lw = std::floor(row.w * style.label_ratio);
         const std::string_view shown = label_text(lbl);
-        if (!shown.empty()) text_in({row.x, row.y, lw - 4, style.row_height}, shown, style.text_dim, 0.0f);
+        if (!shown.empty()) {
+            // Blender right-aligns property labels against the widget column.
+            const float tw = text_width(shown);
+            const float x = std::max(row.x, row.x + lw - 8 - tw);
+            text_in({x, row.y, row.x + lw - 6 - x, style.row_height}, shown, style.text_dim, 0.0f);
+        }
         last_label_box_ = {row.x, row.y, lw, h};
         return shown.empty() && lbl.find("##") == 0 ? row : Box{row.x + lw, row.y, row.w - lw, h};
     }
@@ -904,6 +1135,43 @@ public:
         group_active_ = any_active;
         return changed;
     }
+    /**
+     * @brief Blender's stacked vector block (Location / Rotation / Scale): the label on the
+     *        first row's left column, one field per component below each other, joined into a
+     *        single rounded column with "X", "Y", "Z" inside each field.
+     */
+    bool drag_float_stacked(std::string_view lbl, float* v, int n, float speed = 0.01f, const char* fmt = "%.3f",
+                            const char* const* names = nullptr, float lo = -1e30f, float hi = 1e30f) {
+        static const char* xyz[] = {"X", "Y", "Z", "W"};
+        if (!names) names = xyz;
+        push_id(lbl);
+        bool changed = false, any_active = false, any_deact = false;
+        Box first{};
+        for (int i = 0; i < n; ++i) {
+            Box b = property_row(i == 0 ? lbl : std::string_view("##"), style.row_height - 1);
+            if (i == 0) first = b;
+            b.y -= i * (style.spacing - 1);   // join the rows into one block
+            int corners = 0;
+            if (i == 0) corners |= kTop;
+            if (i == n - 1) corners |= kBottom;
+            stacked_corners_ = corners;
+            stacked_label_ = names[i];
+            changed |= drag_float_in_(get_id(static_cast<int64_t>(i)), b, &v[i], speed, lo, hi, fmt, nullptr);
+            stacked_corners_ = -1;
+            stacked_label_ = nullptr;
+            any_active |= last_active();
+            any_deact |= last_item_.deactivated;
+            if (i + 1 < n) fill({b.x, b.bottom() - 0.5f, b.w, 1}, with_alpha(glm::vec4(0, 0, 0, 1), 0.3f));
+        }
+        layout_().cursor.y -= (n - 1) * (style.spacing - 1);
+        pop_id();
+        set_last_(get_id(lbl), first, first.contains(in_.mouse));
+        last_item_.deactivated = any_deact;
+        group_active_ = any_active;
+        spacing(3);
+        return changed;
+    }
+
     /** @brief True while any sub-field of the last drag_floatn() is being dragged/edited. */
     bool last_group_active() const { return group_active_; }
 
@@ -918,9 +1186,9 @@ public:
             const float nv = lo + (hi - lo) * t;
             if (nv != *v) { *v = nv; changed = true; }
         }
-        fill(b, hovered || held ? style.field_hover : style.field);
+        fill_rounded(b, hovered || held ? style.number_hover : style.number);
         const float t = hi > lo ? std::clamp((*v - lo) / (hi - lo), 0.0f, 1.0f) : 0.0f;
-        fill({b.x, b.y, b.w * t, b.h}, with_alpha(style.accent, held ? 0.75f : 0.55f));
+        if (t > 0) fill_rounded({b.x, b.y, std::max(b.h * 0.5f, b.w * t), b.h}, style.accent, -1, t > 0.98f ? kAll : kLeft);
         char buf[64];
         std::snprintf(buf, sizeof(buf), fmt, *v);
         text_in(b, buf, style.text, 0.0f, true);
@@ -936,9 +1204,7 @@ public:
         const bool clicked = behavior_(id, {b.x, b.y, b.h, b.h}, hovered, held);
         if (clicked) *v = !*v;
         Box cb{b.x, b.y + 4, b.h - 8, b.h - 8};
-        fill(cb, hovered ? style.field_hover : style.field);
-        outline(cb, style.border);
-        if (*v) fill(cb.shrink(3), style.accent);
+        draw_check_(cb, *v, hovered);
         set_last_(id, b, hovered);
         return clicked;
     }
@@ -988,8 +1254,8 @@ public:
         bool hovered = false, held = false;
         const Id sid = get_id("swatch");
         const bool clicked = behavior_(sid, swatch, hovered, held);
-        fill(swatch, glm::vec4(glm::clamp(glm::vec3(rgba[0], rgba[1], rgba[2]), 0.0f, 1.0f), 1.0f));
-        outline(swatch, hovered ? style.text_dim : style.border);
+        fill_rounded(swatch, glm::vec4(glm::clamp(glm::vec3(rgba[0], rgba[1], rgba[2]), 0.0f, 1.0f), 1.0f));
+        outline_rounded(swatch, hovered ? style.text_dim : style.border);
         if (clicked) open_popup("picker", glm::vec2(swatch.x, swatch.bottom() + 2));
         const int n = alpha ? 4 : 3;
         const float gap = 3.0f;
@@ -1018,25 +1284,42 @@ public:
      * @brief A full-width foldout header.
      * @return True while open (emit the section's contents).
      */
-    bool collapsing_header(std::string_view lbl, bool default_open = true, bool* remove_clicked = nullptr) {
+    bool collapsing_header(std::string_view lbl, bool default_open = true, bool* remove_clicked = nullptr,
+                           Icon ic = Icon::None, bool* enabled = nullptr) {
         const Id id = get_id(lbl);
         State& st = state_(id);
         if (!st.init) { st.init = true; st.b[0] = default_open; }
-        Box b = next_box(style.row_height);
+        Box b = next_box(style.row_height + 3);
         bool hovered = false, held = false;
         Box toggle = b;
+        float x = b.x + style.row_height;
+        if (enabled) x += style.row_height - 4;
+        if (ic != Icon::None) x += style.row_height - 2;
         if (remove_clicked) toggle.w -= style.row_height;
+        if (enabled) { toggle.x += style.row_height + style.row_height - 4; toggle.w -= style.row_height + style.row_height - 4; }
         if (behavior_(id, toggle, hovered, held)) st.b[0] = !st.b[0];
-        fill(b, hovered ? style.header_hover : style.header);
-        arrow({b.x + 2, b.y, style.row_height - 4, b.h}, st.b[0], style.text_dim);
-        text_in({b.x + style.row_height, b.y, b.w - style.row_height, b.h}, label_text(lbl), style.text, 0.0f);
+        // Blender sub-panel: rounded header, darker body when open.
+        fill_rounded(b, hovered ? style.header_hover : style.header, -1, st.b[0] ? kTop : kAll);
+        arrow({b.x + 3, b.y, style.row_height - 6, b.h}, st.b[0], style.text_dim);
+        float cx = b.x + style.row_height;
+        if (enabled) {
+            const Box cb{cx, b.y + (b.h - (style.row_height - 8)) * 0.5f, style.row_height - 8, style.row_height - 8};
+            bool eh = false, eheld = false;
+            if (behavior_(hash_int(id, 9), cb.shrink(-2), eh, eheld)) *enabled = !*enabled;
+            draw_check_(cb, *enabled, eh);
+            cx += style.row_height - 4;
+        }
+        if (ic != Icon::None) { icon(ic, {cx, b.y + 4, b.h - 8, b.h - 8}, style.text); cx += style.row_height - 2; }
+        text_in({cx, b.y, b.right() - cx, b.h}, label_text(lbl), style.text, 2.0f);
         set_last_(id, b, hovered);
         if (remove_clicked) {
-            Box x{b.right() - style.row_height, b.y, style.row_height, b.h};
+            Box xb{b.right() - style.row_height, b.y + 1, style.row_height - 2, b.h - 2};
             bool xh = false, xheld = false;
-            *remove_clicked = behavior_(hash_int(id, 3), x, xh, xheld);
-            text_in(x, "x", xh ? style.error : style.text_dim, 0.0f, true);
+            *remove_clicked = behavior_(hash_int(id, 3), xb, xh, xheld);
+            if (xh) fill_rounded(xb, with_alpha(glm::vec4(1), 0.1f));
+            icon(Icon::X, xb.shrink(5), xh ? style.text : style.text_dim);
         }
+        (void)x;
         return st.b[0];
     }
 
@@ -1045,7 +1328,8 @@ public:
      *        When the result is open, emit children then call tree_pop().
      */
     TreeNodeResult tree_node(Id id, std::string_view lbl, bool leaf, bool selected, bool default_open = false,
-                             const glm::vec4* color = nullptr) {
+                             const glm::vec4* color = nullptr, Icon ic = Icon::None, float reserve_right = 0.0f,
+                             bool active = false, const glm::vec4* icon_color = nullptr) {
         State& st = state_(id);
         if (!st.init) { st.init = true; st.b[0] = default_open; }
         Box b = next_box(style.row_height);
@@ -1055,15 +1339,23 @@ public:
         Box arrow_box{ax, b.y, style.row_height - 6, b.h};
         TreeNodeResult r;
         r.rect = full;
-        const bool hovered = hoverable_(full, id);
+        Box hit = full;
+        hit.w -= reserve_right;   // row buttons (eye, camera) at the right handle their own clicks
+        const bool hovered = hoverable_(hit, id);
         if (hovered) hot_id_ = id;
-        if (selected) fill(full, style.selection);
+        if (selected) fill(full, active ? style.selection : style.selection_dim);
         else if (hovered) fill(full, style.row_hover);
+        // Tree guide line from the parent's arrow down to this row (Blender's outliner).
+        if (layout_().indent > 0.5f) {
+            const float gx = b.x - style.indent * 0.5f - 1;
+            fill({gx, b.y - style.spacing, 1, b.h * 0.5f + style.spacing}, with_alpha(style.text_dim, 0.18f));
+        }
         if (!leaf) {
             arrow(arrow_box, st.b[0], style.text_dim);
             if (hovered && in_.pressed[0] && arrow_box.contains(in_.mouse)) st.b[0] = !st.b[0];
         }
         const bool on_arrow = !leaf && arrow_box.contains(in_.mouse);
+        (void)hit;
         if (hovered && in_.pressed[0] && !on_arrow) {
             active_id_ = id;
             press_pos_[0] = in_.mouse;
@@ -1074,7 +1366,12 @@ public:
             else { last_click_id_ = id; last_click_time_ = time_; }
         }
         if (hovered && in_.released[1]) r.right_clicked = true;
-        text_in({arrow_box.right(), b.y, full.right() - arrow_box.right(), b.h}, lbl, color ? *color : style.text, 2.0f);
+        float tx = arrow_box.right();
+        if (ic != Icon::None) {
+            icon(ic, {tx + 1, b.y + 3, b.h - 6, b.h - 6}, icon_color ? *icon_color : color ? *color : style.text);
+            tx += b.h;
+        }
+        text_in({tx, b.y, full.right() - reserve_right - tx, b.h}, lbl, color ? *color : style.text, 2.0f);
         set_last_(id, full, hovered);
         r.open = !leaf && st.b[0];
         if (r.open) indent();
@@ -1087,22 +1384,49 @@ public:
     /**
      * @brief A row of tabs across `b`. @return True when the active tab changed.
      */
-    bool tab_bar(std::string_view id_str, const Box& b, const std::vector<std::string>& tabs, int* active) {
+    bool tab_bar(std::string_view id_str, const Box& b, const std::vector<std::string>& tabs, int* active,
+                 const std::vector<Icon>* icons = nullptr, bool fill_bg = true) {
         push_id(id_str);
-        fill(b, style.panel_alt);
+        if (fill_bg) fill(b, style.panel_alt);
         float x = b.x + 4;
         bool changed = false;
         for (int i = 0; i < static_cast<int>(tabs.size()); ++i) {
-            const float w = text_width(tabs[i]) + style.padding * 4;
+            const Icon ic = icons && i < static_cast<int>(icons->size()) ? (*icons)[static_cast<size_t>(i)] : Icon::None;
+            const float iw = ic != Icon::None ? b.h - 8 : 0.0f;
+            const float w = text_width(tabs[i]) + style.padding * 3 + (iw > 0 ? iw + 4 : 0);
             Box t{x, b.y + 3, w, b.h - 3};
             const Id id = get_id(static_cast<int64_t>(i));
             bool hovered = false, held = false;
             if (behavior_(id, t, hovered, held) && *active != i) { *active = i; changed = true; }
             const bool on = *active == i;
-            fill(t, on ? style.panel_bg : hovered ? style.header_hover : style.header);
-            if (on) fill({t.x, t.y, t.w, 2}, style.accent);
-            text_in(t, tabs[i], on ? style.text : style.text_dim, 0.0f, true);
+            if (on || hovered) fill_rounded(t, on ? style.header : with_alpha(glm::vec4(1), 0.06f), -1, kTop);
+            float tx = t.x + style.padding * 1.5f;
+            if (ic != Icon::None) { icon(ic, {tx, t.y + 3, iw, t.h - 6}, on ? style.text : style.text_dim); tx += iw + 4; }
+            text_in({tx, t.y, t.right() - tx, t.h}, tabs[i], on ? style.text : style.text_dim, 0.0f);
             x += w + 2;
+        }
+        pop_id();
+        return changed;
+    }
+
+    /**
+     * @brief Blender's Properties editor tab strip: a vertical column of icon tabs.
+     * @return True when the active tab changed.
+     */
+    bool vertical_tabs(std::string_view id_str, const Box& b, const std::vector<std::pair<Icon, std::string>>& tabs, int* active,
+                       const std::vector<int>& group_breaks = {}) {
+        push_id(id_str);
+        fill(b, style.panel_alt);
+        const float s = std::min(b.w - 6, style.row_height + 5);
+        float y = b.y + 5;
+        bool changed = false;
+        for (int i = 0; i < static_cast<int>(tabs.size()); ++i) {
+            if (std::find(group_breaks.begin(), group_breaks.end(), i) != group_breaks.end()) y += 8;
+            const Box t{b.x + (b.w - s) * 0.5f, y, s, s};
+            if (icon_button(tabs[i].second, tabs[i].first, tabs[i].second, *active == i, s, kAll, t)) {
+                if (*active != i) { *active = i; changed = true; }
+            }
+            y += s + 2;
         }
         pop_id();
         return changed;
@@ -1183,10 +1507,11 @@ public:
         push_clip_raw_(Box{0, 0, size_.x, size_.y});
         fill(Box{0, 0, size_.x, size_.y}, glm::vec4(0, 0, 0, 0.45f));
         Box b{std::floor((size_.x - box_size.x) * 0.5f), std::floor((size_.y - box_size.y) * 0.5f), box_size.x, box_size.y};
-        fill(b, style.panel_bg);
-        outline(b, style.border);
-        Box bar{b.x, b.y, b.w, style.row_height};
-        fill(bar, style.header);
+        shadow(b, 8);
+        fill_rounded(b, style.panel_bg, 6);
+        outline_rounded(b, with_alpha(glm::vec4(1), 0.07f), 6);
+        Box bar{b.x, b.y, b.w, style.row_height + 2};
+        fill_rounded(bar, style.header, 6, kTop);
         text_in(bar, label_text(name), style.text);
         layer_stack_.push_back({id, z});
         layers_.push_back({id, b, z, true});
@@ -1213,9 +1538,11 @@ public:
     void close_modal() { close_current_popup(); }
 
     /** @brief A menu bar across `b`. Always returns true; pair with end_menubar(). */
-    bool begin_menubar(const Box& b) {
-        fill(b, style.panel_alt);
-        fill({b.x, b.bottom() - 1, b.w, 1}, style.border);
+    bool begin_menubar(const Box& b, bool background = true) {
+        if (background) {
+            fill(b, style.panel_alt);
+            fill({b.x, b.bottom() - 1, b.w, 1}, style.border);
+        }
         menubar_ = MenuBarState{};
         menubar_.active = true;
         menubar_.rect = b;
@@ -1228,7 +1555,7 @@ public:
      * @brief A menu: a header in a menu bar, or a submenu row inside another menu.
      * @return True while its popup is open; pair with end_menu() then.
      */
-    bool begin_menu(std::string_view lbl, bool enabled = true) {
+    bool begin_menu(std::string_view lbl, bool enabled = true, Icon ic = Icon::None) {
         const Id id = get_id(lbl);
         const std::string_view shown = label_text(lbl);
         if (menubar_.active && popup_draw_stack_.empty()) {
@@ -1247,7 +1574,7 @@ public:
                 open_popup_id_(id, {h.x, h.bottom()}, false, true);
             }
             const bool now_open = find_popup_(id) == 0;
-            fill(h, now_open ? style.header_hover : hovered ? style.header : glm::vec4(0));
+            fill_rounded(h.shrink(2), now_open ? style.header_hover : hovered ? with_alpha(glm::vec4(1), 0.08f) : glm::vec4(0));
             text_in(h, shown, enabled ? style.text : style.text_disabled, 0.0f, true);
             set_last_(id, h, hovered);
             if (!now_open) return false;
@@ -1265,8 +1592,9 @@ public:
             }
         }
         const bool open = find_popup_(id) >= 0;
-        if (open || hovered) fill(row, style.header_hover);
-        text_in(row, shown, enabled ? style.text : style.text_disabled);
+        if (open || hovered) fill_rounded(row, style.accent, 3);
+        if (ic != Icon::None) icon(ic, {row.x + 4, row.y + 3, row.h - 6, row.h - 6}, enabled ? style.text : style.text_disabled);
+        text_in({row.x + style.row_height + 2, row.y, row.w, row.h}, shown, enabled ? style.text : style.text_disabled, 0.0f);
         arrow({row.right() - row.h, row.y, row.h, row.h}, false, style.text_dim);
         set_last_(id, row, hovered);
         if (!open) return false;
@@ -1280,7 +1608,7 @@ public:
      * @param checked  Draws a check mark when non-null and true.
      */
     bool menu_item(std::string_view lbl, std::string_view shortcut_text = {}, const bool* checked = nullptr,
-                   bool enabled = true) {
+                   bool enabled = true, Icon ic = Icon::None) {
         const Id id = get_id(lbl);
         Box row = next_box(style.row_height);
         const bool hovered = enabled && hoverable_(row);
@@ -1288,10 +1616,11 @@ public:
             // Hovering a plain item closes any sibling submenu.
             const int depth = static_cast<int>(popup_draw_stack_.size());
             if (static_cast<int>(open_popups_.size()) > depth) open_popups_.resize(static_cast<size_t>(depth));
-            fill(row, style.header_hover);
+            fill_rounded(row, style.accent, 3);
         }
-        const float check_w = style.row_height;
-        if (checked && *checked) fill(Box{row.x + 7, row.y + 7, row.h - 14, row.h - 14}, style.accent);
+        const float check_w = style.row_height + 2;
+        if (checked) draw_check_({row.x + 5, row.y + 5, row.h - 10, row.h - 10}, *checked, false);
+        else if (ic != Icon::None) icon(ic, {row.x + 4, row.y + 3, row.h - 6, row.h - 6}, enabled ? style.text : style.text_disabled);
         text_in({row.x + check_w, row.y, row.w - check_w, row.h}, label_text(lbl), enabled ? style.text : style.text_disabled, 0.0f);
         if (!shortcut_text.empty()) {
             const float sw = text_width(shortcut_text);
@@ -1304,7 +1633,7 @@ public:
     }
     void menu_separator() {
         Box b = next_box(5);
-        fill({b.x, b.y + 2, b.w, 1}, style.border);
+        fill({b.x + 4, b.y + 2, b.w - 8, 1}, with_alpha(glm::vec4(1), 0.08f));
     }
 
     // -------------------------------------------------------------------------------
@@ -1550,21 +1879,32 @@ private:
             Box frame{pos.x, pos.y, p.size.x, p.size.y};
             dl_->set_z_order(z);
             push_clip_raw_(Box{0, 0, size_.x, size_.y});
-            fill(frame, style.popup_bg);
-            outline(frame, style.border);
+            shadow(frame, style.rounding + 2);
+            fill_rounded(frame, style.popup_bg, style.rounding + 1);
+            outline_rounded(frame, with_alpha(glm::vec4(1), 0.07f), style.rounding + 1);
             pop_clip_();
             layers_.push_back({id, frame, z, false});
         }
         dl_->set_z_order(layer_stack_.back().z == 0 ? 0 : layer_stack_.back().z + 1);
     }
 
+    /** @brief Blender's checkbox: rounded box, blue with a white tick when on. */
+    void draw_check_(const Box& cb, bool on, bool hovered) {
+        if (on) {
+            fill_rounded(cb, style.accent, 3);
+            icon(Icon::Check, cb.shrink(1), glm::vec4(1));
+        } else {
+            fill_rounded(cb, hovered ? style.button_hover : style.button, 3);
+        }
+    }
+
     bool combo_in_(Id id, const Box& b, int* index, const std::vector<std::string>& items) {
         bool hovered = false, held = false;
         const bool clicked = behavior_(id, b, hovered, held);
-        fill(b, hovered ? style.field_hover : style.field);
+        fill_rounded(b, hovered ? style.button_hover : style.button);
         const std::string cur = (*index >= 0 && *index < static_cast<int>(items.size())) ? items[*index] : std::string("-");
         text_in({b.x, b.y, b.w - b.h, b.h}, cur, style.text);
-        arrow({b.right() - b.h, b.y, b.h, b.h}, true, style.text_dim);
+        arrow({b.right() - b.h + 3, b.y + 3, b.h - 6, b.h - 6}, true, style.text_dim);
         const Id pid = hash_int(id, 11);
         if (clicked) {
             if (find_popup_(pid) >= 0) open_popups_.resize(static_cast<size_t>(find_popup_(pid)));
@@ -1646,17 +1986,37 @@ private:
             active_id_ = 0;
             deactivated = drag_moved_;
             if (!drag_moved_ && hovered) {
-                // A click without a drag: type a value.
-                char buf[64];
-                std::snprintf(buf, sizeof(buf), fmt, *v);
-                begin_text_edit_(id, buf, true);
+                if (b.w > 60 && in_.mouse.x < b.x + 14) {          // left arrow: step down
+                    *v = std::clamp(*v - speed * 10.0f, lo, hi); changed = true; deactivated = true;
+                } else if (b.w > 60 && in_.mouse.x > b.right() - 14) {   // right arrow: step up
+                    *v = std::clamp(*v + speed * 10.0f, lo, hi); changed = true; deactivated = true;
+                } else {
+                    // A click without a drag: type a value.
+                    char buf[64];
+                    std::snprintf(buf, sizeof(buf), fmt, *v);
+                    begin_text_edit_(id, buf, true);
+                }
             }
         }
-        fill(b, held ? style.field_hover : hovered ? style.field_hover : style.field);
-        if (tick) fill({b.x, b.y + 2, 2, b.h - 4}, *tick);
+        const int corners = stacked_corners_ >= 0 ? stacked_corners_ : kAll;
+        fill_rounded(b, held || hovered ? style.number_hover : style.number, -1, corners);
+        if (tick) fill({b.x + 1, b.y + 3, 2, b.h - 6}, *tick);
         char buf[64];
         std::snprintf(buf, sizeof(buf), fmt, *v);
-        text_in(b, buf, style.text, tick ? 6.0f : style.padding);
+        if (stacked_label_) {
+            // Stacked vector rows: "X" at the left, value right-of-centre (Blender's Location block).
+            text_in({b.x + 8, b.y, 20, b.h}, stacked_label_, style.text_dim, 0.0f);
+            text_in(b, buf, style.text, 0, true);
+        } else {
+            text_in(b, buf, style.text, 0, true);
+        }
+        // Blender's step arrows at both ends while hovered: click to nudge.
+        if (hovered && !held && b.w > 60) {
+            const glm::vec4 ac = with_alpha(style.text, 0.6f);
+            const float m = b.y + b.h * 0.5f;
+            triangle({b.x + 9, m - 4}, {b.x + 9, m + 4}, {b.x + 5, m}, ac);
+            triangle({b.right() - 9, m - 4}, {b.right() - 9, m + 4}, {b.right() - 5, m}, ac);
+        }
         set_last_(id, b, hovered);
         last_item_.deactivated = deactivated || pending_changed;
         return changed || pending_changed;
@@ -1691,12 +2051,13 @@ private:
 
         if (!editing) {
             if (pending_commit_.id == id) {
+                // (value applied below)
                 committed = *value != pending_commit_.value;
                 *value = pending_commit_.value;
                 pending_commit_ = {};
             }
             if (hovered && in_.pressed[0]) begin_text_edit_(id, *value, false);
-            fill(b, hovered ? style.field_hover : style.field);
+            fill_rounded(b, hovered ? style.field_hover : style.field);
             text_in(b, *value, style.text);
             set_last_(id, b, hovered);
             if (committed) last_item_.deactivated = true;
@@ -1762,8 +2123,8 @@ private:
         keyboard_consumed_ = true;
 
         // Draw.
-        fill(b, style.field);
-        outline(b, style.accent);
+        fill_rounded(b, style.field);
+        outline_rounded(b, style.accent);
         const float pad = style.padding;
         const float caret_x = text.width(std::string_view(te.buffer).substr(0, te.caret), style.font_size);
         const float inner_w = b.w - pad * 2;
@@ -1893,11 +2254,15 @@ private:
 
     TextEdit text_edit_;
     struct PendingCommit { Id id = 0; std::string value; } pending_commit_;
+    int stacked_corners_ = -1;
+    const char* stacked_label_ = nullptr;
     std::unordered_map<Id, State> states_;
 };
 
 }  // namespace imm
 }  // namespace ui
 }  // namespace coopa
+
+#include <uicoopa/immediate/imm_icons.h>
 
 #endif  // UICOOPA_IMMEDIATE_IMM_H
