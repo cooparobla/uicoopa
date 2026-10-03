@@ -17,6 +17,7 @@
 #include <coopa/input/keys.h>
 #include <uicoopa/layout/rect.h>
 #include <glm/glm.hpp>
+#include <array>
 #include <vector>
 
 namespace coopa {
@@ -42,8 +43,11 @@ public:
      * @param canvas_root_rect The canvas's root_rect(), used to flip the cursor's Y axis.
      * @param scale_factor    The canvas's scale_factor(), converting window pixels to canvas pixels.
      */
-    void update(const coopa::input::Input& input, const Rect& canvas_root_rect, float scale_factor) {
-        glm::vec2 wpos = input.cursor_position();
+    void update(const coopa::input::Input& input, const Rect& canvas_root_rect, float scale_factor,
+                float cursor_scale = 1.0f) {
+        // cursor_scale converts the platform's cursor units into the framebuffer pixels the
+        // canvas was sized from (2 on a Retina display, where GLFW reports screen points).
+        glm::vec2 wpos = input.cursor_position() * cursor_scale;
         float sf = scale_factor > 0.0f ? scale_factor : 1.0f;
 
         // Window coordinates are +Y down from the top-left; canvas space is +Y up from the
@@ -84,7 +88,25 @@ public:
         scroll_ = input.scroll_delta();
         char_input_ = input.chars();
         key_events_ = input.key_events();
+        mods_ = input.mods();
+        keys_down_.fill(false);
+        for (std::size_t k = 0; k < keys_down_.size(); ++k) {
+            keys_down_[k] = input.key_down(static_cast<coopa::input::Key>(k));
+        }
+        source_ = &input;
     }
+
+    /** @brief Modifier keys held as of the last update (from the last key/button event). */
+    coopa::input::Mods mods() const { return mods_; }
+
+    /** @brief Level-triggered key state as of the last update. */
+    bool is_key_down(coopa::input::Key key) const {
+        const auto i = static_cast<std::size_t>(key);
+        return key != coopa::input::Key::Unknown && i < keys_down_.size() && keys_down_[i];
+    }
+
+    /** @brief The Input this was last updated from (clipboard access), or null. */
+    const coopa::input::Input* source() const { return source_; }
 
     const glm::vec2& position() const { return position_; }
     const glm::vec2& delta() const { return delta_; }
@@ -112,6 +134,9 @@ private:
     bool released_this_frame_[kMaxButtons] = {};
     std::vector<unsigned int> char_input_;
     std::vector<coopa::input::KeyEvent> key_events_;
+    coopa::input::Mods mods_ = coopa::input::Mods::None;
+    std::array<bool, static_cast<std::size_t>(coopa::input::Key::Count)> keys_down_{};
+    const coopa::input::Input* source_ = nullptr;
 };
 
 }  // namespace ui

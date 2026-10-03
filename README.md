@@ -965,3 +965,11 @@ Doxygen-style comments throughout `uicoopa/` are formatted for `coopadocs`
 coopadocs build
 coopadocs show
 ```
+
+## Immediate-mode layer (`uicoopa/immediate/`)
+
+For tool UIs whose structure changes with their data (editors, debug panels), `imm.h`
+provides an immediate-mode API -- menus, popups, modals, trees, property rows, text
+fields, colour picker, splitters, drag & drop -- drawn through the same `DrawList`, `Font`
+and `UiPass` as the retained widgets. `imm_canvas.h`'s `ImmediateCanvas` hosts a frame
+inside a screen-space `CanvasComponent`. The toyengine editor is built entirely on it.

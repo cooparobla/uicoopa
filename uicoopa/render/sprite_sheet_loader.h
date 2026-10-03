@@ -32,6 +32,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <coopa/yaml/document.h>
 
 namespace coopa {
 namespace ui {
@@ -71,9 +72,8 @@ public:
         std::string ext = resolved.extension().string();
         std::string image_path;
 
-        if (ext == ".yaml" || ext == ".yml") {
-            std::vector<std::byte> bytes = coopa::asset::AssetSource::read_bytes(ctx.resolved_path);
-            std::string yaml_text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        if (coopa::yaml::is_document_ext(resolved)) {
+            std::string yaml_text = coopa::yaml::read_text(resolved);
             result->desc = parse_sprite_sheet_desc(yaml_text);
             image_path = (resolved.parent_path() / result->desc.image).string();
             if (ctx.source) image_path = ctx.source->resolve(image_path);

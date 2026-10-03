@@ -276,8 +276,8 @@ public:
      * space — correct even when canvases have different scale factors, unlike
      * sharing one UiInput across canvases would be.
      */
-    void set_input(const coopa::input::Input& input) {
-        input_.update(input, root_rect_, scale_factor_);
+    void set_input(const coopa::input::Input& input, float cursor_scale = 1.0f) {
+        input_.update(input, root_rect_, scale_factor_, cursor_scale);
     }
 
     /** @brief This canvas's own per-frame pointer/keyboard state, as of the last set_input(). */

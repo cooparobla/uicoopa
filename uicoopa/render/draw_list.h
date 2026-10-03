@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <vector>
 #include <array>
+#include <cmath>
 #include <cstdint>
 
 namespace coopa {
@@ -184,6 +185,51 @@ public:
         indices_.push_back(base + 0); indices_.push_back(base + 1); indices_.push_back(base + 2);
         indices_.push_back(base + 0); indices_.push_back(base + 2); indices_.push_back(base + 3);
         batches_.back().index_count += 6;
+    }
+
+    /**
+     * @brief Appends one solid triangle (any winding -- UI pipelines don't cull).
+     *
+     * Samples the current texture at a single UV, so with the default 1x1 white texture
+     * bound (the state set_default_texture() leaves) it is a flat-coloured triangle --
+     * what tree-expander arrows, dropdown carets and colour-wheel cursors need.
+     */
+    void add_triangle(const glm::vec2& a, const glm::vec2& b, const glm::vec2& c, uint32_t color,
+                      const glm::vec2& uv = glm::vec2(0.5f)) {
+        ensure_batch_();
+        uint32_t base = static_cast<uint32_t>(vertices_.size());
+        vertices_.push_back({ a.x, a.y, uv.x, uv.y, color });
+        vertices_.push_back({ b.x, b.y, uv.x, uv.y, color });
+        vertices_.push_back({ c.x, c.y, uv.x, uv.y, color });
+        indices_.push_back(base + 0); indices_.push_back(base + 1); indices_.push_back(base + 2);
+        batches_.back().index_count += 3;
+    }
+
+    /**
+     * @brief Appends a quad with four independently placed and coloured corners (a, b, c, d in
+     *        order around the quad) -- gradients (colour pickers) and rotated rectangles.
+     */
+    void add_quad_gradient(const glm::vec2& a, const glm::vec2& b, const glm::vec2& c, const glm::vec2& d,
+                           uint32_t ca, uint32_t cb, uint32_t cc, uint32_t cd,
+                           const glm::vec2& uv = glm::vec2(0.5f)) {
+        ensure_batch_();
+        uint32_t base = static_cast<uint32_t>(vertices_.size());
+        vertices_.push_back({ a.x, a.y, uv.x, uv.y, ca });
+        vertices_.push_back({ b.x, b.y, uv.x, uv.y, cb });
+        vertices_.push_back({ c.x, c.y, uv.x, uv.y, cc });
+        vertices_.push_back({ d.x, d.y, uv.x, uv.y, cd });
+        indices_.push_back(base + 0); indices_.push_back(base + 1); indices_.push_back(base + 2);
+        indices_.push_back(base + 0); indices_.push_back(base + 2); indices_.push_back(base + 3);
+        batches_.back().index_count += 6;
+    }
+
+    /** @brief Appends a solid line segment `thickness` canvas pixels wide (an oriented quad). */
+    void add_line(const glm::vec2& a, const glm::vec2& b, float thickness, uint32_t color) {
+        glm::vec2 d = b - a;
+        float len = std::sqrt(d.x * d.x + d.y * d.y);
+        if (len < 1e-6f) return;
+        glm::vec2 n = glm::vec2(-d.y, d.x) * (0.5f * thickness / len);
+        add_quad_gradient(a + n, b + n, b - n, a - n, color, color, color, color);
     }
 
     /**

@@ -16,6 +16,7 @@
 #define UICOOPA_AUDIO_SOUND_LIBRARY_H
 
 #include <fkYAML/node.hpp>
+#include <coopa/yaml/document.h>
 
 #include <fstream>
 #include <iostream>
@@ -71,16 +72,14 @@ public:
      */
     bool load_manifest(const std::string& manifest_name = "sounds.yaml") {
         const std::string manifest_path = search_dir_ + "/" + manifest_name;
-        std::ifstream file(manifest_path);
-        if (!file) {
+        const std::filesystem::path resolved = coopa::yaml::resolve_variant(manifest_path);
+        if (!std::filesystem::exists(resolved)) {
             std::cerr << "[uicoopa] SoundLibrary: failed to open manifest '" << manifest_path << "'\n";
             return false;
         }
-        std::stringstream buf;
-        buf << file.rdbuf();
 
         try {
-            fkyaml::node root = fkyaml::node::deserialize(buf.str());
+            fkyaml::node root = coopa::yaml::load_document(resolved);
             if (!root.contains("sounds")) return true; // empty manifest is not an error
             for (const auto& entry : root.at("sounds")) {
                 SoundDef def;

@@ -20,6 +20,7 @@
 #include <uicoopa/builder/ui_theme.h>
 #include <uicoopa/text/font_defaults.h>
 #include <fkYAML/node.hpp>
+#include <coopa/yaml/document.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -364,16 +365,17 @@ inline void resolve_theme_fonts(UITheme& theme, const std::string& theme_dir) {
  * @throws std::runtime_error if the file can't be opened or fails to parse.
  */
 inline UITheme load_theme_file(const std::string& path) {
-    std::ifstream file(path);
-    if (!file) {
+    const std::filesystem::path resolved = coopa::yaml::resolve_variant(path);
+    std::string text;
+    try {
+        text = coopa::yaml::read_text(resolved);
+    } catch (const std::exception&) {
         throw std::runtime_error("Failed to open theme file: " + path);
     }
-    std::stringstream buf;
-    buf << file.rdbuf();
 
     UITheme theme = UITheme::builtin_dark();
     try {
-        fkyaml::node root = fkyaml::node::deserialize(buf.str());
+        fkyaml::node root = fkyaml::node::deserialize(text);
         detail::parse_theme(root, theme);
     } catch (const std::exception& e) {
         throw std::runtime_error("Failed to parse theme file '" + path + "': " + e.what());
