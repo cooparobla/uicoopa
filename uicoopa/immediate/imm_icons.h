@@ -274,6 +274,35 @@ inline void draw_icon(Context& ctx, Icon icon, const Box& b, const glm::vec4& co
         case Icon::ObjectMode:
             d.rect(4, 4, 8, 8, kOrange); d.box(4, 4, 8, 8, 0.8f);
             break;
+        case Icon::LoopCut:   // a box cut by a yellow loop
+            d.box(2, 3, 12, 10, 0.9f); d.l(2, 3, 5, 1, 0.8f); d.l(14, 3, 11, 1, 0.8f); d.l(5, 1, 11, 1, 0.8f);
+            d.l(8, 3, 8, 13, kYellow, 1.2f); d.l(8, 3, 11, 1, kYellow, 1.0f);
+            break;
+        case Icon::SculptMode:   // a brush stroke over a bump
+            d.arc(8, 13, 6, 3.14159f, 6.28318f, 1.0f); d.l(2, 13, 14, 13, 0.8f);
+            d.l(9, 9, 14, 2, 1.4f); d.circle(8.6f, 9.6f, 1.6f, kOrange);
+            break;
+        case Icon::LocalView:   // a cube in a frame (Blender's Local View)
+            d.box(5, 5, 6, 6, 0.9f);
+            d.l(1, 4, 1, 1); d.l(1, 1, 4, 1); d.l(12, 1, 15, 1); d.l(15, 1, 15, 4);
+            d.l(1, 12, 1, 15); d.l(1, 15, 4, 15); d.l(12, 15, 15, 15); d.l(15, 15, 15, 12);
+            break;
+        case Icon::BrushDraw:   // a raised stroke
+            d.arc(8, 14, 6, 3.4f, 6.0f, 1.2f); d.l(1, 14, 15, 14, 0.7f); d.l(8, 3, 8, 6, kBlue, 1.0f); d.arrow_head(8, 2.5f, 0, -1, 2.2f);
+            break;
+        case Icon::BrushSmooth:   // a wave flattening out
+            d.arc(4.5f, 9, 2.5f, 3.14159f, 6.28318f, 1.0f); d.arc(9.5f, 9, 2.5f, 0.0f, 3.14159f, 1.0f); d.l(12, 9, 15, 9);
+            d.l(1, 13, 15, 13, 0.7f);
+            break;
+        case Icon::BrushInflate:   // a circle with outward arrows
+            d.ring(8, 8, 3.5f); d.l(8, 3, 8, 1); d.l(8, 13, 8, 15); d.l(3, 8, 1, 8); d.l(13, 8, 15, 8);
+            break;
+        case Icon::BrushGrab:   // a hand-ish pinch: arrow pulling the surface
+            d.arc(8, 15, 7, 3.6f, 5.8f, 1.0f); d.l(8, 8, 12, 3, 1.0f); d.arrow_head(12.5f, 2.5f, 0.7f, -0.7f, 2.4f); d.circle(8, 8.5f, 1.3f, kOrange);
+            break;
+        case Icon::BrushFlatten:   // a plane pressing down
+            d.l(2, 6, 14, 6, 1.4f); d.l(8, 2, 8, 5); d.arrow_head(8, 5.5f, 0, 1, 2.0f); d.arc(8, 15, 6, 3.4f, 6.0f, 0.8f);
+            break;
         case Icon::EditMode:
             d.box(3, 3, 10, 10, 0.8f); d.circle(3, 3, 1.6f); d.circle(13, 3, 1.6f); d.circle(3, 13, 1.6f); d.circle(13, 13, 1.6f);
             break;
@@ -382,6 +411,14 @@ inline void draw_icon(Context& ctx, Icon icon, const Box& b, const glm::vec4& co
         case Icon::Undo: d.arc(8, 9, 5, -3.1416f, 0.9f, 1.2f); d.arrow_head(3, 9, 0, 1, 2.6f); break;
         case Icon::Redo: d.arc(8, 9, 5, 2.24f, 6.28f, 1.2f); d.arrow_head(13, 9, 0, 1, 2.6f); break;
         case Icon::Restart: d.arc(8, 8, 5, 0.5f, 5.6f, 1.2f); d.arrow_head(12.5f, 5.0f, 0.4f, -1.0f, 2.6f); break;
+        case Icon::Palette:   // painter's palette: a ring with paint dabs and a thumb hole
+            d.arc(8, 8, 6.2f, 0.9f, 6.0f, 1.1f);
+            d.l(8 + 6.2f * std::cos(0.9f), 8 + 6.2f * std::sin(0.9f), 9.5f, 11.0f, 1.1f);
+            d.circle(5.0f, 6.0f, 1.3f, glm::vec4(0.95f, 0.36f, 0.33f, 1));
+            d.circle(8.5f, 4.3f, 1.3f, glm::vec4(0.98f, 0.80f, 0.30f, 1));
+            d.circle(11.6f, 6.4f, 1.3f, glm::vec4(0.36f, 0.66f, 0.98f, 1));
+            d.circle(5.2f, 10.0f, 1.3f, glm::vec4(0.55f, 0.86f, 0.35f, 1));
+            break;
         case Icon::Info: d.ring(8, 8, 6.2f); d.rect(7.2f, 7, 1.6f, 5); d.circle(8, 4.7f, 1.0f); break;
         case Icon::Warning:
             d.tri(8, 1.5f, 1, 14.5f, 15, 14.5f, kYellow); d.rect(7.2f, 5.5f, 1.6f, 5, glm::vec4(0.1f, 0.1f, 0.1f, 1));

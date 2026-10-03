@@ -158,9 +158,11 @@ enum class Icon : int {
     // visibility
     Eye, EyeClosed, Monitor, MonitorOff, Check, Lock,
     // tools
-    SelectBox, Cursor, Move, Rotate, Scale, Transform, Extrude, Inset, Bevel, Knife,
+    SelectBox, Cursor, Move, Rotate, Scale, Transform, Extrude, Inset, Bevel, Knife, LoopCut,
     // modes
-    Vertex, Edge, Face, ObjectMode, EditMode,
+    Vertex, Edge, Face, ObjectMode, EditMode, SculptMode, LocalView,
+    // sculpt brushes
+    BrushDraw, BrushSmooth, BrushInflate, BrushGrab, BrushFlatten,
     // shading / overlays / view
     ShadeWire, ShadeSolid, ShadeMaterial, ShadeRendered, Overlays, XRay, Grid, Snap, Pivot, Orientation, ViewCamera, Ortho,
     Persp, Zoom, Hand,
@@ -169,7 +171,7 @@ enum class Icon : int {
     // files
     Folder, File, Image, Search, Filter, Asset, Console, Save, Package,
     // actions / status
-    Plus, X, Trash, Duplicate, Link, ArrowRight, ArrowDown, Dots, Undo, Redo, Restart, Info, Warning, Error,
+    Plus, X, Trash, Duplicate, Link, ArrowRight, ArrowDown, Dots, Undo, Redo, Restart, Info, Warning, Error, Palette,
     MouseLeft, MouseMiddle, MouseRight, Keyboard,
 };
 
@@ -183,6 +185,9 @@ void draw_icon(Context& ctx, Icon icon, const Box& b, const glm::vec4& color);
 
 /** @brief Sizes and colours for every imm widget. Defaults: Blender 2.8+'s dark theme. */
 struct Style {
+    // NOTE: the built-in values are only a fallback (a copy of the Blender Dark theme) for hosts
+    // that never load a theme; applications load their look from a theme file (imm_theme.h).
+    // Every field here is visited by visit_style() there -- add new fields to it too.
     float font_size   = 12.0f;
     float row_height  = 21.0f;
     float padding     = 6.0f;
@@ -222,6 +227,12 @@ struct Style {
     glm::vec4 object_active   {1.000f, 0.667f, 0.251f, 1.0f}; ///< #ffaa40 -- viewport active object
     glm::vec4 warning       {0.98f, 0.80f, 0.30f, 1.0f};
     glm::vec4 error         {0.95f, 0.38f, 0.35f, 1.0f};
+    glm::vec4 hover_tint     {1.0f, 1.0f, 1.0f, 0.10f};   ///< overlay on hovered flat widgets
+    glm::vec4 edge_highlight {1.0f, 1.0f, 1.0f, 0.08f};   ///< bevel line on frames, popups, menus
+    glm::vec4 separator      {0.0f, 0.0f, 0.0f, 0.35f};   ///< dividers inside grouped widgets
+    glm::vec4 shadow         {0.0f, 0.0f, 0.0f, 0.09f};   ///< one layer of a popup's soft shadow
+    glm::vec4 modal_dim      {0.0f, 0.0f, 0.0f, 0.45f};   ///< behind modal dialogs
+    glm::vec4 check_mark     {1.0f, 1.0f, 1.0f, 1.0f};
 
     /** @brief The defaults, derived from uicoopa's own dark theme where the roles overlap. */
     static Style from_theme(const UITheme& t) {
@@ -426,12 +437,28 @@ public:
 
         // Click outside every open (non-modal) popup closes the whole popup stack.
         closed_by_click_.clear();
+        if (any_pressed_()) suppress_reopen_.clear();
+        // Esc closes the open (non-modal) popups, as in Blender, and is consumed so no
+        // shortcut sees it the same frame.
+        if (!open_popups_.empty() && !open_popups_.back().modal && !text_edit_.active) {
+            auto esc = std::find_if(in_.keys.begin(), in_.keys.end(), [](const coopa::input::KeyEvent& e) {
+                return e.key == coopa::input::Key::Escape && e.action == coopa::input::KeyAction::Press;
+            });
+            if (esc != in_.keys.end()) {
+                while (!open_popups_.empty() && !open_popups_.back().modal) open_popups_.pop_back();
+                in_.keys.erase(esc);
+            }
+        }
         if (any_pressed_() && !open_popups_.empty()) {
             bool inside = false;
             for (const auto& l : layers_prev_) if (l.rect.contains(in_.mouse)) inside = true;
             if (!inside) {
                 while (!open_popups_.empty() && !open_popups_.back().modal) {
                     closed_by_click_.push_back(open_popups_.back().id);
+                    // A left click that closed a popup must not re-open it on release when it
+                    // landed on the popup's own opener (dropdown buttons fire on release):
+                    // clicking an open dropdown closes it. Right clicks may re-open context menus.
+                    if (in_.pressed[0]) suppress_reopen_.push_back(open_popups_.back().id);
                     open_popups_.pop_back();
                 }
             }
@@ -461,6 +488,7 @@ public:
     }
 
     void end_frame() {
+        if (!any_down_()) suppress_reopen_.clear();   // the closing click is over
         // Tooltip, top-most.
         if (!tooltip_.empty() && !drag_.active) {
             // Line 0 is the title (bright); further lines are description (dim) -- Blender's layout.
@@ -485,7 +513,7 @@ public:
             push_clip_raw_(Box{0, 0, size_.x, size_.y});
             shadow(b, style.rounding + 2);
             fill_rounded(b, style.popup_bg, style.rounding + 1);
-            outline_rounded(b, with_alpha(glm::vec4(1), 0.08f), style.rounding + 1);
+            outline_rounded(b, style.edge_highlight, style.rounding + 1);
             for (size_t i = 0; i < lines.size(); ++i) {
                 draw_text({b.x + pad, b.y + pad * 0.7f + lh * i}, lines[i], i == 0 ? style.text : style.text_dim);
             }
@@ -737,7 +765,7 @@ public:
     void shadow(const Box& b, float r = 6.0f) {
         for (int i = 3; i >= 1; --i) {
             const float g = i * 2.0f;
-            fill_rounded({b.x - g + 2, b.y - g + 4, b.w + g * 2 - 4, b.h + g * 2 - 4}, glm::vec4(0, 0, 0, 0.09f), r + g);
+            fill_rounded({b.x - g + 2, b.y - g + 4, b.w + g * 2 - 4, b.h + g * 2 - 4}, style.shadow, r + g);
         }
     }
     /** @brief Draws an icon (see imm_icons.h) fitted into `b`. */
@@ -830,9 +858,16 @@ public:
         l.scroll = scroll;
         if (scroll) {
             l.region.w = std::max(0.0f, l.region.w - style.scrollbar);
-            l.scroll_y = &state_(rid).f[0];
+            auto& st = state_(rid);
+            l.scroll_y = &st.f[0];
+            // Clamp BEFORE laying out, against last frame's content height (f[1]) and this
+            // frame's view: while a region is being resized, laying out with a stale offset
+            // and clamping only at end_region() snapped the content every frame (jitter).
+            const float max_scroll = std::max(0.0f, st.f[1] - (rect.h - style.padding));
+            *l.scroll_y = std::clamp(*l.scroll_y, 0.0f, max_scroll);
         }
-        l.cursor = {l.region.x, l.region.y - (l.scroll_y ? *l.scroll_y : 0.0f)};
+        // Whole pixels: a fractional offset (scrollbar drags) makes text shimmer.
+        l.cursor = {l.region.x, l.region.y - (l.scroll_y ? std::round(*l.scroll_y) : 0.0f)};
         l.content_top = l.cursor.y;
         l.content_bottom = l.cursor.y;
         layout_stack_.push_back(l);
@@ -847,11 +882,13 @@ public:
             const float content_h = (l.content_bottom - l.content_top) + style.padding;
             const float view_h = l.outer.h - style.padding;
             const float max_scroll = std::max(0.0f, content_h - view_h);
+            state_(l.id).f[1] = content_h;
             if (!wheel_consumed_ && in_.scroll.y != 0.0f && l.outer.contains(in_.mouse) && layer_ok_() &&
                 current_clip().contains(in_.mouse)) {
                 *l.scroll_y -= in_.scroll.y * style.row_height * 2.0f;
                 wheel_consumed_ = true;
             }
+            *l.scroll_y = std::clamp(*l.scroll_y, 0.0f, max_scroll);   // before the grab is placed
             // Scrollbar.
             if (max_scroll > 0.0f) {
                 const Box track{l.outer.right() - style.scrollbar, l.outer.y, style.scrollbar, l.outer.h};
@@ -967,7 +1004,7 @@ public:
         const bool clicked = behavior_(id, b, hovered, held);
         if (on) fill_rounded(b, held ? with_alpha(style.accent, 0.8f) : style.accent, -1, corners);
         else if (framed) fill_rounded(b, held ? style.button_active : hovered ? style.button_hover : style.button, -1, corners);
-        else if (hovered) fill_rounded(b, held ? style.button_active : with_alpha(glm::vec4(1), 0.10f), -1, corners);
+        else if (hovered) fill_rounded(b, held ? style.button_active : style.hover_tint, -1, corners);
         const float pad = std::max(2.0f, b.h * 0.16f);
         icon(ic, b.shrink(pad), style.text);
         set_last_(id, b, hovered);
@@ -995,7 +1032,7 @@ public:
             if (icon_button(items[i].second, items[i].first, items[i].second, *active == i, size, corners, cell)) {
                 if (*active != i) { *active = i; changed = true; }
             }
-            if (i > 0) fill({cell.x, cell.y + 3, 1, cell.h - 6}, with_alpha(glm::vec4(0, 0, 0, 1), 0.35f));
+            if (i > 0) fill({cell.x, cell.y + 3, 1, cell.h - 6}, style.separator);
         }
         pop_id();
         return changed;
@@ -1057,7 +1094,7 @@ public:
         if (selected) fill_rounded(b, style.selection_dim, 4);
         else if (hovered) fill_rounded(b, style.row_hover, 4);
         const float is = std::min(b.w - 16, b.h - 26);
-        fill_rounded({b.x + (b.w - is) * 0.5f - 2, b.y + 4, is + 4, is + 4}, with_alpha(glm::vec4(0, 0, 0, 1), 0.18f), 4);
+        fill_rounded({b.x + (b.w - is) * 0.5f - 2, b.y + 4, is + 4, is + 4}, with_alpha(style.separator, style.separator.a * 0.5f), 4);
         icon(ic, {b.x + (b.w - is) * 0.5f + is * 0.15f, b.y + 6 + is * 0.15f, is * 0.7f, is * 0.7f}, tint ? *tint : style.text);
         std::string shown(label_text(lbl));
         while (shown.size() > 3 && text_width(shown) > b.w - 6) shown = shown.substr(0, shown.size() - 4) + "..";
@@ -1161,7 +1198,7 @@ public:
             stacked_label_ = nullptr;
             any_active |= last_active();
             any_deact |= last_item_.deactivated;
-            if (i + 1 < n) fill({b.x, b.bottom() - 0.5f, b.w, 1}, with_alpha(glm::vec4(0, 0, 0, 1), 0.3f));
+            if (i + 1 < n) fill({b.x, b.bottom() - 0.5f, b.w, 1}, style.separator);
         }
         layout_().cursor.y -= (n - 1) * (style.spacing - 1);
         pop_id();
@@ -1220,6 +1257,14 @@ public:
     }
 
     /** @brief A text field in an explicit box (toolbars, search fields). */
+    /** @brief A number field at an explicit rect (headers, toolbars); drag or click to type. */
+    bool drag_float_box(std::string_view id_str, const Box& b, float* v, float speed = 0.01f, float lo = -1e30f, float hi = 1e30f,
+                        const char* fmt = "%.3f") {
+        const Id id = get_id(id_str);
+        const bool changed = drag_float_in_(id, b, v, speed, lo, hi, fmt, nullptr);
+        return changed;
+    }
+
     bool input_text_box(std::string_view id_str, const Box& b, std::string* value, std::string_view placeholder = {}) {
         const bool r = input_text_in_(get_id(id_str), b, value, true);
         if (value->empty() && !(text_edit_.active && text_edit_.id == get_id(id_str)) && !placeholder.empty()) {
@@ -1316,7 +1361,7 @@ public:
             Box xb{b.right() - style.row_height, b.y + 1, style.row_height - 2, b.h - 2};
             bool xh = false, xheld = false;
             *remove_clicked = behavior_(hash_int(id, 3), xb, xh, xheld);
-            if (xh) fill_rounded(xb, with_alpha(glm::vec4(1), 0.1f));
+            if (xh) fill_rounded(xb, style.hover_tint);
             icon(Icon::X, xb.shrink(5), xh ? style.text : style.text_dim);
         }
         (void)x;
@@ -1399,7 +1444,7 @@ public:
             bool hovered = false, held = false;
             if (behavior_(id, t, hovered, held) && *active != i) { *active = i; changed = true; }
             const bool on = *active == i;
-            if (on || hovered) fill_rounded(t, on ? style.header : with_alpha(glm::vec4(1), 0.06f), -1, kTop);
+            if (on || hovered) fill_rounded(t, on ? style.header : style.row_hover, -1, kTop);
             float tx = t.x + style.padding * 1.5f;
             if (ic != Icon::None) { icon(ic, {tx, t.y + 3, iw, t.h - 6}, on ? style.text : style.text_dim); tx += iw + 4; }
             text_in({tx, t.y, t.right() - tx, t.h}, tabs[i], on ? style.text : style.text_dim, 0.0f);
@@ -1505,11 +1550,11 @@ public:
         const int z = kPopupZ + idx * 10;
         dl_->set_z_order(z);
         push_clip_raw_(Box{0, 0, size_.x, size_.y});
-        fill(Box{0, 0, size_.x, size_.y}, glm::vec4(0, 0, 0, 0.45f));
+        fill(Box{0, 0, size_.x, size_.y}, style.modal_dim);
         Box b{std::floor((size_.x - box_size.x) * 0.5f), std::floor((size_.y - box_size.y) * 0.5f), box_size.x, box_size.y};
         shadow(b, 8);
         fill_rounded(b, style.panel_bg, 6);
-        outline_rounded(b, with_alpha(glm::vec4(1), 0.07f), 6);
+        outline_rounded(b, style.edge_highlight, 6);
         Box bar{b.x, b.y, b.w, style.row_height + 2};
         fill_rounded(bar, style.header, 6, kTop);
         text_in(bar, label_text(name), style.text);
@@ -1574,7 +1619,7 @@ public:
                 open_popup_id_(id, {h.x, h.bottom()}, false, true);
             }
             const bool now_open = find_popup_(id) == 0;
-            fill_rounded(h.shrink(2), now_open ? style.header_hover : hovered ? with_alpha(glm::vec4(1), 0.08f) : glm::vec4(0));
+            fill_rounded(h.shrink(2), now_open ? style.header_hover : hovered ? style.hover_tint : glm::vec4(0));
             text_in(h, shown, enabled ? style.text : style.text_disabled, 0.0f, true);
             set_last_(id, h, hovered);
             if (!now_open) return false;
@@ -1633,7 +1678,7 @@ public:
     }
     void menu_separator() {
         Box b = next_box(5);
-        fill({b.x + 4, b.y + 2, b.w - 8, 1}, with_alpha(glm::vec4(1), 0.08f));
+        fill({b.x + 4, b.y + 2, b.w - 8, 1}, style.edge_highlight);
     }
 
     // -------------------------------------------------------------------------------
@@ -1816,6 +1861,7 @@ private:
     }
 
     void open_popup_id_(Id id, glm::vec2 pos, bool modal, bool from_menubar) {
+        if (!modal && std::find(suppress_reopen_.begin(), suppress_reopen_.end(), id) != suppress_reopen_.end()) return;
         const int existing = find_popup_(id);
         if (existing >= 0) { open_popups_[static_cast<size_t>(existing)].pos = pos; return; }
         // Opened from inside popup N: nests at depth N+1; opened from the base layer: replaces
@@ -1881,7 +1927,7 @@ private:
             push_clip_raw_(Box{0, 0, size_.x, size_.y});
             shadow(frame, style.rounding + 2);
             fill_rounded(frame, style.popup_bg, style.rounding + 1);
-            outline_rounded(frame, with_alpha(glm::vec4(1), 0.07f), style.rounding + 1);
+            outline_rounded(frame, style.edge_highlight, style.rounding + 1);
             pop_clip_();
             layers_.push_back({id, frame, z, false});
         }
@@ -1892,7 +1938,7 @@ private:
     void draw_check_(const Box& cb, bool on, bool hovered) {
         if (on) {
             fill_rounded(cb, style.accent, 3);
-            icon(Icon::Check, cb.shrink(1), glm::vec4(1));
+            icon(Icon::Check, cb.shrink(1), style.check_mark);
         } else {
             fill_rounded(cb, hovered ? style.button_hover : style.button, 3);
         }
@@ -2226,6 +2272,7 @@ private:
     std::vector<PopupState> open_popups_;
     std::vector<Id> popup_draw_stack_;
     std::vector<Id> closed_by_click_;
+    std::vector<Id> suppress_reopen_;   ///< popups closed by the current left click (see begin_frame)
     MenuBarState menubar_;
 
     Id hot_id_ = 0;

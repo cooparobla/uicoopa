@@ -973,3 +973,15 @@ provides an immediate-mode API -- menus, popups, modals, trees, property rows, t
 fields, colour picker, splitters, drag & drop -- drawn through the same `DrawList`, `Font`
 and `UiPass` as the retained widgets. `imm_canvas.h`'s `ImmediateCanvas` hosts a frame
 inside a screen-space `CanvasComponent`. The toyengine editor is built entirely on it.
+
+### Themes (`imm_theme.h`)
+
+`imm::Style` (every metric and colour the widgets use) is the look; a theme file sets it.
+`imm::load_theme(path)` reads YAML (or its `.caml` twin) into an `imm::Theme`: `name`,
+optional `inherits:` (another theme in the same folder to start from), `font:`, `metrics:`,
+`colors:` (`"#rrggbb[aa]"`, `[r, g, b, a]` or `{r, g, b, a}`), plus any number of
+application sections -- e.g. an editor's `viewport:` colours -- read with
+`theme.color(section, role, fallback)`. Missing keys keep the inherited value, so a theme
+can be a few overrides. `visit_style()` is the single list of themable fields that both
+the loader and `theme_to_yaml()` walk; `list_themes(dir)` finds the themes in a folder.
+Apply one with `ctx.style = theme.style`. Style's compiled-in values are only a fallback.
