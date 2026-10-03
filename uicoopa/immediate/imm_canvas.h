@@ -48,6 +48,10 @@ public:
     /** @brief The Context the callback receives -- style and font live here. */
     imm::Context& context() { return ctx_; }
 
+    /** @brief Optional: adjusts each frame's input before the Context sees it (e.g. a host
+     *         withholding the mouse while something else owns it). */
+    std::function<void(imm::FrameInput&)> filter_input;
+
     /** @brief Seconds per frame fed to the Context (tooltips, caret blink). */
     float frame_dt = 1.0f / 60.0f;
 
@@ -58,6 +62,7 @@ public:
         if (!canvas || !on_draw) return;
         const glm::vec2 size = canvas->root_rect().size();
         imm::FrameInput in = imm::FrameInput::from_ui_input(canvas->input(), size.y, frame_dt);
+        if (filter_input) filter_input(in);
         ctx_.begin_frame(draw_list, in, size);
         on_draw(ctx_);
         ctx_.end_frame();

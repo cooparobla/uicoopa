@@ -414,6 +414,7 @@ public:
      * @param canvas_size Canvas size in canvas pixels.
      */
     void begin_frame(DrawList& dl, const FrameInput& in, glm::vec2 canvas_size) {
+        cursor_ = coopa::input::CursorShape::Arrow;
         dl_ = &dl;
         in_ = in;
         size_ = canvas_size;
@@ -1494,8 +1495,18 @@ public:
             if (nv != *value) { *value = nv; r.changed = true; }
         }
         fill(bar, held ? style.accent : hovered ? style.header_hover : style.border);
+        // A border you can drag shows the resize arrows (vertical bar: left-right).
+        if (hovered || held) set_mouse_cursor(vertical ? coopa::input::CursorShape::ResizeH : coopa::input::CursorShape::ResizeV);
         return r;
     }
+
+    /**
+     * @brief The mouse cursor shape the UI wants this frame (Arrow unless a widget asked otherwise
+     *        -- splitters ask for resize arrows, text fields for an I-beam). The host applies
+     *        it to the window after the frame (e.g. Input::set_cursor_shape()).
+     */
+    coopa::input::CursorShape mouse_cursor() const { return cursor_; }
+    void set_mouse_cursor(coopa::input::CursorShape c) { cursor_ = c; }
 
     // -------------------------------------------------------------------------------
     // Popups, menus, modals
@@ -1595,6 +1606,8 @@ public:
         return true;
     }
     void end_menubar() { menubar_.active = false; }
+    /** @brief Where the last menubar's headers ended (x in imm space) -- for widgets after it. */
+    float menubar_end() const { return menubar_.x; }
 
     /**
      * @brief A menu: a header in a menu bar, or a submenu row inside another menu.
@@ -2092,7 +2105,7 @@ private:
         using coopa::input::Mods;
         const bool editing = text_edit_.active && text_edit_.id == id;
         const bool hovered = layer_ok_() && b.contains(in_.mouse) && clip_stack_.back().contains(in_.mouse);
-        if (hovered) hot_id_ = id;
+        if (hovered) { hot_id_ = id; set_mouse_cursor(coopa::input::CursorShape::IBeam); }
         bool committed = false;
 
         if (!editing) {
@@ -2272,6 +2285,7 @@ private:
     std::vector<PopupState> open_popups_;
     std::vector<Id> popup_draw_stack_;
     std::vector<Id> closed_by_click_;
+    coopa::input::CursorShape cursor_ = coopa::input::CursorShape::Arrow;   ///< See cursor().
     std::vector<Id> suppress_reopen_;   ///< popups closed by the current left click (see begin_frame)
     MenuBarState menubar_;
 
