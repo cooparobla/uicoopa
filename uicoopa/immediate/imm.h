@@ -1554,12 +1554,18 @@ public:
      * @brief Draws modal `name` if open: dims the screen, centres a titled box of `size`.
      * @return True while open; call end_modal() then.
      */
+    /**
+     * @param box_size Width x height; a height <= 0 fits the box to its content (measured the
+     *                 frame before -- the first frame uses a few rows' guess).
+     */
     bool begin_modal(std::string_view name, glm::vec2 box_size) {
         const Id id = get_id(name);
         const int idx = find_popup_(id);
         if (idx < 0) return false;
         PopupState& p = open_popups_[static_cast<size_t>(idx)];
         p.seen_frame = frame_;
+        p.fit = box_size.y <= 0.0f;
+        if (p.fit) box_size.y = p.fit_h > 0.0f ? p.fit_h : style.row_height * 5.0f;
         const int z = kPopupZ + idx * 10;
         dl_->set_z_order(z);
         push_clip_raw_(Box{0, 0, size_.x, size_.y});
@@ -1576,7 +1582,7 @@ public:
         popup_draw_stack_.push_back(id);
         Layout l{Box{b.x, bar.bottom(), b.w, b.h - bar.h}.shrink(style.padding)};
         l.cursor = l.region.pos();
-        l.content_top = l.cursor.y;
+        l.content_top = l.content_bottom = l.cursor.y;
         layout_stack_.push_back(l);
         clip_stack_.push_back(b);
         apply_clip_();
@@ -1585,6 +1591,14 @@ public:
     }
     void end_modal() {
         pop_id();
+        {
+            const Layout& l = layout_stack_.back();
+            const int idx = find_popup_(layer_stack_.back().id);
+            if (idx >= 0 && open_popups_[static_cast<size_t>(idx)].fit) {
+                const float content = std::max(0.0f, l.content_bottom - l.content_top);
+                open_popups_[static_cast<size_t>(idx)].fit_h = std::ceil(content + style.padding * 2.0f + style.row_height + 2.0f);
+            }
+        }
         layout_stack_.pop_back();
         pop_clip_();
         pop_clip_();
@@ -1808,6 +1822,8 @@ private:
         bool from_menubar = false;
         uint64_t seen_frame = 0;
         uint64_t opened_frame = 0;
+        bool fit = false;      ///< A modal sized to its content (begin_modal height <= 0).
+        float fit_h = 0.0f;    ///< That content's box height, measured last frame.
     };
     struct MenuBarState { bool active = false; Box rect; float x = 0.0f; };
     struct LastItem { Id id = 0; Box rect; bool hovered = false; bool deactivated = false; };
