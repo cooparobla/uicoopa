@@ -173,6 +173,8 @@ enum class Icon : int {
     // actions / status
     Plus, X, Trash, Duplicate, Link, ArrowRight, ArrowDown, Dots, Undo, Redo, Restart, Info, Warning, Error, Palette,
     MouseLeft, MouseMiddle, MouseRight, Keyboard,
+    // paint modes (appended: earlier values stay put)
+    VertexPaint, WeightPaint,
 };
 
 class Context;

@@ -441,6 +441,14 @@ inline void draw_icon(Context& ctx, Icon icon, const Box& b, const glm::vec4& co
         case Icon::Keyboard:
             d.box(1, 4, 14, 8); for (int i = 0; i < 4; ++i) d.rect(2.6f + i * 3, 5.6f, 1.8f, 1.6f); d.rect(4, 9, 8, 1.4f);
             break;
+        case Icon::VertexPaint:   // a triangle with a different colour at each corner
+            d.l(2, 13, 14, 13, 0.9f); d.l(14, 13, 8, 3, 0.9f); d.l(8, 3, 2, 13, 0.9f);
+            d.circle(2.5f, 12.8f, 2.0f, kRed); d.circle(13.5f, 12.8f, 2.0f, kBlue); d.circle(8, 3.4f, 2.0f, kYellow);
+            break;
+        case Icon::WeightPaint:   // the blue-to-red weight ramp under a brush stroke
+            d.rect(1, 10, 3.5f, 4, kBlue); d.rect(4.5f, 10, 3.5f, 4, kGreen); d.rect(8, 10, 3.5f, 4, kYellow);
+            d.rect(11.5f, 10, 3.5f, 4, kRed); d.l(9, 7, 14, 2, 1.4f); d.circle(8.6f, 7.6f, 1.6f, kOrange);
+            break;
     }
 }
 
