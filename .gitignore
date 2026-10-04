@@ -3,3 +3,5 @@ build/
 
 # Generated screenshots / captured frames
 output/
+
+.docs/
