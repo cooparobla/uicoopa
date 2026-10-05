@@ -198,7 +198,7 @@ public:
      * Fed to DrawList::set_text_scale() by rebuild_emit(); see Text::emit() for what reads it.
      */
     float effective_text_scale() const {
-        return is_world_space() ? text_supersample : scale_factor_ * text_supersample;
+        return is_world_space() ? text_supersample : scale_factor_ * display_zoom_ * text_supersample;
     }
 
     /**
@@ -244,6 +244,7 @@ public:
         // independently callable with any DrawList -- an external caller would otherwise be
         // silently left on the 1.0 default and render text at the wrong density.
         draw_list.set_text_scale(effective_text_scale());
+        draw_list.set_pixel_snap(!is_world_space());
         for (auto& child : owner->children()) {
             if (child->active()) emit_(*child, draw_list, 0);
         }
@@ -277,7 +278,63 @@ public:
      * sharing one UiInput across canvases would be.
      */
     void set_input(const coopa::input::Input& input, float cursor_scale = 1.0f) {
-        input_.update(input, root_rect_, scale_factor_, cursor_scale);
+        if (!input_enabled_) { input_.update_idle(glm::vec2(-1.0e6f)); return; }
+        input_.update(input, root_rect_, scale_factor_, cursor_scale, screen_origin_, display_zoom_);
+    }
+
+    // --- Placement inside part of the target (ScreenSpaceOverlay only) ---
+
+    /**
+     * @brief Where this canvas's top-left corner sits in the render target, in target pixels
+     *        (+Y down, like the window). (0, 0) -- the default -- is a canvas covering the
+     *        target from its corner, which is every game's case.
+     *
+     * Non-zero when a host draws the canvas into only PART of its target: an editor showing
+     * a game HUD inside its viewport panel, or a UI preview frame. set_viewport() still gives
+     * the canvas's own size; this only moves it. The host's render pass reads it back
+     * (UiPass::draw()'s origin overload) and set_input() subtracts it from the cursor, so
+     * drawing and hit testing agree on where the canvas is.
+     */
+    void set_screen_origin(glm::vec2 origin) { screen_origin_ = origin; }
+    glm::vec2 screen_origin() const { return screen_origin_; }
+
+    /**
+     * @brief How much the placed canvas is magnified on the target: it is laid out for its
+     *        set_viewport() size but drawn into viewport_size() * zoom target pixels. 1 (the
+     *        default) draws pixel for pixel.
+     *
+     * Lets a UI designer preview a canvas at the real game resolution (1920x1080, laid out
+     * exactly as the game will) inside a smaller frame -- and zoom into it -- without the
+     * layout changing as the frame does. Glyph atlases bake at the magnified size, so text
+     * stays sharp when zoomed in.
+     */
+    void set_display_zoom(float zoom) { display_zoom_ = zoom > 0.0f ? zoom : 1.0f; }
+    float display_zoom() const { return display_zoom_; }
+
+    /** @brief The size set_viewport() last gave, in target pixels (0 until it is called). */
+    glm::uvec2 viewport_size() const { return {viewport_w_, viewport_h_}; }
+
+    /**
+     * @brief false: set_input() feeds an idle frame (pointer far away, nothing pressed), so
+     *        the canvas draws but never reacts. true (the default) is normal input.
+     */
+    void set_input_enabled(bool enabled) { input_enabled_ = enabled; }
+    bool input_enabled() const { return input_enabled_; }
+
+    /**
+     * @brief Layout + emit with no input dispatch and no component behaviour -- what a canvas
+     *        looks like right now, for a scene that is drawn but not simulating.
+     *
+     * late_update() only runs while a Scene simulates (or for systems that run in edit
+     * mode), so an editor's paused scene would otherwise keep a canvas's DrawList empty and
+     * its UI invisible. A host calls this instead, once per frame, after set_viewport().
+     */
+    void preview_refresh() {
+        if (!owner) return;
+        rebuild_layout(viewport_w_, viewport_h_);
+        update_world_transform(view_);
+        draw_list_.begin(root_rect_);
+        rebuild_emit(draw_list_);
     }
 
     /** @brief This canvas's own per-frame pointer/keyboard state, as of the last set_input(). */
@@ -557,6 +614,9 @@ private:
     float scale_factor_ = 1.0f;
     uint32_t viewport_w_ = 0;
     uint32_t viewport_h_ = 0;
+    glm::vec2 screen_origin_{0.0f};   ///< See set_screen_origin().
+    bool input_enabled_ = true;       ///< See set_input_enabled().
+    float display_zoom_ = 1.0f;       ///< See set_display_zoom().
 
     // World-space state, all recomputed together by update_world_transform() so nothing is
     // ever derived twice or left inconsistent between the render and hit-test paths.

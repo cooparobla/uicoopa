@@ -78,6 +78,8 @@
 #include <uicoopa/reactors/text_on_signal.h>
 #include <uicoopa/reactors/log_on_signal.h>
 #include <uicoopa/builder/ui_theme_yaml.h>
+#include <uicoopa/builder/theme_scope.h>
+#include <uicoopa/builder/ui_composites_yaml.h>
 #include <uicoopa/text/font_defaults.h>
 
 #include <glm/glm.hpp>
@@ -592,6 +594,24 @@ inline void register_ui_components() {
             img->type = (t == "Sliced") ? ImageType::Sliced : ImageType::Simple;
         }
         if (node.contains("raycast_target")) img->raycast_target = node.at("raycast_target").get_value<bool>();
+        // Shape (flat-coloured images): rounded corners, an inner outline, a soft shadow.
+        if (node.contains("corner_radius")) img->corner_radius = node.at("corner_radius").get_value<float>();
+        if (node.contains("corners")) {
+            // "all" / "top" / "bottom" / "left" / "right", or a mask (TL 1, TR 2, BR 4, BL 8).
+            const auto& c = node.at("corners");
+            if (c.is_integer()) img->corners = static_cast<int>(c.get_value<int64_t>());
+            else if (c.is_string()) {
+                const std::string v = c.get_value<std::string>();
+                img->corners = v == "top" ? (DrawList::kRoundTL | DrawList::kRoundTR)
+                             : v == "bottom" ? (DrawList::kRoundBL | DrawList::kRoundBR)
+                             : v == "left" ? (DrawList::kRoundTL | DrawList::kRoundBL)
+                             : v == "right" ? (DrawList::kRoundTR | DrawList::kRoundBR) : DrawList::kRoundAll;
+            }
+        }
+        if (node.contains("border_width")) img->border_width = node.at("border_width").get_value<float>();
+        if (node.contains("border_color")) img->border_color = parse_color(node.at("border_color"), img->border_color);
+        if (node.contains("shadow_size"))  img->shadow_size  = node.at("shadow_size").get_value<float>();
+        if (node.contains("shadow_color")) img->shadow_color = parse_color(node.at("shadow_color"), img->shadow_color);
     });
 
     SceneLoader::register_component_parser("Text", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext& ctx) {
@@ -888,15 +908,26 @@ inline void register_ui_components() {
     // before its children[] (see this file's top comment), so placing !Theme on
     // a scene's root object (typically the Canvas) makes it active in time for
     // every UIBuilder-backed component further down the tree.
-    SceneLoader::register_component_parser("Theme", [](const fkyaml::node& node, SceneObject&, const SceneLoader::ParseContext& ctx) {
+    //
+    // The theme also stays on its object as a ThemeScope, which is what YAML composites read
+    // (theme_for()): the nearest scope up the tree wins, so two UI files with different
+    // themes can share one canvas -- see builder/theme_scope.h.
+    SceneLoader::register_component_parser("Theme", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext& ctx) {
         if (!node.contains("source")) return;
         std::string ref = node.at("source").get_value<std::string>();
         try {
-            ThemeLibrary::instance().set_active(load_theme_file(ctx.resolve(ref)));
+            UITheme theme = load_theme_file(ctx.resolve(ref));
+            ThemeLibrary::instance().set_active(theme);
+            auto* scope = obj.add_component<ThemeScope>();
+            scope->theme = std::move(theme);
+            scope->source = ref;
         } catch (const std::exception& e) {
             std::cerr << "[uicoopa] Theme: " << e.what() << "\n";
         }
     });
+
+    // Themed composites (Window, MenuList, StatBar, ...) -- see builder/ui_composites_yaml.h.
+    register_ui_composites();
 
     FontDefaults::note_text_size = [](Font* f, uint32_t sz) {
         UIResourceCache::instance().note_text_atlas_use(f, sz);

@@ -7,6 +7,7 @@
 #define UICOOPA_BUILDER_DETAIL_TABS_H
 
 #include <uicoopa/builder/detail/build_context.h>
+#include <uicoopa/builder/detail/shape.h>
 #include <uicoopa/builder/detail/containers.h>
 #include <uicoopa/builder/detail/text_style.h>
 #include <uicoopa/layout/rect_transform.h>
@@ -46,7 +47,7 @@ inline Button* make_tab_button_(BuildContext ctx, const std::string& label,
     child->add_component<RectTransform>()->set_size_delta({width, theme.metrics.tab_height});
     child->add_component<LayoutElement>()->preferred_size = {width, theme.metrics.tab_height};
 
-    child->add_component<Image>()->color = normal_colors.normal;
+    shape_button(child->add_component<Image>(), theme, kCornersTop, false)->color = normal_colors.normal;
     auto* btn = child->add_component<Button>();
     btn->colors = normal_colors;
 

@@ -44,10 +44,13 @@ public:
      * @param scale_factor    The canvas's scale_factor(), converting window pixels to canvas pixels.
      */
     void update(const coopa::input::Input& input, const Rect& canvas_root_rect, float scale_factor,
-                float cursor_scale = 1.0f) {
+                float cursor_scale = 1.0f, glm::vec2 screen_origin = glm::vec2(0.0f), float display_zoom = 1.0f) {
         // cursor_scale converts the platform's cursor units into the framebuffer pixels the
         // canvas was sized from (2 on a Retina display, where GLFW reports screen points).
-        glm::vec2 wpos = input.cursor_position() * cursor_scale;
+        // screen_origin is where the canvas's top-left sits in those pixels and display_zoom how
+        // much it is magnified there -- (0, 0) and 1 except for a canvas placed inside part of
+        // the target (CanvasComponent::set_screen_origin() / set_display_zoom()).
+        glm::vec2 wpos = (input.cursor_position() * cursor_scale - screen_origin) / (display_zoom > 0.0f ? display_zoom : 1.0f);
         float sf = scale_factor > 0.0f ? scale_factor : 1.0f;
 
         // Window coordinates are +Y down from the top-left; canvas space is +Y up from the
@@ -94,6 +97,29 @@ public:
             keys_down_[k] = input.key_down(static_cast<coopa::input::Key>(k));
         }
         source_ = &input;
+    }
+
+    /**
+     * @brief A frame with no input at all: the cursor parked at `canvas_pos` (pass a point
+     *        far outside the canvas), no buttons, keys, characters or scroll.
+     *
+     * For a canvas that is drawn but must not react -- an editor previewing a HUD it is
+     * laying out -- so hover and press state drain the same way they would if the pointer
+     * simply left.
+     */
+    void update_idle(glm::vec2 canvas_pos) {
+        delta_ = canvas_pos - position_;
+        position_ = canvas_pos;
+        for (int b = 0; b < kMaxButtons; ++b) {
+            buttons_[b] = false;
+            pressed_this_frame_[b] = false;
+            released_this_frame_[b] = false;
+        }
+        scroll_ = glm::vec2(0.0f);
+        char_input_.clear();
+        key_events_.clear();
+        mods_ = coopa::input::Mods::None;
+        keys_down_.fill(false);
     }
 
     /** @brief Modifier keys held as of the last update (from the last key/button event). */

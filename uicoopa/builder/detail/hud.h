@@ -9,6 +9,7 @@
 #define UICOOPA_BUILDER_DETAIL_HUD_H
 
 #include <uicoopa/builder/detail/build_context.h>
+#include <uicoopa/builder/detail/shape.h>
 #include <uicoopa/builder/detail/sections.h>
 #include <uicoopa/builder/detail/text_style.h>
 #include <uicoopa/builder/detail/widgets.h>
@@ -198,7 +199,7 @@ inline ProgressBar* make_progress_bar(BuildContext ctx, const std::string& name,
     rt->anchor_preset(AnchorPreset::MiddleCenter);
     rt->set_size_delta(size);
     node->add_component<LayoutElement>()->preferred_size = size;
-    node->add_component<Image>()->color = theme.hud.bar_bg;
+    shape_bar(node->add_component<Image>(), theme)->color = theme.hud.bar_bg;
 
     glm::vec4 fill_color;
     glm::vec4 ghost_color;
@@ -214,12 +215,12 @@ inline ProgressBar* make_progress_bar(BuildContext ctx, const std::string& name,
     auto ghost_obj = std::make_unique<SceneObject>("Ghost");
     ghost_obj->add_component<RectTransform>()->hittable = false;
     auto* ghost_rt = ghost_obj->get_component<RectTransform>();
-    ghost_obj->add_component<Image>()->color = ghost_color;
+    shape_bar(ghost_obj->add_component<Image>(), theme)->color = ghost_color;
 
     auto fill_obj = std::make_unique<SceneObject>("Fill");
     fill_obj->add_component<RectTransform>()->hittable = false;
     auto* fill_rt = fill_obj->get_component<RectTransform>();
-    fill_obj->add_component<Image>()->color = fill_color;
+    shape_bar(fill_obj->add_component<Image>(), theme)->color = fill_color;
 
     node->add_child(std::move(ghost_obj));
     node->add_child(std::move(fill_obj));
@@ -314,7 +315,7 @@ inline MessageLog* make_message_log(BuildContext ctx, const std::string& name,
     rt->set_size_delta(size);
     rt->hittable = false;
     node->add_component<LayoutElement>()->preferred_size = size;
-    if (boxed) node->add_component<Image>()->color = theme.hud.log_bg;
+    if (boxed) shape_panel(node->add_component<Image>(), theme, false, DrawList::kRoundAll, false)->color = theme.hud.log_bg;
 
     auto* group = node->add_component<VerticalLayoutGroup>();
     group->spacing = 2.0f;
@@ -472,7 +473,7 @@ inline Console* make_console(BuildContext ctx, const std::string& name,
     auto* val_rt = val_obj->add_component<RectTransform>();
     val_rt->anchor_preset(AnchorPreset::StretchAll);
     val_rt->set_size_delta({0.0f, 0.0f});
-    val_obj->add_component<Image>()->color = theme.hud.console_input_bg;
+    shape_button(val_obj->add_component<Image>(), theme)->color = theme.hud.console_input_bg;
 
     auto text_obj = std::make_unique<SceneObject>("Text");
     auto* text_rt = text_obj->add_component<RectTransform>();

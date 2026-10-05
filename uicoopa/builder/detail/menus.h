@@ -15,6 +15,7 @@
 #define UICOOPA_BUILDER_DETAIL_MENUS_H
 
 #include <uicoopa/builder/detail/build_context.h>
+#include <uicoopa/builder/detail/shape.h>
 #include <uicoopa/builder/detail/text_style.h>
 #include <uicoopa/builder/detail/containers.h>
 #include <uicoopa/layout/canvas.h>
@@ -187,7 +188,7 @@ inline Menu* make_menu(BuildContext ctx, MenuBar* bar, const std::string& label,
     popup_rt->set_size_delta({popup_width, 0.0f});
     popup_rt->set_anchored_position({0.0f, 0.0f});
     popup_rt->z_order = k_menu_popup_z;
-    popup_obj->add_component<Image>()->color = theme.menu.popup_bg;
+    shape_panel(popup_obj->add_component<Image>(), theme, /*floating=*/true)->color = theme.menu.popup_bg;
     // Load-bearing once z_order lifts the popup out of every ancestor Mask: without its
     // own, nothing would clip an item whose label is wider than the column.
     popup_obj->add_component<Mask>();

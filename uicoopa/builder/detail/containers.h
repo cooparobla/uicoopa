@@ -7,6 +7,7 @@
 #define UICOOPA_BUILDER_DETAIL_CONTAINERS_H
 
 #include <uicoopa/builder/detail/build_context.h>
+#include <uicoopa/builder/detail/shape.h>
 #include <uicoopa/builder/detail/text_style.h>
 #include <uicoopa/text/font_defaults.h>
 #include <uicoopa/layout/rect_transform.h>
@@ -38,7 +39,7 @@ inline SceneObject* make_panel(BuildContext ctx, const std::string& name,
     auto* rt = child->add_component<RectTransform>();
     rt->anchor_preset(preset);
     rt->set_size_delta(size_delta);
-    child->add_component<Image>()->color = ctx.theme->panel.panel;
+    shape_panel(child->add_component<Image>(), *ctx.theme)->color = ctx.theme->panel.panel;
 
     auto* raw = child.get();
     ctx.parent->add_child(std::move(child));
@@ -133,7 +134,7 @@ inline SceneObject* make_scroll_view(BuildContext ctx, const std::string& name,
     frame_rt->anchor_preset(preset);
     frame_rt->set_size_delta(size);
     frame_rt->set_anchored_position(anchored_pos);
-    frame_obj->add_component<Image>()->color = theme.panel.background;
+    shape_panel(frame_obj->add_component<Image>(), theme)->color = theme.panel.background;
 
     // Zero when headerless, so the Viewport and scrollbar below reclaim the strip rather
     // than leaving a gap where the bar would have been.
@@ -146,7 +147,7 @@ inline SceneObject* make_scroll_view(BuildContext ctx, const std::string& name,
         auto* header_rt = header_obj->add_component<RectTransform>();
         header_rt->anchor_preset(AnchorPreset::StretchTop);
         header_rt->set_size_delta({0.0f, header_h});
-        header_obj->add_component<Image>()->color = theme.panel.header_bar;
+        shape_header(header_obj->add_component<Image>(), theme)->color = theme.panel.header_bar;
 
         auto title_obj = std::make_unique<SceneObject>("Title");
         auto* title_rt = title_obj->add_component<RectTransform>();
@@ -214,13 +215,13 @@ inline SceneObject* make_scroll_view(BuildContext ctx, const std::string& name,
     sb_rt->anchor_preset(AnchorPreset::StretchAll);
     sb_rt->set_offset_min({size.x - 4.0f - scrollbar_thickness, 4.0f + track_end_inset});
     sb_rt->set_offset_max({-4.0f, -(header_h + track_end_inset)});
-    sb_obj->add_component<Image>()->color = theme.slider.track;
+    shape_control(sb_obj->add_component<Image>(), theme)->color = theme.slider.track;
 
     auto sb_handle_obj = std::make_unique<SceneObject>("Handle");
     auto* sb_handle_rt = sb_handle_obj->add_component<RectTransform>();
     sb_handle_rt->anchor_preset(AnchorPreset::StretchAll);
     sb_handle_rt->hittable = false;  // Decorative -- the Scrollbar (track) object owns the drag.
-    sb_handle_obj->add_component<Image>()->color = theme.slider.handle;
+    shape_control(sb_handle_obj->add_component<Image>(), theme)->color = theme.slider.handle;
 
     auto* sb = sb_obj->add_component<Scrollbar>();
     sb->direction = ScrollbarDirection::Vertical;
@@ -282,7 +283,7 @@ inline SceneObject* make_card(BuildContext ctx, const std::string& name, const s
     card_rt->anchor_preset(preset);
     card_rt->set_size_delta(size);
     card_rt->set_anchored_position(anchored_pos);
-    card_obj->add_component<Image>()->color = theme.panel.panel;
+    shape_panel(card_obj->add_component<Image>(), theme)->color = theme.panel.panel;
 
     const float header_h = theme.metrics.card_header_height;
 
@@ -290,7 +291,7 @@ inline SceneObject* make_card(BuildContext ctx, const std::string& name, const s
     auto* header_rt = header_obj->add_component<RectTransform>();
     header_rt->anchor_preset(AnchorPreset::StretchTop);
     header_rt->set_size_delta({0.0f, header_h});
-    header_obj->add_component<Image>()->color = theme.panel.header_bar;
+    shape_header(header_obj->add_component<Image>(), theme)->color = theme.panel.header_bar;
 
     auto title_obj = std::make_unique<SceneObject>("Title");
     auto* title_rt = title_obj->add_component<RectTransform>();
@@ -388,7 +389,7 @@ inline CollapsibleParts make_collapsible(BuildContext ctx, const std::string& na
     auto* root_rt = root_obj->add_component<RectTransform>();
     root_rt->anchor_preset(AnchorPreset::StretchAll);
     root_rt->set_size_delta({0.0f, 0.0f});
-    if (opts.boxed) root_obj->add_component<Image>()->color = theme.panel.panel;
+    if (opts.boxed) shape_panel(root_obj->add_component<Image>(), theme)->color = theme.panel.panel;
 
     auto* root_group = root_obj->add_component<VerticalLayoutGroup>();
     root_group->spacing = 0.0f;
@@ -405,7 +406,7 @@ inline CollapsibleParts make_collapsible(BuildContext ctx, const std::string& na
     header_obj->add_component<LayoutElement>()->preferred_size = {-1.0f, header_h};
     // Image before Button so Button::start()'s target_graphic auto-discovery finds it --
     // the same ordering make_button() relies on.
-    header_obj->add_component<Image>()->color = theme.collapsible.header;
+    shape_button(header_obj->add_component<Image>(), theme, DrawList::kRoundAll, false)->color = theme.collapsible.header;
     auto* header_btn = header_obj->add_component<Button>();
     header_btn->colors.normal      = theme.collapsible.header;
     header_btn->colors.highlighted = theme.collapsible.hover;

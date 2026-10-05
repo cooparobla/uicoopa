@@ -85,7 +85,10 @@ public:
         // atlas is baked at the drawn size it is 2x minification through a sampler with no
         // mipmaps, plus a prefilter blur a whole destination pixel wide. Keep it only on the
         // unscaled path, where every pre-existing caller lives and the result is bit-identical.
-        const uint32_t over  = (px > font_size) ? 1u : 2u;
+        // A screen canvas draws pixel-snapped text from a 1:1 atlas (crisp, even stems -- see
+        // imm::TextRenderer::draw()); a world canvas has no pixel grid, so its unscaled path keeps
+        // the 2x oversampled atlas made for sub-pixel placement.
+        const uint32_t over  = (px > font_size || draw_list.pixel_snap()) ? 1u : 2u;
 
         // wrap_width is a canvas-space column, so it has to be lifted into atlas space too --
         // otherwise supersampled text wraps at a fraction of the intended width.
@@ -133,6 +136,15 @@ public:
             Rect glyph_rect;
             glyph_rect.min = glm::vec2(pen_x + g->quad_min.x * inv, baseline_y - g->quad_max.y * inv);
             glyph_rect.max = glm::vec2(pen_x + g->quad_max.x * inv, baseline_y - g->quad_min.y * inv);
+            if (draw_list.pixel_snap()) {
+                // On a screen canvas, start each glyph on a device pixel (1 / scale canvas px):
+                // sub-pixel origins make bilinear sampling smear each glyph differently, so a
+                // word's letters look uneven and out of line. Size is kept; only the quad moves.
+                const float snap = 1.0f / scale;
+                const glm::vec2 size = glyph_rect.max - glyph_rect.min;
+                glyph_rect.min = glm::round(glyph_rect.min / snap) * snap;
+                glyph_rect.max = glyph_rect.min + size;
+            }
 
             draw_list.add_quad(glyph_rect, g->uv, packed);
         }

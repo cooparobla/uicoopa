@@ -7,6 +7,7 @@
 #define UICOOPA_BUILDER_DETAIL_WIDGETS_H
 
 #include <uicoopa/builder/detail/build_context.h>
+#include <uicoopa/builder/detail/shape.h>
 #include <uicoopa/builder/detail/text_style.h>
 #include <uicoopa/text/font_defaults.h>
 #include <uicoopa/layout/rect_transform.h>
@@ -142,7 +143,7 @@ inline Button* make_button(BuildContext ctx, const std::string& label, ButtonRol
     child->add_component<RectTransform>()->set_size_delta({width, theme.metrics.row_height});
     child->add_component<LayoutElement>()->preferred_size = {width, theme.metrics.row_height};
 
-    child->add_component<Image>()->color = style.normal;
+    shape_button(child->add_component<Image>(), theme)->color = style.normal;
 
     auto* btn = child->add_component<Button>();
     btn->colors.normal      = style.normal;
@@ -203,7 +204,7 @@ inline NumberField* make_slider_value_field_(BuildContext ctx, SceneObject* slid
     rt->set_anchor_max({1.0f, 0.5f});
     rt->set_pivot({1.0f, 0.5f});
     rt->set_size_delta({field_width, theme.spinbox.height});
-    obj->add_component<Image>()->color = theme.spinbox.bg;
+    shape_button(obj->add_component<Image>(), theme)->color = theme.spinbox.bg;
 
     auto* readout = obj->add_component<Text>();
     apply_role_font(readout, theme, FontRole::Numeric);
@@ -279,14 +280,14 @@ inline Slider* make_slider(BuildContext ctx, const std::string& name,
     track_rt->set_pivot({0.5f, 0.5f});
     track_rt->set_size_delta({0.0f, 6.0f});
     track_rt->hittable = false;  // Decorative -- the slider object itself owns the drag gesture.
-    track_obj->add_component<Image>()->color = theme.slider.track;
+    shape_control(track_obj->add_component<Image>(), theme)->color = theme.slider.track;
 
     auto fill_obj = std::make_unique<SceneObject>("Fill");
     auto* fill_rt = fill_obj->add_component<RectTransform>();
     fill_rt->set_anchor_min({0.0f, 0.0f});
     fill_rt->set_anchor_max({0.0f, 1.0f});
     fill_rt->hittable = false;
-    fill_obj->add_component<Image>()->color = theme.slider.fill;
+    shape_control(fill_obj->add_component<Image>(), theme)->color = theme.slider.fill;
 
     auto handle_obj = std::make_unique<SceneObject>("Handle");
     auto* handle_rt = handle_obj->add_component<RectTransform>();
@@ -295,7 +296,7 @@ inline Slider* make_slider(BuildContext ctx, const std::string& name,
     handle_rt->set_pivot({0.5f, 0.5f});
     handle_rt->set_size_delta({theme.slider.handle_width, 16.0f});
     handle_rt->hittable = false;
-    handle_obj->add_component<Image>()->color = theme.slider.handle;
+    shape_control(handle_obj->add_component<Image>(), theme)->color = theme.slider.handle;
 
     auto* slider = slider_obj->add_component<Slider>(min_val, max_val, initial_val);
     slider->step = step;
@@ -336,14 +337,14 @@ inline Toggle* make_toggle(BuildContext ctx, const std::string& name, bool initi
     toggle_obj->add_component<RectTransform>()->set_size_delta({theme.toggle.size, theme.toggle.size});
     toggle_obj->add_component<LayoutElement>()->preferred_size = {theme.toggle.size, theme.toggle.size};
 
-    toggle_obj->add_component<Image>()->color = theme.toggle.bg;
+    shape_button(toggle_obj->add_component<Image>(), theme)->color = theme.toggle.bg;
 
     auto check_obj = std::make_unique<SceneObject>("Checkmark");
     auto* check_rt = check_obj->add_component<RectTransform>();
     check_rt->anchor_preset(AnchorPreset::StretchAll);
     check_rt->set_size_delta({-6.0f, -6.0f});
     check_rt->hittable = false;  // Decorative -- the Toggle object itself owns the click.
-    auto* check_img = check_obj->add_component<Image>();
+    auto* check_img = shape_control(check_obj->add_component<Image>(), theme, 0.6f);
     check_img->color = theme.toggle.check;
     // If no IconLibrary sheet is loaded, icon() returns nullptr and check_img->sprite
     // stays null -- Image::emit() then falls back to exactly the plain tinted square
@@ -390,7 +391,7 @@ inline SceneObject* make_spinbox_step_button_(BuildContext ctx, const std::strin
     auto obj = std::make_unique<SceneObject>(glyph == "-" ? "DecBtn" : "IncBtn");
     obj->add_component<RectTransform>()->set_size_delta({theme.spinbox.btn_width, theme.spinbox.height});
     obj->add_component<LayoutElement>()->preferred_size = {theme.spinbox.btn_width, theme.spinbox.height};
-    obj->add_component<Image>()->color = theme.button.normal;
+    shape_button(obj->add_component<Image>(), theme)->color = theme.button.normal;
     auto* btn = obj->add_component<Button>();
     btn->colors.normal = theme.button.normal;
     btn->colors.highlighted = theme.button.hover;
@@ -439,7 +440,7 @@ inline SpinBox* make_spinbox(BuildContext ctx, const std::string& name,
     auto* val_le = val_obj->add_component<LayoutElement>();
     val_le->flexible_size = {1.0f, 0.0f};
     val_le->preferred_size = {50.0f, theme.spinbox.height};
-    val_obj->add_component<Image>()->color = theme.spinbox.bg;
+    shape_button(val_obj->add_component<Image>(), theme)->color = theme.spinbox.bg;
     auto* readout = val_obj->add_component<Text>();
     apply_role_font(readout, theme, FontRole::Numeric);
     readout->color = theme.text.primary;
@@ -487,7 +488,7 @@ inline TextField* make_text_field(BuildContext ctx, const std::string& name,
     auto* val_rt = val_obj->add_component<RectTransform>();
     val_rt->anchor_preset(AnchorPreset::StretchAll);
     val_rt->set_size_delta({0.0f, 0.0f});  // fills field_obj exactly -- see rect.h's StretchAll gotcha.
-    val_obj->add_component<Image>()->color = theme.spinbox.bg;
+    shape_button(val_obj->add_component<Image>(), theme)->color = theme.spinbox.bg;
 
     auto text_obj = std::make_unique<SceneObject>("Text");
     auto* text_rt = text_obj->add_component<RectTransform>();
@@ -530,7 +531,7 @@ inline ComboBox* make_dropdown(BuildContext ctx, const std::string& name,
     le->preferred_size = {180.0f, theme.combobox.height};
     le->flexible_size = {1.0f, 0.0f};
 
-    combo_obj->add_component<Image>()->color = theme.combobox.bg;
+    shape_button(combo_obj->add_component<Image>(), theme)->color = theme.combobox.bg;
     auto* main_btn = combo_obj->add_component<Button>();
     main_btn->colors.normal = theme.combobox.bg;
     main_btn->colors.highlighted = theme.button.hover;
@@ -584,7 +585,7 @@ inline ComboBox* make_dropdown(BuildContext ctx, const std::string& name,
     // RectTransform::z_order's doc.
     popup_rt->z_order = 1;
 
-    popup_obj->add_component<Image>()->color = theme.combobox.popup_bg;
+    shape_panel(popup_obj->add_component<Image>(), theme, /*floating=*/true)->color = theme.combobox.popup_bg;
     // Bounds item text to the popup's own rect. Load-bearing now that the popup
     // escapes any ancestor Mask (z_order above): without its own Mask, nothing
     // would clip an item whose text is wider than the popup.
@@ -609,7 +610,7 @@ inline ComboBox* make_dropdown(BuildContext ctx, const std::string& name,
         auto* item_le = item_obj->add_component<LayoutElement>();
         item_le->preferred_size = {-1.0f, theme.combobox.height};
 
-        item_obj->add_component<Image>()->color = theme.button.normal;
+        shape_button(item_obj->add_component<Image>(), theme, DrawList::kRoundAll, false)->color = theme.button.normal;
         auto* opt_btn = item_obj->add_component<Button>();
         opt_btn->colors.normal = theme.button.normal;
         opt_btn->colors.highlighted = theme.button.hover;
@@ -666,7 +667,7 @@ inline Button* make_icon_button(BuildContext ctx, const std::string& icon_name, 
     auto* le = obj->add_component<LayoutElement>();
     le->preferred_size = {btn_size, btn_size};
 
-    obj->add_component<Image>()->color = style.normal;
+    shape_button(obj->add_component<Image>(), theme)->color = style.normal;
     auto* btn = obj->add_component<Button>();
     btn->colors.normal = style.normal;
     btn->colors.highlighted = style.hover;

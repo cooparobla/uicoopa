@@ -10,6 +10,8 @@
 #include <uicoopa/ui_component.h>
 #include <uicoopa/input/modal_context.h>
 #include <coopa/scene/scene_object.h>
+#include <coopa/scene/scene.h>
+#include <coopa/event/event_bus.h>
 #include <string>
 
 namespace coopa {
@@ -65,7 +67,11 @@ public:
 private:
     void set_open_(bool open) {
         if (!owner) return;
+        const bool was = owner->active();
         owner->set_active(open);
+        // "opened" / "closed" by the dialog's name, on an actual change -- the hook a game's
+        // pause logic or a reactor (SetActiveOnSignal on a dimmer) listens for.
+        if (was != open && scene) scene->events().emit(owner->name(), open ? "opened" : "closed");
         if (!blocks_input) return;
         if (open) ModalContext::instance().push(owner);
         else ModalContext::instance().remove(owner);

@@ -7,6 +7,7 @@
 #define UICOOPA_BUILDER_DETAIL_TOOLTIP_H
 
 #include <uicoopa/builder/detail/build_context.h>
+#include <uicoopa/builder/detail/shape.h>
 #include <uicoopa/builder/detail/text_style.h>
 #include <uicoopa/layout/canvas.h>
 #include <uicoopa/layout/rect_transform.h>
@@ -68,7 +69,7 @@ inline TooltipOverlay* make_tooltip_overlay(BuildContext ctx) {
     rt->hittable = false;  // Load-bearing: a bubble that ate its own hover would flicker.
     rt->z_order = k_tooltip_z;
 
-    auto* panel = tip_node->add_component<Image>();
+    auto* panel = shape_panel(tip_node->add_component<Image>(), theme, /*floating=*/true);
     panel->color = theme.tooltip.bg;
     // Belt and braces against a measure that came out short (no font loaded, or a single
     // unbreakable word wider than max_width) -- the text is clipped rather than spilling.

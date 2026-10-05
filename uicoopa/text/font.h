@@ -173,6 +173,11 @@ public:
      *   frame (Font::measure() at the authored size alongside Text::emit()'s scaled bake). The
      *   two agree on metrics regardless -- advances and vertical metrics are oversample-
      *   independent -- so mixing them is safe.
+     *
+     * Oversampling is HORIZONTAL only. Vertical oversampling would let a glyph sit at a
+     * sub-pixel height, but every renderer here snaps the baseline to a pixel, so all it did was
+     * give each glyph a half-pixel vertical offset of its own -- blurred differently from its
+     * neighbours, so a word like "Empty" looked out of line (its 'p' and 'y' a hair off).
      */
     FontAtlas& atlas_for_size(uint32_t pixel_height, uint32_t oversample = 2) {
         const AtlasKey key{pixel_height, oversample};
@@ -181,7 +186,7 @@ public:
         auto atlas = std::make_unique<FontAtlas>(device_, allocator_, cmd_pool_,
                                                   ttf_bytes_.data(), ttf_bytes_.size(),
                                                   static_cast<float>(pixel_height),
-                                                  oversample, oversample);
+                                                  oversample, /*v_oversample=*/1);
         FontAtlas& ref = *atlas;
         atlases_[key] = std::move(atlas);
         return ref;
