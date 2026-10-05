@@ -76,6 +76,11 @@ screen-space or placed in the 3D world.
 - **`imm::Context`.** Menus, popups, modals, trees, property rows, drag fields, text input,
   a colour picker, splitters, and drag and drop, re-declared every frame from your data.
 - **Built-in vector icons** and YAML themes with inheritance.
+- **`imm::FileDialog`** (`immediate/imm_file_dialog.h`). A Finder-style Open / Save / Choose
+  Folder modal. It has back / forward / up buttons, a clickable path bar with live search,
+  Favorites / Recent / Locations in a sidebar, a sortable Name / Date / Size / Kind list, a
+  Format menu, and full keyboard navigation. An app names its own document kinds and adds its
+  own Favorites.
 - **`ImmediateCanvas`** hosts it inside a normal screen-space canvas.
 
 ## Dependencies
@@ -271,7 +276,7 @@ uicoopa/
 ├── builder/     UIBuilder, UITheme, ThemeLibrary; one detail/ header per concern
 ├── reactors/    YAML-declared responses to signals
 ├── audio/       optional UI sound (sfxcoopa)
-├── immediate/   imm::Context, ImmediateCanvas, icons, themes
+├── immediate/   imm::Context, ImmediateCanvas, icons, themes, FileDialog
 └── ui_yaml.h    register_ui_components()
 assets/          shaders, fonts, themes, icon sheets, sounds, demo scenes and prefabs
 src/             ui_impl.cpp: the one compiled file (stb_truetype)
