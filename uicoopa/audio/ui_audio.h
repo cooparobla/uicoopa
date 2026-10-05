@@ -23,6 +23,7 @@
 
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <unordered_set>
@@ -42,7 +43,8 @@ struct UiAudioConfig {
 /**
  * @class UiAudio
  * @brief Owns a coopa::sfx::core::AudioEngine, a "UI" bus under Master, and
- * (unless configured otherwise) a real coopa::sfx::core::AudioDevice pumping it.
+ * (unless configured otherwise) a real coopa::sfx::core::AudioDevice pumping it --
+ * or, via the borrowing constructor, plays through a host-owned engine and bus.
  *
  * Every SoundLibrary lookup and play() call happens by name, resolved
  * through SoundLibrary::instance() -- callers never touch a file path.
@@ -61,9 +63,10 @@ struct UiAudioConfig {
  */
 class UiAudio {
 public:
-    explicit UiAudio(const UiAudioConfig& config = {})
-        : format_{config.sample_rate, 2}, engine_(format_) {
-        ui_bus_ = &engine_.create_bus("UI", engine_.master());
+    explicit UiAudio(const UiAudioConfig& config = {}) : format_{config.sample_rate, 2} {
+        owned_engine_.emplace(format_);
+        engine_ = &*owned_engine_;
+        ui_bus_ = &engine_->create_bus("UI", engine_->master());
         if (!config.open_device) return; // manual/headless mode -- not a failure, see UiAudioConfig::open_device.
 
         coopa::sfx::core::DeviceConfig device_config = coopa::sfx::core::DeviceConfig::from_env();
@@ -72,13 +75,33 @@ public:
 
         try {
             device_ = std::make_unique<coopa::sfx::core::AudioDevice>(
-                device_config, [this](float* out, uint32_t frames) { engine_.render_offline(out, frames); });
+                device_config, [this](float* out, uint32_t frames) { engine_->render_offline(out, frames); });
         } catch (const std::exception& e) {
             std::cerr << "[uicoopa] UiAudio: failed to open audio device (" << e.what()
                       << "); UI sounds disabled\n";
             device_failed_ = true;
         }
     }
+
+    /**
+     * @brief Borrowed mode: plays through a host-owned engine and bus instead of owning
+     * its own engine and device.
+     *
+     * Opens no device and creates no bus; `shared` and `ui_bus` must outlive this UiAudio.
+     * available() is always true. The host owns the engine's lifecycle: borrowed mode
+     * never calls engine.update() -- update() here only does UI-side bookkeeping -- so the
+     * host must call AudioEngine::update() itself exactly once per frame (and pump its own
+     * device or render_offline()). play() routes to `ui_bus` by name, so `ui_bus` must be a
+     * bus created on `shared` (find_bus(ui_bus.name()) must resolve to it).
+     */
+    explicit UiAudio(coopa::sfx::core::AudioEngine& shared, coopa::sfx::mixer::MixerBus& ui_bus)
+        : format_(shared.format()), engine_(&shared), ui_bus_(&ui_bus), borrowed_(true) {}
+
+    UiAudio(const UiAudio&) = delete;
+    UiAudio& operator=(const UiAudio&) = delete;
+
+    /** @brief True when constructed from a host-owned engine (see the borrowing constructor). */
+    bool borrowed() const { return borrowed_; }
 
     /**
      * @brief True unless a real device was requested (open_device=true) and genuinely failed
@@ -104,22 +127,27 @@ public:
         }
 
         coopa::sfx::core::PlayParams params;
-        params.bus_name = "UI";
+        params.bus_name = ui_bus_->name();
         params.gain = def->gain * extra_gain;
         params.pitch = def->pitch_jitter > 0.0f ? jittered_pitch_(def->pitch_jitter) : 1.0f;
 
         try {
-            return engine_.play(def->path, params);
+            return engine_->play(def->path, params);
         } catch (const std::exception& e) {
             warn_once_(sound_name, "failed to decode '" + def->path + "': " + e.what());
             return {};
         }
     }
 
-    /** @brief Main-thread per-frame tick; forwards to AudioEngine::update(). Call once per frame. */
-    void update(float delta_time) { engine_.update(delta_time); }
+    /**
+     * @brief Main-thread per-frame tick. Owned mode forwards to AudioEngine::update();
+     * borrowed mode never does (the host owns and updates the shared engine). Call once per frame.
+     */
+    void update(float delta_time) {
+        if (!borrowed_) engine_->update(delta_time);
+    }
 
-    coopa::sfx::core::AudioEngine& engine() { return engine_; }
+    coopa::sfx::core::AudioEngine& engine() { return *engine_; }
     coopa::sfx::mixer::MixerBus& ui_bus() { return *ui_bus_; }
 
     /**
@@ -150,8 +178,12 @@ private:
     }
 
     coopa::sfx::data::AudioFormat format_;
-    coopa::sfx::core::AudioEngine engine_;
+    std::optional<coopa::sfx::core::AudioEngine> owned_engine_; /**< Engaged only in owned mode. */
+    coopa::sfx::core::AudioEngine* engine_ = nullptr;           /**< owned_engine_ or the borrowed engine. */
     coopa::sfx::mixer::MixerBus* ui_bus_ = nullptr;
+    bool borrowed_ = false;
+    // Declared after owned_engine_ so it is destroyed first: the device callback
+    // renders through engine_, which must outlive the device thread.
     std::unique_ptr<coopa::sfx::core::AudioDevice> device_;
     bool device_failed_ = false;
     std::mt19937 rng_{std::random_device{}()};
