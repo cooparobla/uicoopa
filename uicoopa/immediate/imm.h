@@ -435,6 +435,10 @@ public:
         size_ = canvas_size;
         time_ += in.dt;
         ++frame_;
+        // Where the right / middle buttons went down, for last_clicked(Mouse::Right / Middle).
+        // Widgets record the LEFT press themselves (it is also their drag origin); nothing ever
+        // recorded the other two, so a right-click on an item could never count as a click.
+        for (int b = 1; b < 3; ++b) if (in_.pressed[b]) press_pos_[b] = in_.mouse;
 
         // Resolve which layer the mouse is over from LAST frame's layer rects: the highest z
         // containing the mouse, or the open modal (which owns all input while it is up).
