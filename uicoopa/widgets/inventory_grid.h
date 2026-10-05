@@ -21,6 +21,8 @@
 #include <uicoopa/widgets/mask.h>
 #include <uicoopa/text/font_defaults.h>
 #include <coopa/event/signal.h>
+#include <coopa/event/event_bus.h>
+#include <coopa/scene/scene.h>
 #include <coopa/scene/scene_object.h>
 #include <functional>
 #include <vector>
@@ -670,6 +672,12 @@ inline void InventorySlot::on_pointer_up(const PointerEventData& data) {
     } else {
         if (grid) {
             grid->on_slot_clicked.emit(slot_index);
+            // Published by the grid's name too, for game code bound by name (UiHandle).
+            if (grid->scene && grid->owner) {
+                coopa::event::EventArgs args;
+                args.set("slot", slot_index);
+                grid->scene->events().emit(grid->owner->name(), "slot_clicked", args);
+            }
         }
     }
 }

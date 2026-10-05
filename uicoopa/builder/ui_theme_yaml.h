@@ -262,6 +262,18 @@ inline void parse_theme(const fkyaml::node& root, UITheme& out) {
         if (n.contains("tab_indicator_height")) m.tab_indicator_height = n.at("tab_indicator_height").get_value<float>();
         if (n.contains("scrim_alpha"))          m.scrim_alpha          = n.at("scrim_alpha").get_value<float>();
     }
+    if (root.contains("shape")) {
+        const auto& n = root.at("shape");
+        auto& sh = out.shape;
+        if (n.contains("panel_radius"))   sh.panel_radius   = n.at("panel_radius").get_value<float>();
+        if (n.contains("button_radius"))  sh.button_radius  = n.at("button_radius").get_value<float>();
+        if (n.contains("control_radius")) sh.control_radius = n.at("control_radius").get_value<float>();
+        if (n.contains("bar_radius"))     sh.bar_radius     = n.at("bar_radius").get_value<float>();
+        if (n.contains("slot_radius"))    sh.slot_radius    = n.at("slot_radius").get_value<float>();
+        if (n.contains("border_width"))   sh.border_width   = n.at("border_width").get_value<float>();
+        if (n.contains("shadow_size"))    sh.shadow_size    = n.at("shadow_size").get_value<float>();
+        if (n.contains("shadow_color"))   sh.shadow_color   = parse_theme_color(n.at("shadow_color"), sh.shadow_color);
+    }
     if (root.contains("tab")) {
         const auto& n = root.at("tab");
         auto& s = out.tab;

@@ -182,6 +182,24 @@ public:
               uint32_t screen_w, uint32_t screen_h,
               float scale_factor,
               const DrawList& draw_list) {
+        draw(cmd, frame_index, screen_w, screen_h, glm::vec2(0.0f), screen_w, screen_h, scale_factor, draw_list);
+    }
+
+    /**
+     * @brief draw(), for a canvas placed inside PART of the target: its screen_w x screen_h
+     *        rect has its top-left at `origin` (target pixels, +Y down) -- see
+     *        CanvasComponent::set_screen_origin(). Every batch's scissor is clamped to that
+     *        rect as well as to the target, so nothing the canvas emits can spill outside it.
+     *
+     * @param target_w/target_h The bound render target's size, for clamping.
+     */
+    void draw(coopa::gfx::command::CommandBuffer& cmd,
+              uint32_t frame_index,
+              uint32_t target_w, uint32_t target_h,
+              glm::vec2 origin,
+              uint32_t screen_w, uint32_t screen_h,
+              float scale_factor,
+              const DrawList& draw_list) {
         if (draw_list.indices().empty()) return;
 
         // Append at this frame's running cursor -- see begin_frame(). Every canvas the host
@@ -202,7 +220,7 @@ public:
         index_cursor_  += static_cast<uint32_t>(draw_list.indices().size());
 
         pass_->bind(cmd); // stock ("quad") -- rebound to "text" per batch below as needed
-        cmd.set_viewport(0.0f, 0.0f, static_cast<float>(screen_w), static_cast<float>(screen_h));
+        cmd.set_viewport(origin.x, origin.y, static_cast<float>(screen_w), static_cast<float>(screen_h));
         cmd.bind_vertex_buffer(pass_->vertex_buffer(frame_index));
         cmd.bind_index_buffer(pass_->index_buffer(frame_index));
 
@@ -234,7 +252,9 @@ public:
 
             cmd.bind_descriptor_set(pass_->descriptor_set_for(batch.texture_view));
 
-            ScreenScissor scissor = to_screen_scissor_(batch.clip, screen_w, screen_h, scale_factor);
+            ScreenScissor scissor = place_scissor(to_screen_scissor_(batch.clip, screen_w, screen_h, scale_factor),
+                                                  origin, target_w, target_h);
+            if (scissor.w == 0 || scissor.h == 0) continue;
             cmd.set_scissor(scissor.x, scissor.y, scissor.w, scissor.h);
 
             // first_index shifts by this canvas's slice start; vertex_offset re-bases the
@@ -281,22 +301,27 @@ public:
         text_views_.erase(view);
     }
 
-private:
-    static constexpr uint32_t kInitialMaxVerts   = 8192;
-    static constexpr uint32_t kInitialMaxIndices = 12288;
-
-    /// Running append offsets into this frame's shared buffers; reset by begin_frame().
-    uint32_t vertex_cursor_ = 0;
-    uint32_t index_cursor_  = 0;
-
-    bool is_text_view_(coopa::gfx::TextureView view) const {
-        return view != pass_->fallback_view() && text_views_.count(view) != 0;
-    }
-
     /** @brief A clamped, screen-pixel scissor rect. */
     struct ScreenScissor { int32_t x, y; uint32_t w, h; };
 
-    /** @brief Converts a canvas-space clip rect to a clamped, screen-pixel scissor. */
+    /**
+     * @brief Moves a canvas-local scissor (already clamped to the canvas's own rect) by the
+     *        canvas's `origin` and clamps it to the target. Public and pure so a host's tests
+     *        can check placement without a device.
+     */
+    static ScreenScissor place_scissor(ScreenScissor s, glm::vec2 origin, uint32_t target_w, uint32_t target_h) {
+        const int64_t ox = static_cast<int64_t>(std::lround(origin.x));
+        const int64_t oy = static_cast<int64_t>(std::lround(origin.y));
+        const int64_t x0 = std::clamp<int64_t>(s.x + ox, 0, target_w);
+        const int64_t y0 = std::clamp<int64_t>(s.y + oy, 0, target_h);
+        const int64_t x1 = std::clamp<int64_t>(s.x + ox + static_cast<int64_t>(s.w), 0, target_w);
+        const int64_t y1 = std::clamp<int64_t>(s.y + oy + static_cast<int64_t>(s.h), 0, target_h);
+        return ScreenScissor{static_cast<int32_t>(x0), static_cast<int32_t>(y0),
+                             static_cast<uint32_t>(std::max<int64_t>(0, x1 - x0)),
+                             static_cast<uint32_t>(std::max<int64_t>(0, y1 - y0))};
+    }
+
+    /** @brief Converts a canvas-space clip rect to a scissor clamped to the canvas's own rect. */
     static ScreenScissor to_screen_scissor_(const Rect& clip, uint32_t screen_w, uint32_t screen_h, float scale_factor) {
         float x0 = clip.min.x * scale_factor;
         float x1 = clip.max.x * scale_factor;
@@ -313,6 +338,18 @@ private:
             static_cast<uint32_t>(std::max(0.0f, std::round(x1 - x0))),
             static_cast<uint32_t>(std::max(0.0f, std::round(y1 - y0)))
         };
+    }
+
+private:
+    static constexpr uint32_t kInitialMaxVerts   = 8192;
+    static constexpr uint32_t kInitialMaxIndices = 12288;
+
+    /// Running append offsets into this frame's shared buffers; reset by begin_frame().
+    uint32_t vertex_cursor_ = 0;
+    uint32_t index_cursor_  = 0;
+
+    bool is_text_view_(coopa::gfx::TextureView view) const {
+        return view != pass_->fallback_view() && text_views_.count(view) != 0;
     }
 
     std::unique_ptr<coopa::gfx::engine::passes::TexturedQuad2DPass> pass_;

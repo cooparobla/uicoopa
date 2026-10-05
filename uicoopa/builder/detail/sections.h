@@ -7,6 +7,7 @@
 #define UICOOPA_BUILDER_DETAIL_SECTIONS_H
 
 #include <uicoopa/builder/detail/build_context.h>
+#include <uicoopa/builder/detail/shape.h>
 #include <uicoopa/builder/detail/containers.h>
 #include <uicoopa/layout/rect_transform.h>
 #include <uicoopa/layout/layout_element.h>
@@ -107,7 +108,7 @@ inline SceneObject* make_split(BuildContext ctx, const std::string& name, bool h
         // to a node draws before that node's children (see make_card/make_panel's
         // identical background-then-children ordering), so a boxed section's fill never
         // covers whatever the caller adds to it afterward.
-        if (sec.boxed) section_node->add_component<Image>()->color = theme.panel.panel_alt;
+        if (sec.boxed) shape_panel(section_node->add_component<Image>(), theme, false, DrawList::kRoundAll, false)->color = theme.panel.panel_alt;
 
         auto* le = section_node->add_component<LayoutElement>();
         if (sec.size > 0.0f) {

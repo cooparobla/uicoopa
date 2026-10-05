@@ -7,6 +7,7 @@
 #define UICOOPA_BUILDER_DETAIL_INVENTORY_H
 
 #include <uicoopa/builder/detail/build_context.h>
+#include <uicoopa/builder/detail/shape.h>
 #include <uicoopa/builder/detail/text_style.h>
 #include <uicoopa/text/font_defaults.h>
 #include <uicoopa/layout/rect_transform.h>
@@ -59,14 +60,14 @@ inline InventoryGrid* make_inventory_grid(BuildContext ctx, const std::string& n
             auto slot_obj = std::make_unique<SceneObject>("Slot_" + std::to_string(idx));
             slot_obj->add_component<RectTransform>()->set_size_delta(slot_size);
 
-            auto* border_img = slot_obj->add_component<Image>();
+            auto* border_img = shape_slot(slot_obj->add_component<Image>(), theme);
             border_img->color = theme.slot.border;
 
             auto bg_obj = std::make_unique<SceneObject>("Bg");
             bg_obj->add_component<RectTransform>()->anchor_preset(AnchorPreset::StretchAll);
             bg_obj->get_component<RectTransform>()->set_size_delta({-2.0f, -2.0f});
             bg_obj->get_component<RectTransform>()->hittable = false;  // Decorative -- InventorySlot owns drag/drop.
-            bg_obj->add_component<Image>()->color = theme.slot.bg;
+            shape_slot(bg_obj->add_component<Image>(), theme, 1.0f)->color = theme.slot.bg;
 
             auto icon_obj = std::make_unique<SceneObject>("Icon");
             icon_obj->add_component<RectTransform>()->anchor_preset(AnchorPreset::StretchAll);
@@ -82,7 +83,7 @@ inline InventoryGrid* make_inventory_grid(BuildContext ctx, const std::string& n
             selected_obj->add_component<RectTransform>()->anchor_preset(AnchorPreset::StretchAll);
             selected_obj->get_component<RectTransform>()->set_size_delta({0.0f, 0.0f});
             selected_obj->get_component<RectTransform>()->hittable = false;
-            auto* selected_img = selected_obj->add_component<Image>();
+            auto* selected_img = shape_slot(selected_obj->add_component<Image>(), theme);
             selected_img->color = glm::vec4(glm::vec3(theme.slot.selected), 0.0f);
 
             auto count_obj = std::make_unique<SceneObject>("Count");

@@ -780,6 +780,53 @@ A relative path inside a prefab (e.g. `font: ../fonts/DejaVuSans.ttf` in `corner
 resolves against the prefab's own directory, not the including scene's — `ParseContext::resolve()`
 handles this via per-node provenance, so prefabs stay relocatable.
 
+### Composites in YAML (`builder/ui_composites_yaml.h`)
+
+UIBuilder's themed pieces as components a scene file can place -- one component holding only its
+parameters, expanded into the same themed subtree when the scene starts:
+
+| Composite | Keys | Notes |
+|---|---|---|
+| `ThemedPanel` / `ThemedText` / `ThemedButton` | `style`; `text`, `font_role`, `text_role`, `align`; `label`, `role` | Add an Image / Text / Button to the object itself. |
+| `Window` / `Dialog` | `title`, `close_button`, `padding`, `layout`, `spacing`; Dialog: `buttons: [{name, label, role}]`, `close_on_button`, `starts_open`, `modal` | Children stack in the Body. A Dialog publishes `opened` / `closed`. |
+| `ScrollView`, `TabView`, `Collapsible` | `spacing`; `tabs: [..]`; `title` | Children go in the Content / the pages in order / the body. |
+| `MenuList`, `ActionBar` | `items: [{name, label, role}]`, `direction`, `button_height` | One named button per item. |
+| `SettingRow` | `kind: slider / toggle / dropdown / spinbox / text / value`, `label`, `min`, `max`, `value`, `items` | The widget takes the row's name. |
+| `HudCorner` | `flow`, `spacing` | Stacks children toward the corner the object is anchored to. |
+| `StatBar`, `Hotbar`, `ItemGrid`, `MessageLog`, `PromptBar` | `role`, `max`, `value`; `count`; `rows`, `cols`; `max_lines`; `prompts` | The bar / grid / log takes the composite's name. |
+
+Rules: a composite **fills its own rect** (its generated child, tagged `UiGenerated`, stretches to
+the authored RectTransform); **authored children move into its slot**; **names are the
+contract** (no callbacks in YAML); **the theme comes from the tree** -- a `Theme` component also
+stays on its object as a `ThemeScope`, and `theme_for(node)` finds the nearest one.
+
+### Binding authored UI (`binding/ui_handle.h`)
+
+`coopa::ui::UiHandle ui(root)` reaches widgets by name (`"Inventory/Close"` paths work too; a
+composite carrying its widget one level down is found through it):
+
+```cpp
+coopa::ui::UiHandle ui(scene.find_object("hud"));
+ui.bind_bar("Health", &player.health);                 // follows a coopa::stat::Resource
+auto c = ui.on_click("Resume", [&] { ui.hide("PauseMenu"); });   // hold the Connection
+float v = ui.get<float>("MasterVolume");
+ui.set_text("Gold", "Gold  1,240");
+ui.bind_inventory("Bag", &inventory, &items);
+```
+
+`on()` / `on_click()` listen on the scene EventBus (`click`, `value_changed`,
+`selection_changed`, `tab_changed`, `opened`, `closed`, `slot_clicked`). In toyengine,
+`toy::ui::UiController` (`toyengine/ui/ui_assets.h`) is a component base that hands its
+`bind(UiHandle&)` the UI at start.
+
+### Placing a canvas inside part of the target
+
+`CanvasComponent::set_screen_origin()` / `set_display_zoom()` / `set_input_enabled()` draw a
+screen canvas into a sub-rect of its target, magnified, with input mapped into it (or off);
+`UiPass::draw()` has the matching origin overload and `preview_refresh()` lays out and emits a
+canvas whose scene is not simulating. toyengine's editor uses these to keep a HUD inside its
+viewer and to preview UI assets at game resolution.
+
 ## Events: `coopa::event::Signal`
 `Button`'s signals (and any other event-driven component — `Toggle`, `Slider`, `SpinBox`,
 `TextField`, `ComboBox`, `TabView`, `InventoryGrid`) are built on [libcoopa](../../libcoopa)'s

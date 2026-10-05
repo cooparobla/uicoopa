@@ -118,6 +118,15 @@ public:
      */
     void set_text_scale(float scale) { text_scale_ = scale; }
 
+    /**
+     * @brief Whether glyphs (and other detail that must stay crisp) should snap to the target's
+     *        pixel grid -- true for a screen-space canvas, whose canvas pixels map to device
+     *        pixels by text_scale(); false (the default) for a world-space one, which has no
+     *        fixed pixel grid.
+     */
+    void set_pixel_snap(bool snap) { pixel_snap_ = snap; }
+    bool pixel_snap() const { return pixel_snap_; }
+
     /** @brief The scale set by set_text_scale(); 1.0 unless a canvas supplied one. */
     float text_scale() const { return text_scale_; }
 
@@ -223,6 +232,90 @@ public:
         batches_.back().index_count += 6;
     }
 
+    // --- Rounded rectangles -------------------------------------------------------------
+    //
+    // Canvas space is +Y up, so a rect's "top" corners are at max.y. Corner masks use the
+    // usual reading order: kRoundTL | kRoundTR | kRoundBR | kRoundBL.
+
+    static constexpr int kRoundTL = 1, kRoundTR = 2, kRoundBR = 4, kRoundBL = 8, kRoundAll = 15;
+
+    /**
+     * @brief A filled rounded rectangle with an anti-aliased edge (about one screen pixel of
+     *        feather, so it stays crisp at any canvas scale). `radius` is clamped to half the
+     *        rect's smaller side -- a large radius makes a pill. Uses the bound texture's
+     *        centre texel, so bind the default (white) texture for a flat fill.
+     */
+    void add_rounded_rect(const Rect& r, float radius, int corners, uint32_t color) {
+        const float aa = feather_();
+        const float rad = clamp_radius_(r, radius);
+        const int n = corner_segments_(rad + aa);
+        // Fill inset by half the feather, then a feather ring fading out across the true edge.
+        std::vector<glm::vec2> inner, outer;
+        rounded_perimeter_(r, rad, corners, aa * 0.5f, n, inner);
+        rounded_perimeter_(r, rad, corners, -aa * 0.5f, n, outer);
+        ensure_batch_();
+        const uint32_t base = static_cast<uint32_t>(vertices_.size());
+        const glm::vec2 c = r.center();
+        vertices_.push_back({c.x, c.y, 0.5f, 0.5f, color});
+        for (const auto& p : inner) vertices_.push_back({p.x, p.y, 0.5f, 0.5f, color});
+        const uint32_t count = static_cast<uint32_t>(inner.size());
+        for (uint32_t i = 0; i < count; ++i) {
+            indices_.push_back(base); indices_.push_back(base + 1 + i); indices_.push_back(base + 1 + (i + 1) % count);
+        }
+        batches_.back().index_count += count * 3;
+        add_ring_(inner, outer, color, color & 0x00FFFFFFu);
+    }
+
+    /**
+     * @brief A rounded outline `width` canvas pixels thick, drawn inside the rect's edge (so a
+     *        border never grows the element), anti-aliased on both sides.
+     */
+    void add_rounded_border(const Rect& r, float radius, int corners, float width, uint32_t color) {
+        if (width <= 0.0f) return;
+        const float aa = feather_();
+        const float rad = clamp_radius_(r, radius);
+        const int n = corner_segments_(rad + aa);
+        width = std::min(width, std::min(r.size().x, r.size().y) * 0.5f);
+        std::vector<glm::vec2> o_feather, o_edge, i_edge, i_feather;
+        rounded_perimeter_(r, rad, corners, -aa * 0.5f, n, o_feather);
+        rounded_perimeter_(r, rad, corners, aa * 0.5f, n, o_edge);
+        rounded_perimeter_(r, rad, corners, std::max(aa * 0.5f, width - aa * 0.5f), n, i_edge);
+        rounded_perimeter_(r, rad, corners, width + aa * 0.5f, n, i_feather);
+        const uint32_t clear = color & 0x00FFFFFFu;
+        add_ring_(o_edge, o_feather, color, clear);
+        add_ring_(i_edge, o_edge, color, color);
+        add_ring_(i_edge, i_feather, color, clear);
+    }
+
+    /**
+     * @brief A soft drop shadow for a rounded rect: solid under the rect, fading to clear
+     *        `size` canvas pixels beyond its edge. Draw it BEFORE the rect it belongs to.
+     */
+    void add_rounded_shadow(const Rect& r, float radius, int corners, float size, uint32_t color) {
+        if (size <= 0.0f) return;
+        const float rad = clamp_radius_(r, radius);
+        const int n = corner_segments_(rad + size);
+        std::vector<glm::vec2> core, mid, edge;
+        rounded_perimeter_(r, rad, corners, size * 0.15f, n, core);
+        rounded_perimeter_(r, rad, corners, -size * 0.35f, n, mid);
+        rounded_perimeter_(r, rad, corners, -size, n, edge);
+        ensure_batch_();
+        const uint32_t base = static_cast<uint32_t>(vertices_.size());
+        const glm::vec2 c = r.center();
+        vertices_.push_back({c.x, c.y, 0.5f, 0.5f, color});
+        for (const auto& p : core) vertices_.push_back({p.x, p.y, 0.5f, 0.5f, color});
+        const uint32_t count = static_cast<uint32_t>(core.size());
+        for (uint32_t i = 0; i < count; ++i) {
+            indices_.push_back(base); indices_.push_back(base + 1 + i); indices_.push_back(base + 1 + (i + 1) % count);
+        }
+        batches_.back().index_count += count * 3;
+        // Two bands, the outer one fading faster: a cheap approximation of a gaussian falloff.
+        const uint32_t a = (color >> 24) & 0xFFu;
+        const uint32_t half = (color & 0x00FFFFFFu) | (static_cast<uint32_t>(a * 0.45f) << 24);
+        add_ring_(core, mid, color, half);
+        add_ring_(mid, edge, half, color & 0x00FFFFFFu);
+    }
+
     /** @brief Appends a solid line segment `thickness` canvas pixels wide (an oriented quad). */
     void add_line(const glm::vec2& a, const glm::vec2& b, float thickness, uint32_t color) {
         glm::vec2 d = b - a;
@@ -276,6 +369,66 @@ public:
     const std::vector<DrawBatch>& batches()  const { return batches_; }
 
 private:
+    /** @brief One screen pixel, in canvas pixels -- the anti-aliasing feather width. */
+    float feather_() const { return 1.0f / std::max(0.25f, text_scale_); }
+
+    static float clamp_radius_(const Rect& r, float radius) {
+        return std::max(0.0f, std::min(radius, std::min(r.size().x, r.size().y) * 0.5f));
+    }
+
+    /** @brief Arc segments per rounded corner: enough to look round at this canvas's scale. */
+    int corner_segments_(float radius) const {
+        return std::clamp(static_cast<int>(std::ceil(radius * std::max(0.25f, text_scale_) * 0.45f)), 2, 16);
+    }
+
+    /**
+     * @brief The rounded-rect outline, `inset` canvas pixels inside the rect's edge (negative:
+     *        outside), as one closed loop with the SAME point count for any inset -- so two
+     *        loops of one rect pair up index by index into a ring. A square corner (not in
+     *        `corners`) is a zero-radius arc: inset it stays square, outset it rounds by the
+     *        outset, which is what a feather or shadow wants.
+     */
+    void rounded_perimeter_(const Rect& r, float radius, int corners, float inset, int n, std::vector<glm::vec2>& out) const {
+        out.clear();
+        out.reserve(static_cast<size_t>(4 * (n + 1)));
+        struct Corner { glm::vec2 k; glm::vec2 s; float a0; int bit; };
+        // Counter-clockwise from bottom-left (canvas +Y up).
+        const Corner cs[4] = {
+            {{r.min.x, r.min.y}, {1.0f, 1.0f}, 3.14159265f, kRoundBL},
+            {{r.max.x, r.min.y}, {-1.0f, 1.0f}, 4.71238898f, kRoundBR},
+            {{r.max.x, r.max.y}, {-1.0f, -1.0f}, 0.0f, kRoundTR},
+            {{r.min.x, r.max.y}, {1.0f, -1.0f}, 1.57079633f, kRoundTL},
+        };
+        for (const Corner& c : cs) {
+            const float rk = (corners & c.bit) ? radius : 0.0f;
+            const float rad = std::max(rk - inset, 0.0f);
+            const glm::vec2 centre = c.k + c.s * std::max(rk, inset);
+            for (int i = 0; i <= n; ++i) {
+                const float a = c.a0 + 1.57079633f * static_cast<float>(i) / static_cast<float>(n);
+                out.push_back(centre + glm::vec2(std::cos(a), std::sin(a)) * rad);
+            }
+        }
+    }
+
+    /** @brief A band between two matching loops (see rounded_perimeter_()), colours per loop. */
+    void add_ring_(const std::vector<glm::vec2>& a, const std::vector<glm::vec2>& b, uint32_t ca, uint32_t cb) {
+        if (a.size() != b.size() || a.empty()) return;
+        ensure_batch_();
+        const uint32_t base = static_cast<uint32_t>(vertices_.size());
+        const uint32_t n = static_cast<uint32_t>(a.size());
+        for (uint32_t i = 0; i < n; ++i) {
+            vertices_.push_back({a[i].x, a[i].y, 0.5f, 0.5f, ca});
+            vertices_.push_back({b[i].x, b[i].y, 0.5f, 0.5f, cb});
+        }
+        for (uint32_t i = 0; i < n; ++i) {
+            const uint32_t j = (i + 1) % n;
+            const uint32_t a0 = base + 2 * i, b0 = a0 + 1, a1 = base + 2 * j, b1 = a1 + 1;
+            indices_.push_back(a0); indices_.push_back(b0); indices_.push_back(b1);
+            indices_.push_back(a0); indices_.push_back(b1); indices_.push_back(a1);
+        }
+        batches_.back().index_count += n * 6;
+    }
+
     void ensure_batch_() {
         const Rect& clip = clip_stack_.back();
         if (batches_.empty() ||
@@ -304,6 +457,7 @@ private:
     coopa::gfx::TextureView default_texture_view_;
     /// See set_text_scale(). Not touched by begin() -- it describes the canvas, not the frame.
     float                   text_scale_ = 1.0f;
+    bool                    pixel_snap_ = false;   ///< See set_pixel_snap().
     int                     current_z_order_ = 0;
 };
 

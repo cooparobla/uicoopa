@@ -336,6 +336,24 @@ struct TooltipStyle {
 };
 
 /**
+ * @struct ShapeStyle
+ * @brief How round, outlined and lifted the themed widgets are -- the half of a theme's
+ *        character the colours don't carry. Radii are canvas pixels (clamped to half a
+ *        widget's smaller side, so a big value makes pills). All zero (the default) is the
+ *        original square look.
+ */
+struct ShapeStyle {
+    float panel_radius   = 0.0f;  /**< Windows, cards, dialogs, panels, tooltips, popups. */
+    float button_radius  = 0.0f;  /**< Buttons, tabs (top corners), dropdowns, fields, spinboxes. */
+    float control_radius = 0.0f;  /**< Slider tracks / fills / handles, toggles, scrollbars. */
+    float bar_radius     = 0.0f;  /**< Progress and stat bars. */
+    float slot_radius    = 0.0f;  /**< Inventory / hotbar slots. */
+    float border_width   = 0.0f;  /**< Outline on panels, buttons and fields (panel.border colour). */
+    float shadow_size    = 0.0f;  /**< Soft shadow under floating panels (windows, dialogs, popups). */
+    glm::vec4 shadow_color{0.0f, 0.0f, 0.0f, 0.45f};
+};
+
+/**
  * @struct HudStyle
  * @brief Colors and metrics for the gameplay-HUD family of builder helpers
  *        (builder/detail/hud.h): stat bars, the hotbar, the message log, and
@@ -424,6 +442,7 @@ struct UITheme {
     MenuStyle        menu;
     FocusStyle       focus;
     HudStyle         hud;
+    ShapeStyle       shape;
 
     /** @brief Per-theme font override; falls back to FontDefaults::font when null. */
     class Font* font = nullptr;

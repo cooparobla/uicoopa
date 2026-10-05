@@ -175,6 +175,8 @@ enum class Icon : int {
     MouseLeft, MouseMiddle, MouseRight, Keyboard,
     // paint modes (appended: earlier values stay put)
     VertexPaint, WeightPaint,
+    // UI design (appended)
+    UiCanvas, UiText, UiButton, UiLayout, UiWidget, UiAnchor,
 };
 
 class Context;
@@ -268,7 +270,7 @@ public:
 
     float width(std::string_view s, float size) const {
         if (!font_) return static_cast<float>(s.size()) * size * 0.55f;
-        FontAtlas& atlas = font_->atlas_for_size(px_(size), 2);
+        FontAtlas& atlas = font_->atlas_for_size(px_(size), 1);
         float w = 0.0f;
         for (unsigned char c : s) {
             if (const GlyphInfo* g = atlas.glyph(c)) w += g->advance;
@@ -278,7 +280,7 @@ public:
 
     float line_height(float size) const {
         if (!font_) return size * 1.25f;
-        return font_->atlas_for_size(px_(size), 2).line_height();
+        return font_->atlas_for_size(px_(size), 1).line_height();
     }
 
     /** @brief Index of the gap closest to x (0..s.size()), for caret placement. */
@@ -304,7 +306,11 @@ public:
         const float scale = std::clamp(dl.text_scale(), 1.0f, 4.0f);
         const uint32_t px = px_(size * scale);
         const float inv = size / static_cast<float>(px);
-        FontAtlas& atlas = font_->atlas_for_size(px, scale > 1.0f ? 1u : 2u);
+        // Baked 1:1 at every scale and drawn pixel-snapped (below): crisp, evenly weighted
+        // stems, the way desktop UI text is rendered. An oversampled atlas allows sub-pixel x,
+        // but a stem between two pixel columns draws as two grey ones -- letters of one word
+        // then look unevenly soft and out of line.
+        FontAtlas& atlas = font_->atlas_for_size(px, 1);
         dl.set_texture(atlas.texture().view_typed());
         // Baseline in imm space (y down): top + ascent. Canvas y = canvas_h - imm y.
         const float snap = 1.0f / scale;
@@ -313,9 +319,16 @@ public:
         for (unsigned char c : s) {
             const GlyphInfo* g = atlas.glyph(c);
             if (!g) continue;
+            // Each glyph's quad starts on a device pixel: the atlas is baked at the drawn size, so
+            // an unsnapped (sub-pixel) origin would make bilinear sampling smear every glyph by a
+            // different fraction -- uneven stems and letters that look out of line. The pen
+            // itself keeps its exact advance, so spacing doesn't drift.
+            const glm::vec2 size_px = (g->quad_max - g->quad_min) * inv;
+            const float x0 = std::round((pen + g->quad_min.x * inv) / snap) * snap;
+            const float y_top = std::round((baseline + g->quad_min.y * inv) / snap) * snap;   // imm space (y down)
             Rect r;
-            r.min = glm::vec2(pen + g->quad_min.x * inv, canvas_h - (baseline + g->quad_max.y * inv));
-            r.max = glm::vec2(pen + g->quad_max.x * inv, canvas_h - (baseline + g->quad_min.y * inv));
+            r.min = glm::vec2(x0, canvas_h - (y_top + size_px.y));
+            r.max = glm::vec2(x0 + size_px.x, canvas_h - y_top);
             dl.add_quad(r, g->uv, color);
             pen += g->advance * inv;
         }

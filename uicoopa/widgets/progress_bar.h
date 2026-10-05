@@ -13,6 +13,8 @@
 #include <uicoopa/widgets/mask.h>
 #include <uicoopa/widgets/text.h>
 #include <coopa/event/signal.h>
+#include <coopa/event/event_bus.h>
+#include <coopa/scene/scene.h>
 #include <coopa/scene/scene_object.h>
 #include <coopa/stat/resource.h>
 #include <algorithm>
@@ -100,7 +102,16 @@ public:
         value_ = clamped;
         update_visuals();
 
-        if (changed && notify) on_value_changed.emit(value_);
+        if (changed && notify) {
+            on_value_changed.emit(value_);
+            // Same named signal Slider publishes, so a reactor or a game's EventBus listener can
+            // follow a bar by its object name (e.g. flash the portrait when "Health" drops).
+            if (scene && owner) {
+                coopa::event::EventArgs args;
+                args.set("value", value_);
+                scene->events().emit(owner->name(), "value_changed", args);
+            }
+        }
     }
 
     /**

@@ -15,6 +15,7 @@
 #define UICOOPA_BUILDER_DETAIL_DIALOGS_H
 
 #include <uicoopa/builder/detail/build_context.h>
+#include <uicoopa/builder/detail/shape.h>
 #include <uicoopa/builder/detail/text_style.h>
 #include <uicoopa/builder/detail/widgets.h>
 #include <uicoopa/layout/rect_transform.h>
@@ -145,14 +146,14 @@ inline DialogParts make_dialog(BuildContext ctx, const std::string& name, const 
     frame_rt->anchor_preset(AnchorPreset::MiddleCenter);
     frame_rt->set_size_delta(size);
     frame_rt->z_order = 1;  // Same reasoning as the scrim above.
-    frame_obj->add_component<Image>()->color = theme.panel.panel;
+    shape_panel(frame_obj->add_component<Image>(), theme, /*floating=*/true)->color = theme.panel.panel;
 
     const float header_h = theme.metrics.card_header_height;
     auto header_obj = std::make_unique<SceneObject>("Header");
     auto* header_rt = header_obj->add_component<RectTransform>();
     header_rt->anchor_preset(AnchorPreset::StretchTop);
     header_rt->set_size_delta({0.0f, header_h});
-    header_obj->add_component<Image>()->color = theme.panel.header_bar;
+    shape_header(header_obj->add_component<Image>(), theme)->color = theme.panel.header_bar;
 
     auto title_obj = std::make_unique<SceneObject>("Title");
     auto* title_rt = title_obj->add_component<RectTransform>();
@@ -174,7 +175,7 @@ inline DialogParts make_dialog(BuildContext ctx, const std::string& name, const 
         close_rt->anchor_preset(AnchorPreset::MiddleRight);
         close_rt->set_size_delta({header_h - 8.0f, header_h - 8.0f});
         close_rt->set_anchored_position({-6.0f, 0.0f});
-        close_obj->add_component<Image>()->color = theme.button.normal;
+        shape_button(close_obj->add_component<Image>(), theme)->color = theme.button.normal;
         auto* close_btn = close_obj->add_component<Button>();
         close_btn->colors.normal = theme.button.normal;
         close_btn->colors.highlighted = theme.button.hover;

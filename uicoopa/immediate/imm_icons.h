@@ -449,6 +449,27 @@ inline void draw_icon(Context& ctx, Icon icon, const Box& b, const glm::vec4& co
             d.rect(1, 10, 3.5f, 4, kBlue); d.rect(4.5f, 10, 3.5f, 4, kGreen); d.rect(8, 10, 3.5f, 4, kYellow);
             d.rect(11.5f, 10, 3.5f, 4, kRed); d.l(9, 7, 14, 2, 1.4f); d.circle(8.6f, 7.6f, 1.6f, kOrange);
             break;
+
+        // --- UI design ---
+        case Icon::UiCanvas:   // a screen with a HUD bar and a panel on it
+            d.box(1.5f, 2.5f, 13, 11); d.rect(3, 4, 5, 1.6f, kRed); d.rect(9.5f, 8, 3.5f, 4, dim);
+            break;
+        case Icon::UiText:     // a serif T
+            d.l(3, 3, 13, 3, 1.4f); d.l(8, 3, 8, 13, 1.4f); d.l(6, 13, 10, 13);
+            break;
+        case Icon::UiButton:   // a rounded pill with a label line
+            d.box(1.5f, 5, 13, 6); d.l(5, 8, 11, 8, 1.2f);
+            break;
+        case Icon::UiLayout:   // stacked rows
+            d.rect(2, 2.5f, 12, 3); d.rect(2, 6.5f, 12, 3, dim); d.rect(2, 10.5f, 12, 3);
+            break;
+        case Icon::UiWidget:   // a window with a title bar
+            d.box(2, 3, 12, 10); d.rect(2, 3, 12, 2.6f, dim); d.l(4, 9, 12, 9, 0.8f); d.l(4, 11, 9, 11, 0.8f);
+            break;
+        case Icon::UiAnchor:   // four anchor petals around a centre
+            d.tri(8, 2, 6.5f, 5, 9.5f, 5); d.tri(8, 14, 6.5f, 11, 9.5f, 11);
+            d.tri(2, 8, 5, 6.5f, 5, 9.5f); d.tri(14, 8, 11, 6.5f, 11, 9.5f); d.box(5.5f, 5.5f, 5, 5, 0.8f);
+            break;
     }
 }
 
