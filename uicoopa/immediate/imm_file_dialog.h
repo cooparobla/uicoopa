@@ -9,6 +9,8 @@
  *        Keys: Up / Down select, Enter or Cmd+Down opens, Cmd+Up goes to the enclosing folder,
  *        Cmd+[ / Cmd+] back / forward, typing selects by name, "/" or "~" or Shift+Cmd+G types a
  *        path, Shift+Cmd+. shows hidden files, Shift+Cmd+H / D jump Home / to the Desktop.
+ *        Shift+Cmd+N (or New Folder in the list's right-click menu) makes an "untitled folder"
+ *        and starts renaming it in place, as Finder does.
  *
  *        Usage: keep one FileDialog, call draw(ctx) every frame (after the rest of the UI, so
  *        the modal is on top), and open() it from anywhere -- a button, a menu item:
@@ -215,6 +217,8 @@ public:
         typeahead_.clear();   // type-to-select starts fresh in every dialog
         editing_path_ = false;
         replace_armed_.clear();
+        renaming_.clear();
+        notice_.clear();
         scroll_ = 0.0f;
         refresh_();
         // Opened from draw() on the next frame: called from inside a menu, an immediate
@@ -409,6 +413,8 @@ private:
         search_.clear();
         selected_.clear();
         replace_armed_.clear();
+        renaming_.clear();
+        notice_.clear();
         scroll_ = 0.0f;
         refresh_();
         // Going up selects the folder we came from, as Finder does.
@@ -480,6 +486,54 @@ private:
 
     void cancel_() { open_ = false; }
 
+    /** @brief Makes "untitled folder" (or "untitled folder 2", ...) here, selects it and starts
+     *         renaming it, as Finder's New Folder does. */
+    void new_folder_() {
+        std::error_code ec;
+        std::string name = "untitled folder";
+        for (int n = 2; std::filesystem::exists(dir_ / name, ec); ++n) name = "untitled folder " + std::to_string(n);
+        if (!std::filesystem::create_directory(dir_ / name, ec) || ec) {
+            notice_ = "Couldn't create a folder here: " + (ec ? ec.message() : std::string("it already exists")) + ".";
+            return;
+        }
+        search_.clear();   // the new folder must be listed to be renamed
+        refresh_();
+        for (size_t i = 0; i < view_.size(); ++i)
+            if (view_[i].name == name) { select_(static_cast<int>(i)); break; }
+        start_rename_(name);
+    }
+
+    void start_rename_(const std::string& name) {
+        renaming_ = name;
+        rename_buf_ = name;
+        rename_focus_ = true;
+        notice_.clear();
+    }
+
+    /** @brief Renames `renaming_` to `rename_buf_`; an unusable name keeps the old one. */
+    void finish_rename_() {
+        const std::string from = renaming_;
+        renaming_.clear();
+        std::string to = rename_buf_;
+        while (!to.empty() && std::isspace(static_cast<unsigned char>(to.back()))) to.pop_back();
+        while (!to.empty() && std::isspace(static_cast<unsigned char>(to.front()))) to.erase(to.begin());
+        if (to.empty() || to == from) return;
+        if (to == "." || to == ".." || to.find_first_of("/\\:") != std::string::npos) {
+            notice_ = "\"" + to + "\" can't be used as a name.";
+            return;
+        }
+        std::error_code ec;
+        if (std::filesystem::exists(dir_ / to, ec)) {
+            notice_ = "\"" + to + "\" already exists.";
+            return;
+        }
+        std::filesystem::rename(dir_ / from, dir_ / to, ec);
+        if (ec) { notice_ = "Couldn't rename \"" + from + "\": " + ec.message() + "."; return; }
+        refresh_();
+        for (size_t i = 0; i < view_.size(); ++i)
+            if (view_[i].name == to) { select_(static_cast<int>(i)); break; }
+    }
+
     // =========================================================================================
     // Keyboard
     // =========================================================================================
@@ -544,6 +598,7 @@ private:
         if (pressed(Key::H, cmd | Mods::Shift)) navigate_(file_dialog_detail::home_dir());
         if (pressed(Key::D, cmd | Mods::Shift)) navigate_(file_dialog_detail::home_dir() / "Desktop");
         if (pressed(Key::Period, cmd | Mods::Shift)) { show_hidden_ = !show_hidden_; refresh_(); }
+        if (pressed(Key::N, cmd | Mods::Shift)) new_folder_();
         if (pressed(Key::F, cmd)) search_focus_ = true;
     }
 
@@ -851,9 +906,11 @@ private:
             const Entry& e = view_[static_cast<size_t>(i)];
             const Box rb{rows.x, std::round(rows.y + i * row_h - scroll_), rows.w - sb_w, row_h};
             if (i % 2 == 1) ctx.fill(rb, glm::vec4(1, 1, 1, 0.025f));
+            const bool renaming = !renaming_.empty() && e.name == renaming_;
             ctx.push_id(i);
             bool hov = false;
-            const bool clicked = ctx.invisible_button("##row", rb, &hov);
+            // The row being renamed is the name field's: a row button would take its clicks.
+            const bool clicked = !renaming && ctx.invisible_button("##row", rb, &hov);
             ctx.pop_id();
             const bool enabled = e.dir || e.ok;
             const bool sel = i == selected_index_;
@@ -875,7 +932,8 @@ private:
             const Icon ic = e.dir ? Icon::Folder : file_dialog_detail::is_image_ext(e.ext) ? Icon::Image : Icon::File;
             const glm::vec4 icc = !enabled ? st.text_disabled : e.dir ? (sel ? st.text : folder_tint_(st)) : (sel ? st.text : st.text_dim);
             ctx.icon(ic, {rb.x + 8, rb.y + (rb.h - 14) * 0.5f, 14, 14}, icc);
-            ctx.text_in({rb.x + 28, rb.y, cx[1] - rb.x - 34, rb.h}, e.name, tc, 0);
+            if (renaming) draw_rename_field_(ctx, {rb.x + 24, rb.y + 1, cx[1] - rb.x - 30, rb.h - 2});
+            else ctx.text_in({rb.x + 28, rb.y, cx[1] - rb.x - 34, rb.h}, e.name, tc, 0);
             if (show_date) ctx.text_in({cx[1], rb.y, date_w - 4, rb.h}, file_dialog_detail::format_time(e.mtime), dc, 8);
             {
                 const std::string s = e.dir ? std::string("--") : file_dialog_detail::format_size(e.size);
@@ -891,6 +949,11 @@ private:
             selected_.clear();
             selected_index_ = -1;
         }
+        // Scrolled out of view (or deleted behind our back): a field not declared this frame
+        // has lost focus, so end the rename with what was last committed.
+        if (!renaming_.empty() && !rename_drawn_) finish_rename_();
+        rename_drawn_ = false;
+        if (ctx.is_hovered(rows) && ctx.mouse_released(Mouse::Right)) ctx.open_popup("##listmenu");
         if (view_.empty()) {
             const char* msg = !error_.empty() ? error_.c_str() : !search_.empty() ? "No matches" : "This folder is empty";
             ctx.text_in({rows.x, rows.y + 30, rows.w, row_h}, msg, st.text_disabled, 0, true);
@@ -908,6 +971,22 @@ private:
             ctx.fill_rounded(grab, held || hov ? st.text_dim : st.scroll_grab, grab.w * 0.5f);
         }
         ctx.outline(list, st.border);
+        if (ctx.begin_popup("##listmenu", 180.0f)) {
+            if (ctx.menu_item("New Folder", "Shift Cmd N", nullptr, error_.empty(), Icon::Folder)) new_folder_();
+            ctx.end_popup();
+        }
+    }
+
+    /** @brief The in-place name field of the row being renamed (a new folder). Enter, Tab or a
+     *         click elsewhere renames; Escape keeps the name it had. */
+    void draw_rename_field_(Context& ctx, const Box& b) {
+        rename_drawn_ = true;
+        if (rename_focus_) { ctx.begin_text_edit("##rename", rename_buf_); rename_focus_ = false; rename_started_ = true; }
+        std::string buf = rename_buf_;
+        const bool committed = ctx.input_text_box("##rename", b, &buf);
+        if (committed) rename_buf_ = buf;
+        if (committed || (!ctx.wants_keyboard() && !rename_started_)) finish_rename_();
+        rename_started_ = false;
     }
 
     void draw_name_row_(Context& ctx, const Box& row) {
@@ -957,7 +1036,8 @@ private:
             for (const auto& e : view_) (e.dir ? dirs : files) += 1;
             char buf[96];
             std::snprintf(buf, sizeof buf, "%zu item%s%s", view_.size(), view_.size() == 1 ? "" : "s", show_hidden_ ? "  (showing hidden)" : "");
-            ctx.text_in({x, bar.y, 200, bar.h}, buf, st.text_disabled, 0);
+            if (notice_.empty()) ctx.text_in({x, bar.y, 200, bar.h}, buf, st.text_disabled, 0);
+            else ctx.text_in({x, bar.y, std::max(0.0f, bar.right() - 216 - x), bar.h}, notice_, st.warning, 0);
         }
         const float bw = 100.0f;
         const Box ok{bar.right() - bw, bar.y, bw, bar.h};
@@ -993,6 +1073,10 @@ private:
     std::string path_buf_;
     bool focus_name_ = false;
     std::string replace_armed_;       ///< Save: the existing file a second press replaces
+    std::string renaming_;            ///< The entry being renamed in place (empty: none)
+    std::string rename_buf_;
+    bool rename_focus_ = false, rename_started_ = false, rename_drawn_ = false;
+    std::string notice_;              ///< A failed New Folder / rename, shown in the bottom bar
     std::string last_click_;
     double last_click_time_ = 0.0;
     bool open_ = false;

@@ -646,6 +646,9 @@ public:
 
     /** @brief Marks the keyboard as used this frame, so later shortcut() calls return false. */
     void consume_keyboard() { keyboard_consumed_ = true; }
+    /** @brief A widget used the keyboard this frame (a text field typed, a list took Enter): code
+     *         reading keys directly (a canvas text editor) should leave them alone. */
+    bool keyboard_consumed() const { return keyboard_consumed_; }
 
     // -------------------------------------------------------------------------------
     // Last-item queries (the widget most recently declared)
@@ -1295,14 +1298,18 @@ public:
 
     /**
      * @brief A dropdown. @return True when the selection changed.
+     * @param hovered When non-null, set to the item under the mouse in the open list, or -1
+     *                (closed, nothing hovered, or the frame an item is chosen) -- for a live
+     *                preview of the choice, as a font menu previews the hovered font.
      */
-    bool combo(std::string_view lbl, int* index, const std::vector<std::string>& items) {
+    bool combo(std::string_view lbl, int* index, const std::vector<std::string>& items, int* hovered = nullptr) {
         Box b = property_row(lbl);
-        return combo_in_(get_id(lbl), b, index, items);
+        return combo_in_(get_id(lbl), b, index, items, hovered);
     }
     /** @brief combo() in an explicit box. */
-    bool combo_box(std::string_view id_str, const Box& b, int* index, const std::vector<std::string>& items) {
-        return combo_in_(get_id(id_str), b, index, items);
+    bool combo_box(std::string_view id_str, const Box& b, int* index, const std::vector<std::string>& items,
+                   int* hovered = nullptr) {
+        return combo_in_(get_id(id_str), b, index, items, hovered);
     }
 
     /**
@@ -1994,7 +2001,13 @@ private:
         }
     }
 
-    bool combo_in_(Id id, const Box& b, int* index, const std::vector<std::string>& items) {
+    /// Lists longer than this get a search field at the top of their popup.
+    static constexpr size_t kComboSearchMin = 15;
+
+    bool combo_in_(Id id, const Box& b, int* index, const std::vector<std::string>& items, int* hovered_item = nullptr) {
+        using coopa::input::Key;
+        using coopa::input::KeyAction;
+        if (hovered_item) *hovered_item = -1;
         bool hovered = false, held = false;
         const bool clicked = behavior_(id, b, hovered, held);
         fill_rounded(b, hovered ? style.button_hover : style.button);
@@ -2002,27 +2015,97 @@ private:
         text_in({b.x, b.y, b.w - b.h, b.h}, cur, style.text);
         arrow({b.right() - b.h + 3, b.y + 3, b.h - 6, b.h - 6}, true, style.text_dim);
         const Id pid = hash_int(id, 11);
+        const Id sid = hash_int(id, 12);   // the search field
+        const bool searchable = items.size() > kComboSearchMin;
+        bool opened = false;
         if (clicked) {
             if (find_popup_(pid) >= 0) open_popups_.resize(static_cast<size_t>(find_popup_(pid)));
-            else open_popup_id_(pid, {b.x, b.bottom() + 1}, false, false);
+            else {
+                open_popup_id_(pid, {b.x, b.bottom() + 1}, false, false);
+                opened = true;
+            }
         }
         set_last_(id, b, hovered);
         bool changed = false;
+        if (opened && searchable) {
+            // Type straight away: the field has the keyboard from the first frame.
+            combo_search_ = {pid, {}, -1, false, true};
+            begin_text_edit_(sid, std::string(), false);
+        }
         if (begin_popup_id_(pid, b.w)) {
-            const size_t visible = std::min<size_t>(items.size(), 18);
-            Box list = next_box(visible * (style.row_height + style.spacing));
-            begin_region("combo_list", list, items.size() > visible);
-            for (int i = 0; i < static_cast<int>(items.size()); ++i) {
-                push_id(static_cast<int64_t>(i));
-                if (selectable(items[i], i == *index)) {
+            const float pitch = style.row_height + style.spacing;
+            // Which items show: all, or those whose name contains the query (any case).
+            std::vector<int> shown;
+            ComboSearch* cs = searchable && combo_search_.popup == pid ? &combo_search_ : nullptr;
+            bool pick_highlight = false;
+            if (cs) {
+                const bool editing = text_edit_.active && text_edit_.id == sid;
+                if (editing) {
+                    for (const auto& e : in_.keys) {
+                        if (e.action == KeyAction::Release) continue;
+                        if (e.key == Key::Down) { ++cs->highlight; cs->keyboard = true; cs->scroll_to = true; }
+                        if (e.key == Key::Up) { cs->highlight = std::max(0, cs->highlight - 1); cs->keyboard = true; cs->scroll_to = true; }
+                        if (e.key == Key::Enter || e.key == Key::KpEnter) pick_highlight = true;
+                        if (e.key == Key::Escape) open_popups_.resize(static_cast<size_t>(find_popup_(pid)));
+                        keyboard_consumed_ = true;
+                    }
+                    if (text_edit_.buffer != cs->query) { cs->query = text_edit_.buffer; cs->highlight = cs->query.empty() ? -1 : 0; cs->keyboard = true; cs->scroll_to = true; }
+                }
+                if (in_.mouse_delta != glm::vec2(0.0f)) cs->keyboard = false;   // the mouse takes over the preview
+                const Box sb = next_box(style.row_height);
+                std::string q = cs->query;
+                input_text_in_(sid, sb, &q, true);
+                if (cs->query.empty()) text_in({sb.x + 2, sb.y, sb.w - 2, sb.h}, "Search", style.text_disabled);
+                auto lower = [](std::string v) {
+                    for (char& c : v) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    return v;
+                };
+                const std::string lq = lower(cs->query);
+                for (int i = 0; i < static_cast<int>(items.size()); ++i)
+                    if (lq.empty() || lower(items[static_cast<size_t>(i)]).find(lq) != std::string::npos) shown.push_back(i);
+                cs->highlight = std::min(cs->highlight, static_cast<int>(shown.size()) - 1);
+                if (opened) {
+                    // Start with the current item in view.
+                    for (size_t k = 0; k < shown.size(); ++k) if (shown[k] == *index) state_(get_id("combo_list")).f[0] = std::max(0.0f, (static_cast<float>(k) - 3.0f) * pitch);
+                }
+                if (cs->scroll_to && cs->highlight >= 0) {
+                    float& sy = state_(get_id("combo_list")).f[0];
+                    const float top = static_cast<float>(cs->highlight) * pitch;
+                    const float view = static_cast<float>(std::min<size_t>(shown.size(), 18)) * pitch - style.padding;
+                    if (top < sy) sy = top;
+                    if (top + pitch > sy + view) sy = top + pitch - view;
+                }
+                cs->scroll_to = false;
+                if (pick_highlight && !shown.empty()) {
+                    const int i = shown[static_cast<size_t>(std::max(0, cs->highlight))];
                     if (*index != i) { *index = i; changed = true; }
                     close_all_popups();
+                }
+            } else {
+                shown.resize(items.size());
+                for (int i = 0; i < static_cast<int>(items.size()); ++i) shown[static_cast<size_t>(i)] = i;
+            }
+            const size_t visible = std::min<size_t>(shown.size(), 18);
+            Box list = next_box(std::max<size_t>(visible, 1) * pitch);
+            begin_region("combo_list", list, shown.size() > visible);
+            if (shown.empty()) text_in(next_box(style.row_height), "No matches", style.text_disabled);
+            for (size_t k = 0; k < shown.size() && !changed; ++k) {
+                const int i = shown[k];
+                push_id(static_cast<int64_t>(i));
+                if (selectable(items[static_cast<size_t>(i)], i == *index)) {
+                    if (*index != i) { *index = i; changed = true; }
+                    close_all_popups();
+                } else {
+                    if (cs && static_cast<int>(k) == cs->highlight) outline_rounded(last_item_.rect, style.accent, 3);
+                    if (hovered_item && last_hovered() && !(cs && cs->keyboard)) *hovered_item = i;
+                    if (hovered_item && cs && cs->keyboard && static_cast<int>(k) == cs->highlight) *hovered_item = i;
                 }
                 pop_id();
             }
             end_region();
             end_popup_();
         }
+        if (changed && hovered_item) *hovered_item = -1;
         return changed;
     }
 
@@ -2352,6 +2435,14 @@ private:
 
     TextEdit text_edit_;
     struct PendingCommit { Id id = 0; std::string value; } pending_commit_;
+    /// The open searchable combo's query and keyboard highlight (one combo popup is open at a time).
+    struct ComboSearch {
+        Id popup = 0;
+        std::string query;
+        int highlight = -1;      ///< Index into the filtered list; -1: none
+        bool keyboard = false;   ///< The last navigation was the keyboard (its highlight is "hovered")
+        bool scroll_to = false;  ///< Bring the highlight into view this frame
+    } combo_search_;
     int stacked_corners_ = -1;
     const char* stacked_label_ = nullptr;
     std::unordered_map<Id, State> states_;
