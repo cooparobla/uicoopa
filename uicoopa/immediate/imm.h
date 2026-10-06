@@ -1541,6 +1541,8 @@ public:
         if (last_item_.hovered && in_.released[1]) { open_popup(name); return true; }
         return false;
     }
+    /** @brief The label column of the last property_row() (an inspector field's name). */
+    const Box& last_label_box() const { return last_label_box_; }
     /** @brief Opens a popup when `area` is right-clicked over nothing else. */
     bool open_context_popup_in(std::string_view name, const Box& area) {
         if (hoverable_(area) && in_.released[1] && hot_id_ == 0) { open_popup(name); return true; }
