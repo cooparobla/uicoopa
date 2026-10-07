@@ -4,8 +4,8 @@
  *        handed a specific Font (e.g. auto-generated tooltip/inventory text).
  *
  * Split out of the builder layer so widgets (widgets/inventory_grid.h) don't
- * have to include a builder/ header to reach it -- see UITheme's file comment
- * for why the font hooks used to live there and why that was backwards.
+ * have to include a builder/ header to reach it (widgets sit below the builder
+ * in the include graph).
  * Application code sets FontDefaults::font once at startup (typically right
  * after loading its UI font -- see ui_yaml.h's UIResources::register_font()
  * and UIResourceCache::font_for(), which both do this automatically) and

@@ -69,7 +69,7 @@ public:
      * This is the world-space canvas path: there, the cursor reaches canvas space through a
      * ray/plane intersection against the canvas's 3D placement (see
      * CanvasComponent::ray_to_canvas()), which has no scale_factor to divide by. update()
-     * above is now just "compute the screen-space cursor, then call this", so the
+     * above is just "compute the screen-space cursor, then call this", so the
      * button/scroll/character/key-event copying below exists exactly once.
      *
      * @param input      Source of per-frame input state.

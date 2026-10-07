@@ -25,10 +25,9 @@ namespace detail_tabview {
 /**
  * @brief Runs SceneObject::start() over a subtree that is meant to end up hidden.
  *
- * Retained as this widget's long-standing spelling of the helper; the body now lives
- * in widgets/detail/hidden_subtree.h, shared with ComboBox and every widget added since
- * (see that file for why it sits under widgets/ and not builder/). The reason this
- * TabView needs it is unchanged: a page built already hidden would leave every widget
+ * A TabView-local name for the helper; the body lives in widgets/detail/hidden_subtree.h,
+ * shared with ComboBox and other widgets (see that file for why it sits under widgets/ and
+ * not builder/). TabView needs it because a page built already hidden would leave every widget
  * inside it unwired -- Button::target_graphic, a nested ComboBox's popup and SpinBox's
  * steppers never resolved.
  *

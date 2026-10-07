@@ -84,7 +84,7 @@ public:
         // Oversampling exists to let a glyph sit at arbitrary sub-pixel offsets at ~1:1. Once the
         // atlas is baked at the drawn size it is 2x minification through a sampler with no
         // mipmaps, plus a prefilter blur a whole destination pixel wide. Keep it only on the
-        // unscaled path, where every pre-existing caller lives and the result is bit-identical.
+        // unscaled path (a text scale of 1).
         // A screen canvas draws pixel-snapped text from a 1:1 atlas (crisp, even stems -- see
         // imm::TextRenderer::draw()); a world canvas has no pixel grid, so its unscaled path keeps
         // the 2x oversampled atlas made for sub-pixel placement.

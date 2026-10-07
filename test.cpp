@@ -1455,8 +1455,8 @@ void test_canvas_sort_order() {
     ASSERT_TRUE(canvases[1] == canvas_a);  // sort_order 5, drawn last (top)
 
     // Each canvas is driven directly through Scene::late_update() -- no wrapper
-    // class involved -- and computes its OWN scale factor independently, unlike
-    // the old UiScene's single shared "primary" scale factor.
+    // class involved -- and computes its OWN scale factor independently rather
+    // than sharing one "primary" scale factor.
     for (auto* c : canvases) c->set_viewport(800, 600);
     scene.late_update(0.016f);
     ASSERT_NEAR(canvas_a->scale_factor(), 2.0f, 1e-4f);
@@ -1557,7 +1557,7 @@ void test_late_update_and_event_bus() {
 }
 
 void test_canvas_self_driven() {
-    // No UiScene, no external rebuild_layout()/rebuild_emit() calls -- just
+    // No wrapper class, no external rebuild_layout()/rebuild_emit() calls -- just
     // Scene::late_update(), exactly like an application drives a real frame.
     coopa::scene::Scene scene("CanvasSelfDriven");
 
@@ -3018,8 +3018,8 @@ void test_z_order_wins_over_hierarchy_order() {
     rt_a->set_size_delta({100.0f, 100.0f});
     rt_a->resolve(Rect{ glm::vec2(0.0f), glm::vec2(1000.0f, 1000.0f) });
 
-    // Baseline, z_order left at its default 0 everywhere: A (added later) wins,
-    // exactly as before this feature existed.
+    // Baseline, z_order left at its default 0 everywhere: A (added later) wins
+    // by sibling order alone.
     RaycastHit baseline = Raycaster::hit_test(root, glm::vec2(50.0f, 50.0f));
     ASSERT_TRUE(baseline.object == a);
 
@@ -3225,8 +3225,8 @@ void test_consume_rules_slider_drag_and_up_vs_scrollrect() {
 void test_inventory_slot_drag_drop_via_handlers() {
     // End-to-end through InventorySlot's real IPointerHandler overrides (exactly
     // what EventSystem would call) rather than InventoryGrid::transfer_or_swap_items()
-    // directly -- this is what the Bg/Icon/Count hittable=false fix (Phase 1) and
-    // hit_drop_target_'s parent-walk fix (Phase 2) actually protect.
+    // directly -- this exercises the Bg/Icon/Count children being hittable=false and
+    // hit_drop_target_'s parent walk.
     auto canvas_obj = std::make_unique<SceneObject>("Canvas");
     auto* canvas = canvas_obj->add_component<CanvasComponent>();
     canvas->scaler.mode = ScaleMode::ConstantPixelSize;
@@ -3519,9 +3519,9 @@ void test_inventory_hover_tooltip_does_not_break_drop_target_raycast() {
 }
 
 void test_scroll_clamp_uses_fresh_size_on_first_layout_pass() {
-    // Before this fix, clamp_position_ read content_rt.rect().size(), which lags
-    // one frame behind a ContentSizeFitter resize; content_rt.size_delta() is
-    // fresh coming out of the SAME frame's measure pass. Verifies scrolling
+    // clamp_position_ reads content_rt.size_delta(), which is fresh coming out of
+    // the SAME frame's measure pass; content_rt.rect().size() would lag one frame
+    // behind a ContentSizeFitter resize. Verifies scrolling
     // clamps correctly on the very first layout pass, no second frame needed.
     auto canvas_obj = std::make_unique<SceneObject>("Canvas");
     auto* canvas = canvas_obj->add_component<CanvasComponent>();
@@ -3919,9 +3919,9 @@ void test_theme_yaml_loading() {
     }
     ASSERT_TRUE(threw);
 
-    // A theme file with the old text: keys only (no fonts:/size_heading/size_body at
-    // all) must parse exactly as it did before FontRole existed -- every role falls
-    // back to font_path, and size lookups fall back to their legacy size_* scalar.
+    // A theme file with only the basic text: keys (no fonts:/size_heading/size_body at
+    // all) must still parse -- every role falls back to font_path, and size lookups
+    // fall back to their category's size_* scalar.
     std::string legacy_path = std::string(ROOT_DIR) + "/output/test_legacy_theme.yaml";
     {
         std::ofstream f(legacy_path);
@@ -3942,7 +3942,7 @@ void test_theme_yaml_loading() {
     ASSERT_NEAR(coopa::ui::detail::font_role_size(legacy, FontRole::Heading), dark_default.text.size_heading, 1e-4f);
 
     // A theme file exercising the full `fonts:` schema: an explicit size wins over
-    // the legacy scalar; a path-only role inherits its category's size_* scalar
+    // the size_* scalar; a path-only role inherits its category's size_* scalar
     // instead; an omitted role (numeric, here) falls back to font_path/that size.
     std::string roles_path = std::string(ROOT_DIR) + "/output/test_font_roles_theme.yaml";
     {
@@ -4006,7 +4006,7 @@ void test_font_role_resolution() {
     UITheme theme = UITheme::builtin_dark();
 
     // Default (no FontRoleStyle::size set anywhere): every role maps to its
-    // documented legacy scalar -- see FontRole's doc in build_context.h.
+    // documented size_* scalar -- see FontRole's doc in build_context.h.
     ASSERT_NEAR(coopa::ui::detail::font_role_size(theme, FontRole::Title),   theme.text.size_title,   1e-4f);
     ASSERT_NEAR(coopa::ui::detail::font_role_size(theme, FontRole::Heading), theme.text.size_heading, 1e-4f);
     ASSERT_NEAR(coopa::ui::detail::font_role_size(theme, FontRole::Body),    theme.text.size_body,    1e-4f);
@@ -5546,7 +5546,7 @@ void test_navigation_gamepad_flip_suppresses_cursor_overlay() {
     overlay->update(0.016f);
     ASSERT_TRUE(overlay->suppressed);
     // `node` (the driven "Cursor" node), not `owner` (the always-active canvas
-    // root the component itself now lives on -- see CursorOverlay's class doc
+    // root the component itself lives on -- see CursorOverlay's class doc
     // for why those must be different nodes).
     ASSERT_TRUE(!overlay->node->active());
 
@@ -5561,12 +5561,12 @@ void test_navigation_gamepad_flip_suppresses_cursor_overlay() {
  *
  * Every other gamepad ComboBox test (e.g. test_selectable_combobox_confirm_opens_and_scopes)
  * calls Selectable::handle_nav() directly, bypassing NavigationDriver and
- * update_active_mode_() entirely -- that gap is exactly what let a real bug ship:
- * ambient mouse motion (a resting hand, or plain OS cursor jitter) used to win
- * unconditionally over a held pad button every frame, so active_mode kept flipping
- * back to Pointer mid-navigation and Confirm could act on whatever the mouse was
- * hovering instead of the keyboard-selected item. See update_active_mode_()'s doc
- * (widgets/navigation_driver.h) for the fixed precedence this test locks in.
+ * update_active_mode_() entirely. This one goes through the driver: if ambient mouse
+ * motion (a resting hand, or plain OS cursor jitter) won over a held pad button,
+ * active_mode would flip back to Pointer mid-navigation and Confirm could act on
+ * whatever the mouse was hovering instead of the keyboard-selected item. See
+ * update_active_mode_()'s doc (widgets/navigation_driver.h) for the precedence this
+ * test locks in.
  */
 void test_navigation_driver_combobox_via_real_pad_with_mouse_present() {
     NavigationContext::instance().clear();
@@ -5744,11 +5744,10 @@ void test_navigation_driver_combobox_via_real_pad_stationary_mouse() {
     NavigationContext::instance().clear();
 }
 
-/** @brief Regression: TabView::apply_selection_() deactivates the outgoing page,
- *         but nothing previously re-validated the current selection against that --
- *         it kept pointing at a now-hidden widget, and NavigationDriver::update_ring_()
- *         drew the ring at that stale, last-resolved rect until the next direction
- *         press implicitly fixed things via move(). Exercises the real fix
+/** @brief Regression: TabView::apply_selection_() deactivates the outgoing page, so
+ *         the current selection can point at a now-hidden widget; without
+ *         re-validation NavigationDriver::update_ring_() would draw the ring at that
+ *         stale rect until the next direction press. Exercises the re-validation
  *         end-to-end, through canvas_obj->late_update() (not the driver alone --
  *         see the ComboBox tests above for why that distinction matters here):
  *         NavigationContext::ensure_valid_selection() drops the stale selection the
@@ -5914,10 +5913,9 @@ void test_inventory_gamepad_pick_and_place() {
     ASSERT_TRUE(inv->get_item(3).empty());
 }
 
-/** @brief InventoryItem::icon_path, previously declared but never read, now resolves
- *         through IconLibrary in InventorySlot::update_visuals(). Headless tests never
+/** @brief InventoryItem::icon_path resolves through IconLibrary in InventorySlot::update_visuals(). Headless tests never
  *         load an icon sheet, so the lookup must miss cleanly (nullptr sprite) and fall
- *         all the way back to update_visuals()'s original id-keyed color table --
+ *         all the way back to update_visuals()'s id-keyed color table --
  *         exactly the "no IconLibrary" degrade path test_builder_icons_degrade_without_
  *         icon_library already covers for the rest of the builder. */
 void test_inventory_slot_icon_path_resolves_through_icon_library() {
@@ -6046,8 +6044,8 @@ void test_inventory_grid_transfer_override_intercepts_drop_and_pick_place() {
 }
 
 /** @brief A default-constructed (null) transfer_override leaves transfer_or_swap_items()
- *         byte-identical to its pre-existing move/merge/swap rule -- the regression lock
- *         for every standalone InventoryGrid caller that predates this field. */
+ *         on its built-in move/merge/swap rule -- what every standalone InventoryGrid
+ *         relies on. */
 void test_inventory_grid_null_override_matches_builtin_three_way() {
     SceneObject root("InventoryRoot");
     root.add_component<RectTransform>()->set_size_delta({400.0f, 400.0f});
@@ -6077,13 +6075,12 @@ void test_inventory_grid_null_override_matches_builtin_three_way() {
 }
 
 /** @brief Regression: CursorOverlay::update() hides itself by toggling a node's
- *         active() flag -- it used to be `owner->set_active()`, but owner was the
- *         very node this component's own update() lived on, and SceneObject::
- *         update() early-returns on `!active_`, so once the mouse left the window
- *         the overlay could never turn itself back on (or restore from a Hybrid
- *         `suppressed` flip either). enable_cursor() now installs the component on
- *         the always-active canvas root and drives a SEPARATE `node` instead --
- *         see CursorOverlay's class doc. */
+ *         active() flag. Toggling its own owner would be a trap: SceneObject::update()
+ *         early-returns on `!active_`, so once the mouse left the window the overlay
+ *         could never turn itself back on (or restore from a Hybrid `suppressed`
+ *         flip). enable_cursor() therefore installs the component on the
+ *         always-active canvas root and drives a SEPARATE `node` -- see
+ *         CursorOverlay's class doc. */
 void test_cursor_overlay_recovers_after_leaving_window() {
     UITheme theme = UITheme::builtin_dark();
     auto canvas_obj = std::make_unique<SceneObject>("Canvas");
@@ -6909,7 +6906,7 @@ void test_world_canvas_does_not_disturb_screen_space_canvases() {
 
 void test_ui_input_update_at_sets_canvas_position_directly() {
     // update_at() is the seam world canvases feed their ray/plane result through; update()
-    // is now defined in terms of it, so this also covers the screen-space path's copying.
+    // is defined in terms of it, so this also covers the screen-space path's copying.
     coopa::input::Input input;
     UiInput ui;
     ui.update_at(input, glm::vec2(12.0f, 7.0f));

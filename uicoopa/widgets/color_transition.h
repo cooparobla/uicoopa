@@ -15,7 +15,7 @@ namespace ui {
  * @struct ColorTransition
  * @brief The four tint colors a widget cycles between, and how fast it fades among them.
  *
- * Originally Button-only; shared by any widget that wants the same
+ * Shared by any widget that wants the same
  * disabled > pressed > hovered > normal precedence and fade behavior — see
  * Button::update(), Slider::update(), Toggle::update(), Scrollbar::update().
  */

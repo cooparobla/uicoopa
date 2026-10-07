@@ -2,16 +2,13 @@
  * @file hidden_subtree.h
  * @brief start_hidden_subtree(): runs SceneObject::start() over a subtree meant to end up hidden.
  *
- * Lives under uicoopa/widgets/detail/ rather than uicoopa/builder/detail/ on purpose.
- * ComboBox and TabView each carried a private copy of this function, and both said why
- * in their own doc comments: a widget header must not depend on uicoopa/builder/, so
- * neither could reach a shared helper that lived over there. A home under widgets/
- * satisfies that constraint exactly, and stops the copy count growing with every new
- * widget that hides a subtree it built (CollapsiblePanel and MenuBar both do).
+ * Lives under uicoopa/widgets/detail/ rather than uicoopa/builder/detail/ on purpose:
+ * a widget header must not depend on uicoopa/builder/, and several widgets hide a
+ * subtree they built (ComboBox, TabView, CollapsiblePanel, MenuBar), so they share
+ * this one copy.
  *
  * detail_combobox::start_hidden_subtree() and detail_tabview::start_hidden_subtree()
- * still exist and still work -- they now forward here, so nothing that called them by
- * their old name had to change.
+ * forward here.
  */
 
 #ifndef UICOOPA_WIDGETS_DETAIL_HIDDEN_SUBTREE_H

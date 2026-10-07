@@ -637,7 +637,7 @@ private:
  *
  * Stateless — call fresh each frame (or after loading a scene / changing
  * which canvases exist); cheap for the realistic handful of canvases a scene
- * has. Replaces the old UiScene wrapper's cached, staleness-prone canvas list.
+ * has. Nothing is cached, so the result can't go stale.
  */
 inline std::vector<CanvasComponent*> collect_canvases(coopa::scene::Scene& scene) {
     auto canvases = scene.get_components<CanvasComponent>();

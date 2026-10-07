@@ -37,8 +37,7 @@ namespace ui {
  * the rest just redirect `target` from their own on_signal(). Without this,
  * every sibling's own update() would independently write the graphic's color
  * each frame, and whichever one happens to run last in the component list
- * would silently clobber whatever an actually-triggered sibling just set —
- * not a hypothetical: this is what happened before FadeState existed.
+ * would silently clobber whatever an actually-triggered sibling just set.
  * uicoopa/ui_yaml.h wires shared_fade/ticks up automatically for same-object,
  * same-target_component siblings; unshared instances (the common case — one
  * reactor, one graphic) just get their own private FadeState and tick it

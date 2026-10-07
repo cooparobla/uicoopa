@@ -7,15 +7,13 @@
  * atlas's coverage values are drawn as colour, i.e. solid blocks instead of letters (see
  * UiPass::is_text_view_).
  *
- * That knowledge used to be assembled at SCENE-PARSE time: UIResourceCache recorded each
- * `(font, authored font_size)` pair a !Text component asked for, and mark_text_atlases()
- * replayed the list. That works only while the baked size is exactly the authored size. It is
- * not, any more -- Text bakes at `font_size * the canvas's effective text scale`, so the size
- * is a runtime property of the window and the canvas, and a parse-time list cannot know it.
+ * A list built at scene-parse time from authored `font_size`s can't supply it: Text bakes at
+ * `font_size * the canvas's effective text scale`, so the baked size is a runtime property of
+ * the window and the canvas.
  *
- * So registration moved to the one place that cannot be out of date: FontAtlas's constructor.
- * Every atlas that exists is in here, whoever created it and whenever; the destructor removes
- * it again. Hosts call UIResourceCache::mark_text_atlases() per frame exactly as before.
+ * So registration happens in the one place that cannot be out of date: FontAtlas's
+ * constructor. Every atlas that exists is in here, whoever created it and whenever; the
+ * destructor removes it again. Hosts call UIResourceCache::mark_text_atlases() per frame.
  *
  * Not thread-safe, and deliberately so -- atlas creation happens on the thread that emits UI,
  * which is the same thread that records draw commands.

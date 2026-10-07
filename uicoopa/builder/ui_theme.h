@@ -43,7 +43,7 @@ struct PanelStyle {
  * build_context.h for the exact mapping). `font` is not set by hand -- it is
  * populated from `path` when a theme is loaded through ThemeLibrary (see
  * ui_theme_yaml.h's resolve_theme_fonts()); a null `font` here falls back to
- * UITheme::font, then FontDefaults::font, same as before this struct existed. */
+ * UITheme::font, then FontDefaults::font. */
 struct FontRoleStyle {
     std::string path;           /**< Font file path; empty inherits TypographyStyle::font_path. */
     float       size = 0.0f;    /**< Pixel size; <= 0 inherits the category's size_* scalar. */
@@ -317,9 +317,8 @@ struct MenuStyle {
  * ...): one obvious place for a themed app to override this look, and a 1:1 mirror of the
  * `tooltip:` YAML block ui_theme_yaml.h parses.
  *
- * `bg` deliberately matches SlotStyle::tooltip_bg's value -- InventoryGrid grew its own
- * hover tooltip before this general one existed, and the two should be indistinguishable
- * until a theme says otherwise.
+ * `bg` deliberately matches SlotStyle::tooltip_bg's value -- InventoryGrid draws its own
+ * hover tooltip, and the two should be indistinguishable until a theme says otherwise.
  *
  * `delay` is the part worth tuning rather than the colors. Too short and a tooltip flashes
  * up while the pointer is merely crossing the panel on its way somewhere else; too long and

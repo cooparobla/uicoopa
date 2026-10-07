@@ -94,7 +94,7 @@ comes from, and one matrix at the pass level.
   Layout is unaffected at any value: `Text` divides everything the atlas reports back down by
   the same factor (see `widgets/text.h`). **Screen-space canvases need nothing here** — their
   magnification is exactly `scale_factor()`, which is folded in automatically; the default
-  `1.0` reproduces the pre-supersampling behaviour byte for byte.
+  `1.0` adds no supersampling.
 - **`occlude`** hides fragments behind opaque geometry. Off by default: the floating-nameplate
   look, always legible. It is a fragment-shader depth compare and `discard`, **not** a hardware
   depth test, because a world canvas composites into whatever colour target the host already
@@ -158,7 +158,7 @@ bar floating above it, plus a second `Transform`-mode canvas, driven by
   atlas parsed from a YAML descriptor, with a `TypedAssetLoader` integration and hot-reload.
 - **`icon_library.h`** — `IconLibrary`, a process-wide singleton (`IconLibrary::instance()`)
   resolving icon names to sprites from one or more loaded sheets; every builder factory that
-  can draw a real icon (see `builder/` below) degrades gracefully to its pre-icon look when
+  can draw a real icon (see `builder/` below) degrades gracefully to a plain shape when
   nothing is published.
 
 ## Text (`uicoopa/text/`)
@@ -268,11 +268,11 @@ bar floating above it, plus a second `Transform`-mode canvas, driven by
   than per-widget hover signals, because only `Button` has any — `Slider`/`Toggle`/`SpinBox`/
   `TextField` keep hover private and `ComboBox` isn't an `IPointerHandler` at all — so this
   covers every widget, including future ones, with no widget changes.
-- **`detail/hidden_subtree.h`** — `start_hidden_subtree()`, one shared copy of the
+- **`detail/hidden_subtree.h`** — `start_hidden_subtree()`, the shared workaround for
   "`SceneObject::start()` early-returns on `!active_`, so a subtree built hidden never wires
-  up" workaround that `ComboBox` and `TabView` each used to carry privately. Under
-  `widgets/` rather than `builder/` so it keeps the property those private copies existed
-  for: a widget header depends on nothing in `uicoopa/builder/`.
+  up", used by `ComboBox`, `TabView` and other widgets that hide a subtree they built. Under
+  `widgets/` rather than `builder/` because a widget header depends on nothing in
+  `uicoopa/builder/`.
 
 ## Groups (`uicoopa/groups/`)
 - **`layout_group.h`** — `HorizontalLayoutGroup`/`VerticalLayoutGroup`: automatic child
@@ -631,8 +631,8 @@ a tabular-figures mono for digit readouts), instead of every widget sharing one 
 at one of `size_title`/`size_label`/`size_small`. An omitted `path` inherits `font_path`; an
 omitted (or `<= 0`) `size` inherits that category's `size_title`/`size_heading`/`size_body`/
 `size_label`/`size_small`/`size_label` scalar respectively (see `FontRole`'s doc in
-`detail/build_context.h` for the exact table) — so existing theme files with only the legacy
-`text:` keys parse unchanged. In YAML:
+`detail/build_context.h` for the exact table) — so theme files with only the basic `text:`
+keys still work. In YAML:
 
 ```yaml
 text:
@@ -911,7 +911,20 @@ frame's layer rects, so a widget under an open popup does not react.
   canvas holding one. Restructure the scene after `late_update()`, not inside the callback.
 - **`imm_icons.h`** — a vector icon set drawn from lines, triangles and circles, so it needs
   no image assets and stays sharp at any scale.
+- **`imm_file_dialog.h`** — `imm::FileDialog`, a Finder-style Open / Save / Choose Folder
+  modal. Keep one, call `draw(ctx)` every frame after the rest of the UI, and `open()` it with
+  a mode, title, start folder, extension filter and callback. It has back / forward / up, a
+  path bar with live search, a Favorites / Recent / Locations sidebar, a sortable list, a
+  Format menu, and full keyboard navigation; Shift+Cmd+N (or New Folder in the list's
+  right-click menu) creates a folder and renames it in place. Apps name their own document
+  kinds with `kind_name` / `format_group` and add Favorites with `favorites` / `launch_dir`.
 - **`imm_theme.h`** — themes, below.
+
+`combo()` / `combo_box()` popups with more than 15 items get a search field that has the
+keyboard as soon as the popup opens: typing filters by substring (any case), Up / Down move a
+highlight, Enter picks it. An optional `int* hovered` out-parameter reports the item under
+the pointer (or keyboard highlight) for live previews. `keyboard_consumed()` tells code that
+reads keys directly whether a widget already used the keyboard this frame.
 
 The toyengine editor is built entirely on this layer.
 
@@ -926,6 +939,11 @@ application sections, such as an editor's `viewport:` colours, read with
 can be a few overrides. `visit_style()` is the single list of themable fields that both
 the loader and `theme_to_yaml()` walk; `list_themes(dir)` finds the themes in a folder.
 Apply one with `ctx.style = theme.style`. Style's compiled-in values are only a fallback.
+
+Two metrics shape property rows (`property_row()`, which every labelled inspector widget goes
+through): `label_ratio` is the fraction of the row given to the label column, and
+`label_align` places the label within it, from `0` (flush left, as in a form) to `1` (the
+default: right-aligned against the widget, as Blender does).
 
 ## The demos
 

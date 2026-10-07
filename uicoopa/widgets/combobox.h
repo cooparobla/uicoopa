@@ -26,10 +26,9 @@ namespace detail_combobox {
 /**
  * @brief Runs SceneObject::start() over a subtree that is meant to end up hidden.
  *
- * Retained as this widget's long-standing spelling of the helper; the body now lives
- * in widgets/detail/hidden_subtree.h, shared with TabView and every widget added since
- * (see that file for why it sits under widgets/ and not builder/). The reason this
- * ComboBox needs it is unchanged: a popup built already hidden would leave every widget
+ * A ComboBox-local name for the helper; the body lives in widgets/detail/hidden_subtree.h,
+ * shared with TabView and other widgets (see that file for why it sits under widgets/ and
+ * not builder/). ComboBox needs it because a popup built already hidden would leave every widget
  * inside it unwired -- including each item's gamepad Selectable
  * (builder/detail/selectables.h), whose ONLY registration path with NavigationContext
  * is its own start().

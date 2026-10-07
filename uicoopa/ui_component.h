@@ -19,7 +19,7 @@
 namespace coopa {
 namespace ui {
 
-class DrawList;  // Defined in uicoopa/render/draw_list.h (Phase 3).
+class DrawList;  // Defined in uicoopa/render/draw_list.h.
 
 /**
  * @struct SizeConstraints

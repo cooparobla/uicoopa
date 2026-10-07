@@ -110,12 +110,11 @@ public:
         // side ~6.9H at oversample 1. 8H rounded up to a power of two clears that with margin at
         // every size, and the loop below covers whatever it doesn't.
         //
-        // Floored at kMinAtlasDim, which is the size every atlas used to be: a smaller atlas
-        // packs glyphs differently, and with a padding of 1 texel and a LINEAR sampler a
-        // magnified glyph's filter taps can reach a NEIGHBOUR's texels -- so shrinking the atlas
-        // silently changes how existing text renders. Growing it never does. This keeps every
-        // size that already fit byte-identical and confines the new behaviour to the sizes that
-        // previously threw.
+        // Floored at kMinAtlasDim: a smaller atlas packs glyphs differently, and with a padding
+        // of 1 texel and a LINEAR sampler a magnified glyph's filter taps can reach a
+        // NEIGHBOUR's texels -- so shrinking the atlas would change how text renders. Growing it
+        // never does, so every size that fits in kMinAtlasDim packs identically and only larger
+        // sizes grow.
         const uint32_t over_max = std::max(h_oversample, v_oversample);
         uint32_t dim = next_pow2(std::clamp<uint32_t>(
             static_cast<uint32_t>(std::ceil(8.0f * pixel_height * static_cast<float>(over_max))),
@@ -221,7 +220,7 @@ public:
     float line_height() const { return ascent_ - descent_ + line_gap_; }
 
 private:
-    /// The fixed size every atlas used to be, kept as a floor -- see the seed comment in the ctor.
+    /// Smallest atlas side, kept as a floor -- see the seed comment in the ctor.
     static constexpr uint32_t kMinAtlasDim = 512;
     /// Vulkan guarantees maxImageDimension2D >= 4096, so this needs no device query. At R8 that
     /// is a 16 MB staging copy -- only reachable by a pixel_height far past any UI's needs.

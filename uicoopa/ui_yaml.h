@@ -245,17 +245,14 @@ public:
      * @brief Marks every font atlas texture used by any parsed !Text component as
      *        an R8-coverage text atlas, so the pass samples it correctly.
      *
-     * Call once after loading a scene (or scenes) — replaces the app hand-listing
-     * every baked size itself, e.g. test_window.cpp's old
-     * `ui_pass.mark_as_text_atlas(ui_font.atlas_for_size(kTitleSize).texture().view_typed())`
-     * lines.
+     * Call after loading a scene (or scenes), and per frame, so the app never has to
+     * hand-list every baked size with `ui_pass.mark_as_text_atlas(...)` itself.
      *
      * Templated on the pass rather than taking `UiPass&`: UiWorldPass exposes the same
      * mark_as_text_atlas(TextureView) method and needs exactly the same treatment, and a
      * canvas drawn by both must be registered with both. Without this, every world-space
      * Text batch would select the RGBA "quad" variant and render an R8 glyph atlas's
-     * coverage values as colour — solid red blocks instead of letters. Source-compatible
-     * with every existing call site.
+     * coverage values as colour — solid red blocks instead of letters.
      *
      * @tparam Pass Anything with a `mark_as_text_atlas(coopa::gfx::TextureView)` method.
      */
@@ -265,7 +262,7 @@ public:
             ui_pass.mark_as_text_atlas(font->atlas_for_size(size).texture().view_typed());
         }
         // ...and every atlas that actually exists, whatever size it was baked at. The loop above
-        // only knows the sizes AUTHORED in the scene file, which is no longer the same thing:
+        // only knows the sizes AUTHORED in the scene file, which differ from the baked ones:
         // Text bakes at font_size * the canvas's effective text scale, a runtime property of the
         // window and the canvas (see Text::emit()). Without this, a supersampled atlas would fail
         // the pass's is_text_view_ check and its R8 coverage would be drawn as RGBA colour --
@@ -953,7 +950,7 @@ inline void register_ui_components(coopa::gfx::core::Device& device,
 
     // Lets ui_theme_yaml.h's resolve_theme_fonts() load a theme's per-role
     // fonts (TypographyStyle::title/heading/body/label/caption/numeric and the
-    // legacy font_path) through the same GPU-backed cache scene-referenced
+    // fallback font_path) through the same GPU-backed cache scene-referenced
     // fonts use, without ui_theme_yaml.h depending on UIResourceCache directly.
     FontDefaults::resolve_font = [](const std::string& path) {
         return UIResourceCache::instance().font_for_path(path);

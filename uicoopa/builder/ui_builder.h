@@ -540,7 +540,7 @@ public:
 
     /** @brief A left-to-right row of icons, e.g. a strip of glyphs under a card header.
      *         Each name that IconLibrary doesn't resolve draws nothing (see add_icon()) --
-     *         no has_icons() guard needed, unlike hand-rolled callers before this existed.
+     *         so callers need no has_icons() guard.
      *  @param color `color.a < 0` uses the theme's accent text color. */
     std::vector<Image*> add_icon_row(const std::vector<std::string>& icon_names, float size = -1.0f,
                                      glm::vec4 color = {0.0f, 0.0f, 0.0f, -1.0f}, float spacing = -1.0f,
@@ -555,8 +555,7 @@ public:
     }
 
     /** @brief Assigns `items[i]` to `grid`'s slot `i`, in order -- the UIBuilder-level
-     *         facade for detail::set_items(), which callers previously had to reach into
-     *         the detail:: namespace directly to use. */
+     *         facade for detail::set_items(), so callers needn't reach into detail::. */
     void set_items(InventoryGrid* grid, const std::vector<InventoryItem>& items) {
         detail::set_items(grid, items);
     }

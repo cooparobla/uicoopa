@@ -350,7 +350,7 @@ coopa::gfx::app::ContextConfig config = coopa::gfx::app::ContextConfig::from_env
 
         // Must run before frame(): resolving new textures updates descriptor
         // sets, which is unsafe once a render pass is open.
-        // Per-frame, like every other demo here. The pre-loop call is not enough any more: Text
+        // Per-frame, like every other demo here. A pre-loop call alone is not enough: Text
         // bakes its glyph atlas at font_size * the canvas's effective text scale, which depends on
         // the live window size, so a mark taken before the first frame can miss the atlas that
         // actually gets drawn -- and an unmarked R8 atlas renders as solid colour blocks.

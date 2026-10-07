@@ -13,15 +13,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # that belongs to "the uicoopa repo as an application" -- its six demo executables, its
 # ctest registration, its generated root_directory.h, and its leak gate -- is gated on it,
 # so a consumer that add_subdirectory()'s this repo gets exactly one thing: the coopa::ui
-# target below. Same guard physxcoopa/CMakeLists.txt:36 and sfxcoopa/CMakeLists.txt:53
-# already use.
+# target below. physxcoopa and sfxcoopa use the same guard.
 #
 # Every path below is derived from CMAKE_CURRENT_SOURCE_DIR / CMAKE_CURRENT_BINARY_DIR,
 # never CMAKE_SOURCE_DIR / CMAKE_BINARY_DIR. Those two mean "the TOP-LEVEL project", so
-# under add_subdirectory() they pointed this repo's own includes, shader dir and generated
-# header at the consumer's tree instead of at uicoopa -- the exact bug
-# libcoopa/CMakeLists.txt:11-18 documents. They are still correct to use for the
-# standalone test itself, which is precisely a question about the top-level project.
+# under add_subdirectory() they would point this repo's own includes, shader dir and
+# generated header at the consumer's tree instead of at uicoopa. They are still correct
+# for the standalone test itself, which is precisely a question about the top-level project.
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(UICOOPA_STANDALONE TRUE)
 else()
@@ -69,8 +67,8 @@ endif()
 # `target_link_libraries(myapp PRIVATE coopa::ui)` sufficient.
 # uicoopa_impl: the one non-header-only piece -- the single TU that compiles
 # stb_truetype's implementation block. See src/ui_impl.cpp for why this must be
-# singular, and why the old repo-wide add_definitions() could not survive becoming
-# add_subdirectory()-able. Mirrors gfxcoopa_impl exactly.
+# singular, and why a directory-scoped add_definitions() can't provide it to a
+# consumer. Mirrors gfxcoopa_impl exactly.
 add_library(uicoopa_impl STATIC src/ui_impl.cpp)
 target_compile_features(uicoopa_impl PRIVATE cxx_std_20)
 target_compile_definitions(uicoopa_impl PRIVATE STB_TRUETYPE_IMPLEMENTATION)
@@ -89,20 +87,18 @@ target_include_directories(uicoopa_lib INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/includes        # stb/stb_truetype.h
     ${CAML_DIR}/includes                        # caml/ + fkYAML
     ${CAML_DIR})                                # caml.h root
-# UICOOPA_HAS_AUDIO must be INTERFACE, not the old directory-scoped
+# UICOOPA_HAS_AUDIO must be INTERFACE, not a directory-scoped
 # add_compile_definitions(): a consumer compiling uicoopa/audio/*.h without it would
 # silently get the no-audio stubs while linking against a coopa::sfx that is present.
 target_compile_definitions(uicoopa_lib INTERFACE ${UICOOPA_AUDIO_DEFS})
 target_link_libraries(uicoopa_lib INTERFACE uicoopa_impl coopa::gfx ${UICOOPA_AUDIO_LIBS})
 
 # --- Shader compilation ---
-# Previously relied entirely on cbuild --vulkan (checked-in .spv, plain `glslc <file> -o
-# <file>.spv`, no -I). That stops working the moment a uicoopa shader #includes
-# <gfx/surface2d/...> from gfxcoopa's shared 2D quad backbone -- gfx_add_shader_target()
-# (owned by gfxcoopa, see its own file doc) always adds gfxcoopa's assets/shaders/ to the
-# -I search path and tracks .glsl body dependencies via glslc -MD depfiles, which cbuild's
-# plain invocation does neither of. .glslc_flags (already present, for cbuild) keeps that
-# path working too.
+# ui.vert #includes <gfx/surface2d/quad_vs.glsl>, gfxcoopa's shared 2D quad backbone.
+# gfx_add_shader_target() (owned by gfxcoopa, see its own file doc) adds this repo's
+# assets/shaders/ and gfxcoopa's assets/shaders/ to the -I search path and tracks .glsl
+# body dependencies via glslc -MD depfiles, writing each .spv next to its source.
+# assets/shaders/.glslc_flags gives cbuild --vulkan the same -I paths.
 #
 # Deliberately NOT gated on UICOOPA_STANDALONE: a consumer needs these .spv files at
 # runtime just as much as the demos do (UiPass/UiWorldPass take .spv paths), so it

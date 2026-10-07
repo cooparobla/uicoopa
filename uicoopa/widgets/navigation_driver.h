@@ -16,8 +16,7 @@
  * -- i.e. after rebuild_layout() (fresh RectTransform::rect()s), after
  * rebuild_emit(), and after EventSystem::process() (fresh hover state, needed
  * for the Hybrid pointer->selection sync). Anything this driver changes is
- * therefore emitted next frame -- not a regression, since a mouse click has
- * exactly this same one-frame latency (EventSystem::process() is likewise
+ * therefore emitted next frame -- the same one-frame latency a mouse click has (EventSystem::process() is likewise
  * the last thing in the canvas's own late_update()).
  */
 
@@ -196,11 +195,10 @@ private:
      * Otherwise, *holding* any pad button/stick wins and keeps the driver in
      * Gamepad mode for as long as it's held, regardless of incidental mouse
      * drift -- a resting hand on the mouse (or plain OS cursor jitter) must
-     * not silently starve an actively-held gamepad session, which previously
-     * made multi-step flows (e.g. opening a ComboBox popup, moving between
-     * its items, then confirming) unreliable the instant the mouse so much as
-     * twitched. Only when the player truly isn't touching the pad does
-     * ambient mouse motion reclaim Pointer, exactly as before.
+     * not silently starve an actively-held gamepad session, or multi-step
+     * flows (e.g. opening a ComboBox popup, moving between its items, then
+     * confirming) would break the instant the mouse twitched. Only when the
+     * player isn't touching the pad does ambient mouse motion reclaim Pointer.
      */
     void update_active_mode_(const GamepadState& pad) {
         if (build_mode == InputMode::Pointer) return;  // never installed in practice, but stay inert if it is

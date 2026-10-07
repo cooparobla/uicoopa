@@ -4,13 +4,9 @@
  * engine::data::Texture -- a solid white default texture, and a synchronous
  * load-from-file helper for the interactive demo/tests.
  *
- * uicoopa/render/texture.h (a full duplicate of gfxcoopa's Texture, complete
- * with its own raw Vulkan upload path) used to provide these two factory
- * methods directly on its own Texture class. Now that gfxcoopa's Texture
- * supports arbitrary formats (including the R8_Unorm FontAtlas needs) via
- * its sealed upload() overload, that duplicate is gone -- these two free
- * functions are the only uicoopa-specific pieces left to carry forward, and
- * they belong here (not in gfxcoopa) since "make a white default texture"
+ * Textures themselves are gfxcoopa's Texture, which supports arbitrary formats
+ * (including the R8_Unorm FontAtlas needs) via its sealed upload() overload.
+ * These two free functions live here (not in gfxcoopa) since "make a white default texture"
  * and "synchronously decode+upload one file" are demo/UI conveniences, not
  * something every gfxcoopa consumer needs (gfxcoopa's own asset-loader path,
  * coopa::asset::TextureLoader, already covers the general case).

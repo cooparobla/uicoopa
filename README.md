@@ -79,8 +79,9 @@ screen-space or placed in the 3D world.
 - **`imm::FileDialog`** (`immediate/imm_file_dialog.h`). A Finder-style Open / Save / Choose
   Folder modal. It has back / forward / up buttons, a clickable path bar with live search,
   Favorites / Recent / Locations in a sidebar, a sortable Name / Date / Size / Kind list, a
-  Format menu, and full keyboard navigation. An app names its own document kinds and adds its
-  own Favorites.
+  Format menu, full keyboard navigation, and Finder-style New Folder with in-place rename. An
+  app names its own document kinds and adds its own Favorites.
+- **Searchable combos.** `combo()` lists longer than 15 items get a type-to-filter field.
 - **`ImmediateCanvas`** hosts it inside a normal screen-space canvas.
 
 ## Dependencies
@@ -95,8 +96,8 @@ folder. `CMakeLists.txt` pulls them in as follows:
 | [sfxcoopa](../sfxcoopa) | optional, `UICOOPA_WITH_AUDIO` (ON) | UI sound in `uicoopa/audio/` only. If the folder is missing, uicoopa builds without audio and prints a warning. |
 | [caml](../caml) | include path only | `CMakeLists.txt` adds its `includes/` (fkYAML) to the include path. No uicoopa header includes a caml header directly. |
 
-You also need the Vulkan SDK (with `glslc`), GLFW, CMake and a C++20 compiler. stb_truetype
-is vendored in `includes/`.
+You also need the Vulkan SDK (with `glslc`), GLFW, CMake 3.20+ (gfxcoopa's shader rules need
+it) and a C++20 compiler. stb_truetype is vendored in `includes/`.
 
 ## Getting started
 
@@ -276,6 +277,7 @@ uicoopa/
 ├── builder/     UIBuilder, UITheme, ThemeLibrary; one detail/ header per concern
 ├── reactors/    YAML-declared responses to signals
 ├── audio/       optional UI sound (sfxcoopa)
+├── binding/     UiHandle: bind game code to named widgets in authored UI
 ├── immediate/   imm::Context, ImmediateCanvas, icons, themes, FileDialog
 └── ui_yaml.h    register_ui_components()
 assets/          shaders, fonts, themes, icon sheets, sounds, demo scenes and prefabs

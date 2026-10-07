@@ -231,7 +231,7 @@ int main() {
         UIResourceCache::instance().note_text_atlas_use(f, sz);
     };
     // Lets ThemeLibrary's per-role fonts (title/heading/body/label/caption/numeric,
-    // and the legacy font_path) actually load -- see ui_theme_yaml.h's
+    // and the fallback font_path) actually load -- see ui_theme_yaml.h's
     // resolve_theme_fonts(), called from load() below. configure() is needed even
     // though this demo never calls register_ui_components() (it builds UI
     // imperatively): font_for_path() no-ops without a Device/Allocator/CommandPool.

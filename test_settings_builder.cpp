@@ -194,10 +194,8 @@ struct StatusReadouts {
  * @brief Builds the settings inspector (SettingsWindow): a titled card whose
  *        body is a UIBuilder::tab_view() with seven pages -- Display,
  *        Graphics, Audio, Gameplay, Controls, Accessibility, Network --
- *        each populated entirely via UIBuilder's row helpers. Replaces the
- *        old single 52-row scroll list (add_section_header() strips with no
- *        real grouping) with a real tabbed layout; every row still fits its
- *        page without scrolling once split this way.
+ *        each populated entirely via UIBuilder's row helpers. Every row fits
+ *        its page without scrolling.
  * @return The card's Body builder, so StatusReadouts and the env-var hooks
  *         below can keep reading back by name -- UIBuilder::get_value()
  *         searches the whole subtree regardless of which tab is selected
@@ -353,7 +351,7 @@ void refresh_status_card(UIBuilder settings, const UITheme& theme, StatusReadout
     s.render_scale->text = "Render Scale: " + format_float(settings.get_value<float>("render_scale")) + "x";
 
     // Flagged Warning near the top of its range (attention-worthy, not necessarily bad),
-    // Secondary otherwise -- mirrors the old demo's habit of color-coding notable values.
+    // Secondary otherwise -- color-codes notable values.
     float shadow_distance = settings.get_value<float>("shadow_distance");
     s.shadows->text = "Shadow Distance: " + format_float(shadow_distance, 0);
     s.shadows->color = shadow_distance >= 400.0f ? theme.text.warning : theme.text.secondary;
@@ -542,11 +540,9 @@ Animator* build_animations(SceneObject* canvas_obj, const UITheme& theme) {
  *        the settings panel live, and a footer status line -- plus a Modal confirm
  *        dialog the Reset button opens instead of resetting immediately.
  *
- * The icon strip / button row / footer used to be two hand-positioned
- * horizontal_layout() children (`at(TopLeft, {20,-6}, {720,32})` then
- * `{20,-46},{720,40}`, with widths restated as `760 - 2*20` literals) plus a free-
- * positioned footer paragraph. split_rows() replaces all three with one call, and
- * add_icon_row()/add_action_bar() replace their respective hand-rolled loops.
+ * The icon strip / button row / footer are one split_rows() call rather than
+ * hand-positioned children with restated width literals, and add_icon_row()/
+ * add_action_bar() build their contents.
  */
 void build_action_panel(UIBuilder root, UIBuilder settings, Animator* banner_anim) {
     const UITheme& theme = root.theme();
@@ -651,7 +647,7 @@ int main() {
         UIResourceCache::instance().note_text_atlas_use(f, sz);
     };
     // Lets ThemeLibrary's per-role fonts (title/heading/body/label/caption/numeric,
-    // and the legacy font_path) actually load -- see ui_theme_yaml.h's
+    // and the fallback font_path) actually load -- see ui_theme_yaml.h's
     // resolve_theme_fonts(), called from load() below. configure() is needed even
     // though this demo never calls register_ui_components() (it builds UI
     // imperatively): font_for_path() no-ops without a Device/Allocator/CommandPool.

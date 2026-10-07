@@ -19,12 +19,11 @@
  *
  * A nonzero RectTransform::z_order resets this inherited clip back to
  * unbounded (see hit_test_all_), letting a node escape an ancestor Mask
- * entirely. That means an inherited clip can no longer be assumed to only
- * shrink going deeper (a descendant can "widen" it back out at will), so
- * hit_test_all_ always recurses into every active child rather than pruning a
- * subtree whose CURRENT clip excludes the point — an earlier version pruned
- * there for cost, but that is unsound once escaping is possible: it would
- * cut off an escaping descendant before it ever got a chance to reset the clip.
+ * entirely. So an inherited clip can't be assumed to only shrink going deeper
+ * (a descendant can "widen" it back out at will), and hit_test_all_ always
+ * recurses into every active child rather than pruning a subtree whose CURRENT
+ * clip excludes the point: pruning would cut off an escaping descendant before
+ * it ever got a chance to reset the clip.
  */
 
 #ifndef UICOOPA_INPUT_RAYCASTER_H
@@ -134,8 +133,8 @@ private:
 
         // Always recurse, even when the point is currently outside child_clip: a
         // descendant with its own nonzero z_order can still escape this clip (see
-        // the file doc) — this node's clip can no longer be assumed to only ever
-        // shrink further down the tree, so it can't be used to prune here.
+        // the file doc) — this node's clip can't be assumed to only ever shrink
+        // further down the tree, so it can't be used to prune here.
         auto& children = obj.children();
         for (auto it = children.rbegin(); it != children.rend(); ++it) {
             hit_test_all_(**it, point, child_clip, effective, out);

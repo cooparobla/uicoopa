@@ -120,9 +120,9 @@ inline const FontRoleStyle& font_role_style(const UITheme& theme, FontRole role)
  * @brief Resolves a FontRole to its pixel size within `theme`.
  *
  * A role's own FontRoleStyle::size wins if positive; otherwise falls back to
- * that category's legacy TypographyStyle::size_* scalar, so a theme file that
- * only sets the old size_title/size_label/size_small keys (no `fonts:` block
- * at all) renders identically to before FontRole existed.
+ * that category's TypographyStyle::size_* scalar, so a theme file that only
+ * sets the size_title/size_label/size_small keys (no `fonts:` block at all)
+ * still sizes every role.
  */
 inline float font_role_size(const UITheme& theme, FontRole role) {
     const FontRoleStyle& style = font_role_style(theme, role);

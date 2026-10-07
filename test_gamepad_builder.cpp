@@ -20,7 +20,7 @@
  *   C / V           - X / Y (Full profile only)
  *   PageUp/PageDown - triggers (Full profile only)
  *   Tab             - Start (Advance)
- * Because Escape is now the pad's B button, quitting is bound to F10 instead
+ * Because Escape is the pad's B button, quitting is bound to F10 instead
  * (see the render loop below).
  *
  * Layout: a themed Card ("Settings") with a tab_view() of three pages
@@ -373,7 +373,7 @@ int main() {
 
     while (!ctx.should_close()) {
         ctx.poll();
-        // Escape is now the pad's Back button -- quit is F10 instead.
+        // Escape is the pad's Back button -- quit is F10 instead.
         if (ctx.input().key_down(coopa::input::Key::F10)) ctx.window().set_should_close(true);
 
         float dt = ctx.delta_time();

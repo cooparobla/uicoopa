@@ -218,9 +218,8 @@ public:
      * @brief Optional interception point for transfer_or_swap_items(): when set, called
      *        instead of this widget's own built-in move/merge/swap rule, and must return
      *        true iff it actually changed something (matching that rule's own return
-     *        contract). Null (the default) is byte-identical to every caller before this
-     *        field existed -- every existing standalone InventoryGrid usage/test is
-     *        unaffected. This is the seam InventoryBinding (widgets/inventory_binding.h)
+     *        contract). Null (the default) uses the built-in rule, so a standalone
+     *        InventoryGrid needs nothing here. This is the seam InventoryBinding (widgets/inventory_binding.h)
      *        installs to route drag-drop/pick-place through a backing coopa::item::Inventory
      *        instead of this widget's own items_ vector -- see that header's doc for why
      *        the interception happens here rather than at each call site (InventorySlot::

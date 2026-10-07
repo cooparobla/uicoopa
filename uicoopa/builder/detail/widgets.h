@@ -347,8 +347,7 @@ inline Toggle* make_toggle(BuildContext ctx, const std::string& name, bool initi
     auto* check_img = shape_control(check_obj->add_component<Image>(), theme, 0.6f);
     check_img->color = theme.toggle.check;
     // If no IconLibrary sheet is loaded, icon() returns nullptr and check_img->sprite
-    // stays null -- Image::emit() then falls back to exactly the plain tinted square
-    // this looked like before icons existed.
+    // stays null -- Image::emit() then draws a plain tinted square.
     check_img->sprite = IconLibrary::instance().icon(theme.icons.toggle_check);
 
     auto* toggle = toggle_obj->add_component<Toggle>(initial_val);
@@ -586,7 +585,7 @@ inline ComboBox* make_dropdown(BuildContext ctx, const std::string& name,
     popup_rt->z_order = 1;
 
     shape_panel(popup_obj->add_component<Image>(), theme, /*floating=*/true)->color = theme.combobox.popup_bg;
-    // Bounds item text to the popup's own rect. Load-bearing now that the popup
+    // Bounds item text to the popup's own rect. Load-bearing because the popup
     // escapes any ancestor Mask (z_order above): without its own Mask, nothing
     // would clip an item whose text is wider than the popup.
     popup_obj->add_component<Mask>();

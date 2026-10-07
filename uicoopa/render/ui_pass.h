@@ -50,9 +50,8 @@ namespace ui {
 /**
  * @struct UiPushConstants
  * @brief Matches the `Push` block declared in ui.vert exactly -- see
- *        gfx/surface2d/quad_vs.glsl's doc for the scale/offset convention. Shrunk from its
- *        old {inv_canvas_size, is_text, _pad} shape now that is_text selects a pipeline
- *        variant instead of riding along in the push block (see ui_quad.frag/ui_text.frag).
+ *        gfx/surface2d/quad_vs.glsl's doc for the scale/offset convention. Text vs quad
+ *        is a pipeline variant, not a push-constant flag (see ui_quad.frag/ui_text.frag).
  */
 struct UiPushConstants {
     float scale[2];
@@ -232,9 +231,8 @@ public:
         push.scale[1]  = canvas_h > 0.0f ? (1.0f / canvas_h) * 2.0f : 0.0f;
         push.offset[0] = -1.0f;
         push.offset[1] = -1.0f;
-        // Scale/offset are per-FRAME (canvas size), not per-batch -- pushed once, unlike the
-        // old is_text-carrying block which had to be re-pushed every batch. The pipeline
-        // bind below is what varies per batch now.
+        // Scale/offset are per-FRAME (canvas size), not per-batch -- pushed once. The pipeline
+        // bind below (quad vs text variant) is what varies per batch.
         cmd.push_constants(coopa::gfx::ShaderStage::Vertex | coopa::gfx::ShaderStage::Fragment, push);
 
         bool last_is_text = false;
