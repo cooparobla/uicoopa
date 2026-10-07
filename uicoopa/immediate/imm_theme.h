@@ -64,6 +64,7 @@ void visit_style(S& s, V&& v) {
     v.metric("spacing", s.spacing);
     v.metric("indent", s.indent);
     v.metric("label_ratio", s.label_ratio);
+    v.metric("label_align", s.label_align);
     v.metric("scrollbar", s.scrollbar);
     v.metric("rounding", s.rounding);
 

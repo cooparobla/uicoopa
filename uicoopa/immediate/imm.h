@@ -202,6 +202,7 @@ struct Style {
     float spacing     = 3.0f;
     float indent      = 16.0f;
     float label_ratio = 0.46f;   ///< Property rows: fraction of the row width given to the label.
+    float label_align = 1.0f;    ///< Property rows: label placement in its column, 0 = left edge, 1 = against the widget (Blender).
     float scrollbar   = 7.0f;
     float rounding    = 4.0f;    ///< Widget corner radius.
 
@@ -1157,9 +1158,10 @@ public:
         const float lw = std::floor(row.w * style.label_ratio);
         const std::string_view shown = label_text(lbl);
         if (!shown.empty()) {
-            // Blender right-aligns property labels against the widget column.
+            // Blender right-aligns property labels against the widget column (label_align 1);
+            // forms flush them left (0).
             const float tw = text_width(shown);
-            const float x = std::max(row.x, row.x + lw - 8 - tw);
+            const float x = row.x + std::max(0.0f, lw - 8 - tw) * std::clamp(style.label_align, 0.0f, 1.0f);
             text_in({x, row.y, row.x + lw - 6 - x, style.row_height}, shown, style.text_dim, 0.0f);
         }
         last_label_box_ = {row.x, row.y, lw, h};

@@ -1,1 +1,1 @@
-/Users/tblaney/my_game/.libs/toyengine/libs/uicoopa/assets/shaders/ui.vert.spv: /Users/tblaney/my_game/.libs/toyengine/libs/uicoopa/assets/shaders/ui.vert /Users/tblaney/my_game/.libs/toyengine/libs/gfxcoopa/assets/shaders/gfx/surface2d/quad_vs.glsl
+/Users/tblaney/Code/nevart/libs/uicoopa/assets/shaders/ui.vert.spv: /Users/tblaney/Code/nevart/libs/uicoopa/assets/shaders/ui.vert /Users/tblaney/Code/nevart/libs/gfxcoopa/assets/shaders/gfx/surface2d/quad_vs.glsl
