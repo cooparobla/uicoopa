@@ -177,6 +177,10 @@ enum class Icon : int {
     VertexPaint, WeightPaint,
     // UI design (appended)
     UiCanvas, UiText, UiButton, UiLayout, UiWidget, UiAnchor,
+    // asset browser (appended)
+    Tag, Sort,
+    // mesh editing (appended)
+    Proportional,
 };
 
 class Context;
@@ -649,6 +653,11 @@ public:
     /** @brief A widget used the keyboard this frame (a text field typed, a list took Enter): code
      *         reading keys directly (a canvas text editor) should leave them alone. */
     bool keyboard_consumed() const { return keyboard_consumed_; }
+    /** @brief The text being typed into field `id_str` (same id scope as the field), if it is being edited. */
+    std::optional<std::string> editing_text(std::string_view id_str) {
+        if (text_edit_.active && text_edit_.id == get_id(id_str)) return text_edit_.buffer;
+        return std::nullopt;
+    }
 
     // -------------------------------------------------------------------------------
     // Last-item queries (the widget most recently declared)

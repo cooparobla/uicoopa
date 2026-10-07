@@ -470,6 +470,17 @@ inline void draw_icon(Context& ctx, Icon icon, const Box& b, const glm::vec4& co
             d.tri(8, 2, 6.5f, 5, 9.5f, 5); d.tri(8, 14, 6.5f, 11, 9.5f, 11);
             d.tri(2, 8, 5, 6.5f, 5, 9.5f); d.tri(14, 8, 11, 6.5f, 11, 9.5f); d.box(5.5f, 5.5f, 5, 5, 0.8f);
             break;
+        case Icon::Tag:   // a luggage tag pointing up-left, with its eyelet
+            d.l(2, 2, 8, 2); d.l(8, 2, 14, 8); d.l(14, 8, 8, 14); d.l(8, 14, 2, 8); d.l(2, 8, 2, 2);
+            d.circle(5, 5, 1.3f);
+            break;
+        case Icon::Proportional:   // proportional editing: a falloff ring around the selection
+            d.ring(8, 8, 6.2f); d.ring(8, 8, 3.6f, dim, 0.8f); d.circle(8, 8, 1.5f);
+            break;
+        case Icon::Sort:   // bars shortening downward, beside a down arrow
+            d.l(2, 3.5f, 9, 3.5f); d.l(2, 7, 7, 7); d.l(2, 10.5f, 5, 10.5f);
+            d.l(12, 2.5f, 12, 12); d.tri(9.5f, 11, 14.5f, 11, 12, 14);
+            break;
     }
 }
 
