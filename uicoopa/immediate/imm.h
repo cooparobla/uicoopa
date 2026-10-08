@@ -1461,6 +1461,18 @@ public:
         return r;
     }
     void tree_pop() { unindent(); }
+    /** @brief Whether tree node `id` is open (its last state; `default_open` before it was first drawn),
+     *         without drawing it -- lets a long list skip rows that are off screen and collapsed. */
+    bool tree_is_open(Id id, bool default_open = false) const {
+        auto it = states_.find(id);
+        return it != states_.end() && it->second.init ? it->second.b[0] : default_open;
+    }
+    /** @brief Whether a row of height `h` at the cursor would be entirely outside the clip rect. */
+    bool next_row_clipped(float h) const {
+        const float y = layout_stack_.back().cursor.y;
+        const Box c = current_clip();
+        return y + h < c.y || y > c.bottom();
+    }
     /** @brief Forces a tree node's (or collapsing header's) open state. */
     void set_open(Id id, bool open) { State& st = state_(id); st.init = true; st.b[0] = open; }
 
