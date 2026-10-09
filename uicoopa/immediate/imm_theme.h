@@ -67,6 +67,7 @@ void visit_style(S& s, V&& v) {
     v.metric("label_align", s.label_align);
     v.metric("scrollbar", s.scrollbar);
     v.metric("rounding", s.rounding);
+    v.metric("tooltip_delay", s.tooltip_delay);
 
     v.color("window_bg", s.window_bg);
     v.color("panel_bg", s.panel_bg);

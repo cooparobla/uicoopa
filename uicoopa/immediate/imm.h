@@ -205,6 +205,7 @@ struct Style {
     float label_align = 1.0f;    ///< Property rows: label placement in its column, 0 = left edge, 1 = against the widget (Blender).
     float scrollbar   = 7.0f;
     float rounding    = 4.0f;    ///< Widget corner radius.
+    float tooltip_delay = 0.6f;  ///< Seconds an item must be hovered, with the mouse resting, before its tooltip shows.
 
     glm::vec4 window_bg     {0.114f, 0.114f, 0.114f, 1.0f};   ///< #1d1d1d -- gaps between areas
     glm::vec4 panel_bg      {0.188f, 0.188f, 0.188f, 1.0f};   ///< #303030 -- editor background
@@ -506,6 +507,7 @@ public:
         keyboard_consumed_ = false;
         wheel_consumed_ = false;
         tooltip_.clear();
+        tooltip_seen_ = false;
         dl_->set_texture(dl_->default_texture());
 
         // A text field that was not redeclared this frame loses focus without committing.
@@ -514,6 +516,9 @@ public:
 
     void end_frame() {
         if (!any_down_()) suppress_reopen_.clear();   // the closing click is over
+        // The tooltip's item was not hovered this frame: the next hover waits the full delay again.
+        if (!tooltip_seen_) tooltip_target_ = 0;
+        tooltip_prev_mouse_ = in_.mouse;
         // Tooltip, top-most.
         if (!tooltip_.empty() && !drag_.active) {
             // Line 0 is the title (bright); further lines are description (dim) -- Blender's layout.
@@ -681,8 +686,17 @@ public:
      */
     void tooltip(std::string_view tip) {
         if (!last_item_.hovered) return;
-        if (tooltip_target_ != last_item_.id) { tooltip_target_ = last_item_.id; tooltip_start_ = time_; }
-        if (time_ - tooltip_start_ > 0.45) tooltip_ = std::string(tip);
+        tooltip_seen_ = true;
+        // The delay restarts on a new item, while the mouse is moving (sweeping across a panel
+        // shows nothing) and on any press (a click hides the tip until the next rest).
+        const glm::vec2 d = in_.mouse - tooltip_prev_mouse_;
+        const bool moving = d.x * d.x + d.y * d.y > 4.0f;
+        if (tooltip_target_ != last_item_.id || moving || any_down_()) {
+            tooltip_target_ = last_item_.id;
+            tooltip_start_ = time_;
+            return;
+        }
+        if (time_ - tooltip_start_ >= style.tooltip_delay) tooltip_ = std::string(tip);
     }
     /** @brief The tooltip shown this frame ("" if none) -- valid until the next begin_frame. */
     const std::string& tooltip_text() const { return tooltip_; }
@@ -2452,6 +2466,8 @@ private:
     std::string tooltip_;
     Id tooltip_target_ = 0;
     double tooltip_start_ = 0.0;
+    bool tooltip_seen_ = false;          ///< tooltip() saw its item hovered this frame
+    glm::vec2 tooltip_prev_mouse_{0.0f};  ///< last frame's mouse, to hold the delay while moving
 
     DragPayload drag_;
     Id drag_candidate_ = 0;
