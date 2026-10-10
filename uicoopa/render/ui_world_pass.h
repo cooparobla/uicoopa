@@ -270,7 +270,7 @@ public:
         // this pass's vertices go through a real view_proj, so a positive-height viewport
         // would mirror the whole canvas vertically about the target's centre (exactly as
         // documented on DebugLinePass::draw()); and the viewport state at this point in a
-        // host's frame is not reliably negative anyway -- gfxcoopa's PixelStylizePass, which
+        // host's frame is not reliably negative anyway -- gfxcoopa's StylizePass, which
         // typically runs immediately before, sets a POSITIVE one. Depending on the host's
         // state here would make correctness hinge on unrelated feature flags.
         cmd.set_viewport(0.0f, static_cast<float>(target_h),

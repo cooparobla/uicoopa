@@ -27,7 +27,7 @@ bool ui_world_occluded(float occlude, vec2 inv_target_size, float depth_bias) {
     // negative height (the sign affects the NDC->framebuffer mapping, not gl_FragCoord's own
     // origin), and .xy is already texel-centred. u_scene_depth was rasterized through the
     // same negative-height viewport at the same extent, so its texel (x, y) IS this
-    // framebuffer pixel -- no Y flip. (Cross-check: gfxcoopa's pixel_stylize.frag samples
+    // framebuffer pixel -- no Y flip. (Cross-check: gfxcoopa's stylize.frag samples
     // this same depth image via fullscreen.vert's v_uv, which maps uv (0,0) to the
     // framebuffer's top-left the same way.)
     float scene_z = texture(u_scene_depth, gl_FragCoord.xy * inv_target_size).r;
