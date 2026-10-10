@@ -1,0 +1,11 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/cmake_install.cmake",
+		"/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/gfxcoopa-build/cmake_install.cmake",
+		"/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/gfxcoopa-build/libcoopa-build/cmake_install.cmake",
+		"/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-build/cmake_install.cmake",
+		"/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/sfxcoopa-build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

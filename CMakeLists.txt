@@ -10,8 +10,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # --- Standalone vs consumed ---
 # UICOOPA_STANDALONE is true only when this file IS the top-level project. Everything
-# that belongs to "the uicoopa repo as an application" -- its six demo executables, its
-# ctest registration, its generated root_directory.h, and its leak gate -- is gated on it,
+# that belongs to "the uicoopa repo as an application" -- its test executable and five
+# windowed demos, its ctest registration, its generated root_directory.h, and its leak gate -- is gated on it,
 # so a consumer that add_subdirectory()'s this repo gets exactly one thing: the coopa::ui
 # target below. physxcoopa and sfxcoopa use the same guard.
 #
@@ -115,45 +115,54 @@ if(UICOOPA_STANDALONE)
     configure_file(configuration/root_directory.h.in configuration/root_directory.h)
     include_directories(${CMAKE_CURRENT_BINARY_DIR}/configuration)
 
-    # --- Add executables ---
-    # `uicoopa` is the headless suite ctest runs below — test.cpp, not test_window.cpp,
-    # so `ctest`/CI never needs a display.
-    add_executable(uicoopa test.cpp)
-    target_link_libraries(uicoopa PRIVATE coopa::ui)
+    # --- Headless test suites ---
+    # `uicoopa` is the headless test executable: one tests/<suite>_test.cpp per system on the
+    # shared coopa test framework (coopa/testing/test.h), plus area-local fixtures under
+    # tests/support/. coopa_add_test_suites() registers one ctest entry per suite
+    # (uicoopa_<suite>), each run as `uicoopa --suite <suite>`, so `ctest -j` parallelises
+    # them and none of them ever needs a display.
+    file(GLOB UICOOPA_TEST_SOURCES CONFIGURE_DEPENDS
+         ${CMAKE_CURRENT_SOURCE_DIR}/tests/*_test.cpp
+         ${CMAKE_CURRENT_SOURCE_DIR}/tests/support/*.cpp)
+    # ui_audio_test.cpp exercises sfxcoopa-backed types that only exist with audio on; in a
+    # no-audio build its suite would select zero tests, which the runner treats as a failure.
+    if(NOT UICOOPA_AUDIO_DEFS)
+        list(FILTER UICOOPA_TEST_SOURCES EXCLUDE REGEX "/ui_audio_test\\.cpp$")
+    endif()
+    add_executable(uicoopa ${UICOOPA_TEST_SOURCES})
+    target_include_directories(uicoopa PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    target_link_libraries(uicoopa PRIVATE coopa::ui coopa::test_main)
     add_dependencies(uicoopa uicoopa_shaders)
 
-    # Windowed interactive demo (RectTransform anchors, layout groups, Button) — separate
-    # from the headless `uicoopa` test target so `ctest`/CI never needs a display.
-    add_executable(uicoopa_test_window test_window.cpp)
-    target_link_libraries(uicoopa_test_window PRIVATE coopa::ui)
-    add_dependencies(uicoopa_test_window uicoopa_shaders)
-
-    # Windowed demo: the settings_demo-shaped UI built entirely through UIBuilder
-    # (no scene YAML except the theme file) -- see test_settings_builder.cpp.
-    add_executable(uicoopa_settings_builder test_settings_builder.cpp)
-    target_link_libraries(uicoopa_settings_builder PRIVATE coopa::ui)
-    add_dependencies(uicoopa_settings_builder uicoopa_shaders)
-
-    # Windowed demo dedicated to UIBuilder::dialog()/split_rows()/split_columns()/
-    # tab_view() -- see test_dialog_builder.cpp.
-    add_executable(uicoopa_dialog_builder test_dialog_builder.cpp)
-    target_link_libraries(uicoopa_dialog_builder PRIVATE coopa::ui)
-    add_dependencies(uicoopa_dialog_builder uicoopa_shaders)
-
-    # Windowed demo for gamepad-style navigation (InputMode::Hybrid) -- see
-    # test_gamepad_builder.cpp.
-    add_executable(uicoopa_gamepad_builder test_gamepad_builder.cpp)
-    target_link_libraries(uicoopa_gamepad_builder PRIVATE coopa::ui)
-    add_dependencies(uicoopa_gamepad_builder uicoopa_shaders)
-
-    # Windowed demo: a gameplay HUD bound to coopa::item / coopa::stat models --
-    # see test_hud_builder.cpp.
-    add_executable(uicoopa_hud_builder test_hud_builder.cpp)
-    target_link_libraries(uicoopa_hud_builder PRIVATE coopa::ui)
-    add_dependencies(uicoopa_hud_builder uicoopa_shaders)
+    # --- Windowed demos ---
+    # Interactive programs under demos/, NOT tests: each opens a visible window, so none is
+    # ever registered with ctest. Executable names are kept stable (tools and docs refer to
+    # them); see docs/reference.md's "Demos" section for what each one shows.
+    #
+    #   uicoopa_test_window       demos/demo_window.cpp            YAML-declared UI (assets/scenes/test_window)
+    #   uicoopa_settings_builder  demos/demo_settings_builder.cpp  settings panel built through UIBuilder
+    #   uicoopa_dialog_builder    demos/demo_dialog_builder.cpp    dialog()/split_rows()/split_columns()/tab_view()
+    #   uicoopa_gamepad_builder   demos/demo_gamepad_builder.cpp   gamepad navigation (InputMode::Hybrid)
+    #   uicoopa_hud_builder       demos/demo_hud_builder.cpp       gameplay HUD bound to coopa::item/coopa::stat
+    set(UICOOPA_DEMOS
+        uicoopa_test_window:demo_window
+        uicoopa_settings_builder:demo_settings_builder
+        uicoopa_dialog_builder:demo_dialog_builder
+        uicoopa_gamepad_builder:demo_gamepad_builder
+        uicoopa_hud_builder:demo_hud_builder)
+    set(UICOOPA_DEMO_TARGETS "")
+    foreach(entry IN LISTS UICOOPA_DEMOS)
+        string(REPLACE ":" ";" pair "${entry}")
+        list(GET pair 0 demo_target)
+        list(GET pair 1 demo_source)
+        add_executable(${demo_target} demos/${demo_source}.cpp)
+        target_link_libraries(${demo_target} PRIVATE coopa::ui)
+        add_dependencies(${demo_target} uicoopa_shaders)
+        list(APPEND UICOOPA_DEMO_TARGETS ${demo_target})
+    endforeach()
 
     enable_testing()
-    add_test(NAME uicoopa_tests COMMAND uicoopa)
+    coopa_add_test_suites(uicoopa PREFIX uicoopa SOURCES ${UICOOPA_TEST_SOURCES} LABELS unit)
 
     # --- Vulkan/GLFW leak gate ---
     # uicoopa names zero Vk*/VK_*/vk*/GLFW*/glfw* symbols outside its documented
@@ -171,11 +180,9 @@ if(UICOOPA_STANDALONE)
         add_custom_target(uicoopa_leak_check ALL
             COMMAND ${GFXCOOPA_DIR}/tools/check_no_vulkan.sh ${CMAKE_CURRENT_SOURCE_DIR})
         add_dependencies(uicoopa uicoopa_leak_check)
-        add_dependencies(uicoopa_test_window uicoopa_leak_check)
-        add_dependencies(uicoopa_settings_builder uicoopa_leak_check)
-        add_dependencies(uicoopa_dialog_builder uicoopa_leak_check)
-        add_dependencies(uicoopa_gamepad_builder uicoopa_leak_check)
-        add_dependencies(uicoopa_hud_builder uicoopa_leak_check)
+        foreach(demo_target IN LISTS UICOOPA_DEMO_TARGETS)
+            add_dependencies(${demo_target} uicoopa_leak_check)
+        endforeach()
         add_test(NAME uicoopa_no_vulkan
                  COMMAND ${GFXCOOPA_DIR}/tools/check_no_vulkan.sh ${CMAKE_CURRENT_SOURCE_DIR})
     endif()

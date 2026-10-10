@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/CMakeFiles/meshoptimizer-populate"
+		},
+		{
+			"file" : "/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/CMakeFiles/meshoptimizer-populate.rule"
+		},
+		{
+			"file" : "/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/CMakeFiles/meshoptimizer-populate-complete.rule"
+		},
+		{
+			"file" : "/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/meshoptimizer-populate-prefix/src/meshoptimizer-populate-stamp/meshoptimizer-populate-build.rule"
+		},
+		{
+			"file" : "/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/meshoptimizer-populate-prefix/src/meshoptimizer-populate-stamp/meshoptimizer-populate-configure.rule"
+		},
+		{
+			"file" : "/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/meshoptimizer-populate-prefix/src/meshoptimizer-populate-stamp/meshoptimizer-populate-download.rule"
+		},
+		{
+			"file" : "/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/meshoptimizer-populate-prefix/src/meshoptimizer-populate-stamp/meshoptimizer-populate-install.rule"
+		},
+		{
+			"file" : "/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/meshoptimizer-populate-prefix/src/meshoptimizer-populate-stamp/meshoptimizer-populate-mkdir.rule"
+		},
+		{
+			"file" : "/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/meshoptimizer-populate-prefix/src/meshoptimizer-populate-stamp/meshoptimizer-populate-patch.rule"
+		},
+		{
+			"file" : "/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/meshoptimizer-populate-prefix/src/meshoptimizer-populate-stamp/meshoptimizer-populate-test.rule"
+		},
+		{
+			"file" : "/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/meshoptimizer-populate-prefix/src/meshoptimizer-populate-stamp/meshoptimizer-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"meshoptimizer-populate"
+		],
+		"name" : "meshoptimizer-populate"
+	}
+}

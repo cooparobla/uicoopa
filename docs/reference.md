@@ -35,7 +35,7 @@ Composition follows a `coopa::scene::SceneObject` tree: every UI node carries a
   `SceneObject`'s plain pre-order `update()` walk — is what lets layout groups compute an
   aggregate child size before their own rect is resolved. `rebuild_layout()`/`rebuild_emit()`
   are public and independently callable — safe to use headlessly with no display, which is
-  how the test suite (`test.cpp`) exercises resolved layout without a window.
+  how the headless test suites (`tests/`) exercise resolved layout without a window.
 - **`canvas_scaler.h`** — `CanvasScaler`, screen-size-independent scaling (Unity's
   `CanvasScaler` equivalent): a reference resolution plus a width/height blend factor.
   **Screen-space only** — a world canvas ignores it entirely (see below).
@@ -329,8 +329,8 @@ bar floating above it, plus a second `Transform`-mode canvas, driven by
 ## Builder (`uicoopa/builder/`)
 
 A fluent, imperative, theme-driven construction API — the fastest way to stand up a real UI
-without touching `SceneObject`/component wiring by hand. `test_settings_builder.cpp` and
-`test_dialog_builder.cpp` (below) are worked examples; `test.cpp`'s `test_builder_*` tests
+without touching `SceneObject`/component wiring by hand. `demo_settings_builder.cpp` and
+`demo_dialog_builder.cpp` (below) are worked examples; the `tests/ui_builder_test.cpp`, `tests/builder_layout_test.cpp` and `tests/modal_test.cpp` suites
 are the API contract in assertion form. `ui_builder.h` (the `UIBuilder` facade) and
 `ui_theme.h`/`ui_theme_yaml.h` (`UITheme`/`ThemeLibrary`) are the only headers meant to be
 included directly; each concern behind them — containers, standard widgets, labeled rows,
@@ -552,7 +552,7 @@ exists, which is exactly when the app's one `Scene::start()` call reaches it.
 ### Gameplay HUD: `hud_layer()` / `hud_corner()` / stat bars / hotbar / console
 
 The pieces every gameplay HUD needs, built the same UIBuilder way as everything else —
-see `test_hud_builder.cpp` (below) for a complete worked example, and
+see `demo_hud_builder.cpp` (below) for a complete worked example, and
 `widgets/inventory_binding.h`'s file doc for the "the UI visualizes a `coopa::item`/
 `coopa::stat` model, it doesn't own one" contract this whole family follows.
 
@@ -648,7 +648,7 @@ calling `apply_font()` with a raw theme size — see `detail/widgets.h`'s label/
 factories for the pattern. A role's `FontRoleStyle::font` is populated from its `path` when a
 theme loads through `ThemeLibrary` (`ui_theme_yaml.h`'s `resolve_theme_fonts()`, via the
 `FontDefaults::resolve_font` hook an application wires to its GPU font loader — see
-`register_ui_components()`'s GPU overload, or `test_settings_builder.cpp`'s manual wiring for
+`register_ui_components()`'s GPU overload, or `demo_settings_builder.cpp`'s manual wiring for
 an app that never calls `register_ui_components()`); a null role font falls back to
 `UITheme::font`, then `FontDefaults::font`, exactly like `apply_font()` always has.
 
@@ -657,7 +657,7 @@ an app that never calls `register_ui_components()`); a null role font falls back
 `UITheme::cursor` (`CursorStyle`) is unlike every other theme field in one respect: it drives
 nothing by default. It only takes effect once an application calls
 `UIBuilder::enable_cursor(input)` (or the free-function form, `coopa::ui::enable_cursor(node,
-theme, input)`, for scenes with no `UIBuilder` in scope — see `test_window.cpp`) — that
+theme, input)`, for scenes with no `UIBuilder` in scope — see `demo_window.cpp`) — that
 installs a `CursorOverlay` (`widgets/cursor_overlay.h`) at the root of the calling canvas,
 hides the OS pointer (`coopa::input::Input::set_cursor_mode(Hidden)`), and from then on draws
 a themed, IconLibrary-backed sprite that tracks the mouse and swaps icon automatically based
@@ -732,25 +732,25 @@ so both configurations build cleanly.
 - **`ui_sound_player.h`** — `UiSoundPlayer`, a `coopa::scene::Component` that auto-connects to
   every widget's signals it finds under its own subtree via `ScopedConnection`s — one
   instance on a Canvas gives every `Button` in the whole UI hover/click sounds with zero
-  per-button wiring (see `test_settings_builder.cpp`'s/`test_dialog_builder.cpp`'s `main()`).
+  per-button wiring (see `demo_settings_builder.cpp`'s/`demo_dialog_builder.cpp`'s `main()`).
 - **`play_sound_on_signal.h`** — `PlaySoundOnSignal : SignalReactor`, the reactor form.
 - **`audio_yaml.h`** — registers `!UiSoundPlayer`/`!PlaySoundOnSignal` YAML parsers with
   `SceneLoader`; kept separate from `ui_yaml.h::register_ui_components()` (rather than folded
-  in) so that function — included unconditionally by `test.cpp` — keeps building with audio
+  in) so that function — included unconditionally by the headless test suites — keeps building with audio
   disabled. An application opts into audio-scene-loading by calling this alongside
   `register_ui_components()`.
 
 ## YAML loading (`uicoopa/ui_yaml.h`)
 `register_ui_components()` registers a `!TypeName` parser for every widget/group/reactor
 above with libcoopa's `coopa::scene::SceneLoader`, so a scene `.yaml` file can declare UI
-components directly (`test_window.cpp`'s `assets/scenes/test_window/scene.yaml` is the
+components directly (`demo_window.cpp`'s `assets/scenes/test_window/scene.yaml` is the
 reference example). One-directional bridge only — libcoopa has no dependency on uicoopa. The
 `builder/` API above is the *imperative* path and has no YAML counterpart for its composite
 containers (`panel`/`card`/`scroll_view`/`split_rows`/`dialog`/`tab_view`) — only the leaf
 widgets it assembles are individually YAML-expressible.
 
 `register_ui_animated_properties()` — called automatically by `register_ui_components()`,
-and directly by apps (like `test_settings_builder.cpp`/`test_dialog_builder.cpp`) that build
+and directly by apps (like `demo_settings_builder.cpp`/`demo_dialog_builder.cpp`) that build
 their UI imperatively and never call `register_ui_components()` at all — registers every
 field below with libcoopa's `coopa::anim::AnimatedPropertyRegistry`, so a `coopa::anim::
 Animator` can drive them by name from a clip, exactly as if libcoopa itself defined
@@ -877,7 +877,7 @@ root.add_prompt_bar({{NavAction::Confirm, "Select"}, {NavAction::Back, "Back"}})
 
 `add_prompt_bar()` draws button glyphs from `assets/icons/prompts.png`
 (`tools/gen_button_prompts.py`) and skips any action the given `NavProfile` cannot emit.
-`test_gamepad_builder.cpp` is the worked example.
+`demo_gamepad_builder.cpp` is the worked example.
 
 ## Immediate-mode layer (`uicoopa/immediate/`)
 
@@ -947,10 +947,10 @@ default: right-aligned against the widget, as Blender does).
 
 ## The demos
 
-Five windowed demos, each its own build target. None is part of the headless test suite
-(`test.cpp`), so `ctest` never needs a display.
+Five windowed demos under `demos/`, each its own build target. None is a test: none is
+registered with `ctest` (the headless suites live in `tests/`), so `ctest` never needs a display.
 
-### `test_window.cpp` — the YAML-declarative demo
+### `demo_window.cpp` — the YAML-declarative demo
 
 Loads `assets/scenes/test_window/scene.yaml` and drives it through nothing but
 `Scene::update()`/`late_update()`. There is no separate UI wrapper class:
@@ -963,7 +963,7 @@ a `Button` with two unrelated listeners on the same signal, and a hand-authored 
 subtree (`assets/prefabs/dialog.yaml`, pulled in with `inherit_from`) toggled by
 `SetActiveOnSignal`.
 
-### `test_settings_builder.cpp` — the UIBuilder settings-panel demo
+### `demo_settings_builder.cpp` — the UIBuilder settings-panel demo
 
 A settings inspector built entirely through `UIBuilder`, with no scene YAML except the theme
 file. A tabbed inspector (`tab_view()`, seven pages: Display, Graphics, Audio, Gameplay,
@@ -972,14 +972,14 @@ with `split_rows()`, a live readout that re-reads the settings every frame via
 `UIBuilder::get_value()`, a drag-and-drop inventory grid, and a `DialogMode::Modal`
 confirmation that the Reset button opens.
 
-### `test_dialog_builder.cpp` — the split/dialog/tab demo
+### `demo_dialog_builder.cpp` — the split/dialog/tab demo
 
 An `Embedded` dialog spans the whole canvas, `split_columns()` makes a fixed-width Nav
 column and a weighted Main column, `tab_view()` switches three pages inside Main (one of
 which nests its own `split_rows()`), and Nav's buttons open two blocking `DialogMode::Modal`
 dialogs ("About" and "Discard Changes?") over the tabbed content.
 
-### `test_hud_builder.cpp` — the gameplay HUD demo
+### `demo_hud_builder.cpp` — the gameplay HUD demo
 
 The worked example for **Gameplay HUD** (above): a hotbar (9 slots, keys 1-9, bound to a
 `coopa::item::Inventory`/`Hotbar` via `InventoryBinding`), health and stamina
@@ -990,7 +990,7 @@ are declared *before* the `Scene` in `main()`, so they outlive it during teardow
 `widgets/inventory_binding.h`'s ownership contract. Item definitions load from
 `assets/items/items.yaml` via `coopa::item::ItemDatabaseLoader`.
 
-### `test_gamepad_builder.cpp` — the gamepad navigation demo
+### `demo_gamepad_builder.cpp` — the gamepad navigation demo
 
 A tabbed card (Display, Controls, Inventory), an "About" modal and a prompt bar, built with
 `InputMode::Hybrid`. The mouse keeps working; pressing a direction key switches to the
@@ -1053,12 +1053,12 @@ the exit screenshot are unaffected.
 
 | Target | Source | Purpose |
 |---|---|---|
-| `uicoopa` | `test.cpp` | Headless assertion-based test suite (`RUN_TEST`/`ASSERT_TRUE`). Registered with `ctest` as `uicoopa_tests`; no display required. |
-| `uicoopa_test_window` | `test_window.cpp` | The YAML-declarative demo. |
-| `uicoopa_settings_builder` | `test_settings_builder.cpp` | The `UIBuilder` settings-panel demo. |
-| `uicoopa_dialog_builder` | `test_dialog_builder.cpp` | The `dialog()`/`split_rows()`/`split_columns()`/`tab_view()` demo. |
-| `uicoopa_hud_builder` | `test_hud_builder.cpp` | The gameplay HUD demo. |
-| `uicoopa_gamepad_builder` | `test_gamepad_builder.cpp` | The gamepad navigation demo. |
+| `uicoopa` | `tests/*_test.cpp` + `tests/support/` | Headless test suites on the shared coopa test framework (`coopa/testing/test.h`, linked via `coopa::test_main`). One `ctest` entry per suite, `uicoopa_<suite>`, each running `uicoopa --suite <suite>`; no display required. `ui_audio_test.cpp` is compiled only in audio builds. |
+| `uicoopa_test_window` | `demos/demo_window.cpp` | The YAML-declarative demo. |
+| `uicoopa_settings_builder` | `demos/demo_settings_builder.cpp` | The `UIBuilder` settings-panel demo. |
+| `uicoopa_dialog_builder` | `demos/demo_dialog_builder.cpp` | The `dialog()`/`split_rows()`/`split_columns()`/`tab_view()` demo. |
+| `uicoopa_hud_builder` | `demos/demo_hud_builder.cpp` | The gameplay HUD demo. |
+| `uicoopa_gamepad_builder` | `demos/demo_gamepad_builder.cpp` | The gamepad navigation demo. |
 
 ### Vulkan/GLFW leak gate
 

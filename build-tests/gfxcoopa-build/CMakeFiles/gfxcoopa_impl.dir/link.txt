@@ -1,0 +1,2 @@
+/usr/bin/ar qc libgfxcoopa_impl.a CMakeFiles/gfxcoopa_impl.dir/src/gfx_impl.cpp.o
+/usr/bin/ranlib libgfxcoopa_impl.a

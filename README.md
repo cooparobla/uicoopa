@@ -138,7 +138,7 @@ scripted runs; the [reference](docs/reference.md#running-a-demo) lists every var
 
 ### 4. Build a UI in code
 
-This is an abridged version of `test_dialog_builder.cpp`. It builds a canvas with
+This is an abridged version of `demos/demo_dialog_builder.cpp`. It builds a canvas with
 `UIBuilder`, then draws it each frame with `UiPass` inside gfxcoopa's frame loop.
 
 ```cpp
@@ -209,7 +209,7 @@ a screenshot on exit. Copy its `main()` as a starting point.
 ### 5. Or declare it in YAML
 
 Register the YAML parsers once, then load the scene with libcoopa's `SceneManager`, as
-`test_window.cpp` does:
+`demos/demo_window.cpp` does:
 
 ```cpp
 coopa::ui::register_ui_components(ctx.device(), ctx.allocator(), ctx.command_pool());
@@ -255,14 +255,23 @@ built when uicoopa is the top-level project.
 ## Testing
 
 ```bash
-ctest --test-dir build        # the headless suite plus the no-raw-Vulkan check
-./build/uicoopa               # the suite on its own
+ctest --test-dir build -j8               # every suite in parallel, plus the no-raw-Vulkan check
+ctest --test-dir build -R uicoopa_modal  # one suite
+./build/uicoopa --list                   # every test, as <suite> <name>
+./build/uicoopa --suite slider           # one suite directly; -v prints every check
 ```
 
-`test.cpp` holds about 200 assertion tests covering layout math, text wrapping, raycasting,
-YAML parsing, the builder, dialogs, navigation, and the HUD bindings. It needs no window or
-GPU. `GFX_LEAK_CHECK` (ON by default) also fails the build if library code names a raw
-Vulkan or GLFW symbol.
+`tests/` holds one `<suite>_test.cpp` per system (layout math, text wrapping, raycasting,
+YAML parsing, each widget, the builder, dialogs and the modal stack, gamepad navigation, the
+HUD bindings, ...) on the shared coopa test framework (`coopa/testing/test.h` in libcoopa),
+with shared fixtures in `tests/support/`. All of it builds into the one `uicoopa` executable;
+ctest runs each suite as its own `uicoopa_<suite>` entry. A new `*_test.cpp` is picked up on the
+next configure. The suites need no window or GPU, and write only to per-test scratch
+directories under the system temp dir. `GFX_LEAK_CHECK` (ON by default) also fails the build
+if library code names a raw Vulkan or GLFW symbol.
+
+The windowed programs in `demos/` are demos, not tests: they open a visible window and are
+never registered with ctest.
 
 ## Project layout
 
@@ -283,7 +292,8 @@ uicoopa/
 assets/          shaders, fonts, themes, icon sheets, sounds, demo scenes and prefabs
 src/             ui_impl.cpp: the one compiled file (stb_truetype)
 tools/           scripts that generate the icon, cursor and button-prompt sheets
-test*.cpp        the headless suite and the five windowed demos
+tests/           headless test suites, one <suite>_test.cpp per system; support/ fixtures
+demos/           the five windowed demos (demo_*.cpp)
 ```
 
 ## Notes

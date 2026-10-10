@@ -18,8 +18,8 @@ neither of those files' own byte-for-byte reproducibility or descriptor test
 is touched by prompt-glyph changes.
 
 Re-running this script must reproduce assets/icons/prompts.png byte-for-byte;
-uicoopa's headless test suite (test.cpp's
-test_default_prompt_sheet_descriptor_is_valid) treats the checked-in
+uicoopa's headless test suite (tests/sprite_sheet_test.cpp's
+shipped_sheet_descriptors_are_in_bounds_and_disjoint) treats the checked-in
 prompts.yaml as the source of truth for what the sheet should contain.
 
 Usage: python3 tools/gen_button_prompts.py

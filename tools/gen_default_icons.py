@@ -18,8 +18,8 @@ bleeding a neighboring icon into this one's edges, without needing a
 half-texel UV inset (see uicoopa/render/sprite_sheet.h's pixel_rect_to_uv()).
 
 Re-running this script must reproduce assets/icons/icons.png byte-for-byte;
-uicoopa's headless test suite (test.cpp's
-test_default_icon_sheet_descriptor_is_valid) treats the checked-in
+uicoopa's headless test suite (tests/sprite_sheet_test.cpp's
+shipped_sheet_descriptors_are_in_bounds_and_disjoint) treats the checked-in
 icons.yaml as the source of truth for what the sheet should contain.
 
 Usage: python3 tools/gen_default_icons.py
