@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

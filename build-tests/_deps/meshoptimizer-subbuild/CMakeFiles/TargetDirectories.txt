@@ -1,3 +1,0 @@
-/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/CMakeFiles/meshoptimizer-populate.dir
-/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/CMakeFiles/edit_cache.dir
-/Users/tblaney/Code/toyengine/libs/uicoopa/build-tests/_deps/meshoptimizer-subbuild/CMakeFiles/rebuild_cache.dir

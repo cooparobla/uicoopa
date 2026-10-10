@@ -5,3 +5,6 @@ build/
 output/
 
 .docs/
+
+# Any build directory (build-tests/, build-asan/, ...)
+build*/

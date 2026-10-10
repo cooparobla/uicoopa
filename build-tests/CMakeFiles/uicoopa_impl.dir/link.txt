@@ -1,2 +1,0 @@
-/usr/bin/ar qc libuicoopa_impl.a CMakeFiles/uicoopa_impl.dir/src/ui_impl.cpp.o
-/usr/bin/ranlib libuicoopa_impl.a
