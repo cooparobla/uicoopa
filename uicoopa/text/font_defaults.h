@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace coopa {
 namespace ui {
@@ -51,6 +52,18 @@ struct FontDefaults {
      *        Font* fields null and every role falls back to FontDefaults::font.
      */
     static inline std::function<class Font*(const std::string&)> resolve_font = nullptr;
+
+    /**
+     * @brief Extra directories a theme's font paths are looked up in, highest priority first.
+     *
+     * A theme states its fonts relative to itself ("../../fonts/inter_regular.ttf"), which is
+     * right for a theme shipped beside the fonts it uses -- and wrong for one in a game's own
+     * assets that wants the engine's shared faces. An application that layers asset
+     * directories sets this to those roots at startup (the font then reads
+     * "fonts/inter_regular.ttf", resolved against each in turn), and
+     * ui_theme_yaml.h's resolve_theme_fonts() tries them after the theme's own folder.
+     */
+    static inline std::vector<std::string> search_dirs{};
 };
 
 /**

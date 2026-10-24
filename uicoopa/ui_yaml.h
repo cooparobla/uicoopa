@@ -68,6 +68,8 @@
 #include <uicoopa/widgets/spinbox.h>
 #include <uicoopa/widgets/combobox.h>
 #include <uicoopa/widgets/inventory_grid.h>
+#include <uicoopa/widgets/tooltip.h>
+#include <uicoopa/widgets/drag_handle.h>
 #include <uicoopa/groups/layout_group.h>
 #include <uicoopa/groups/grid_layout_group.h>
 #include <uicoopa/groups/content_size_fitter.h>
@@ -539,6 +541,18 @@ inline void register_ui_components() {
         if (node.contains("match_width_or_height")) canvas->scaler.match_width_or_height = node.at("match_width_or_height").get_value<float>();
         if (node.contains("scale_factor"))          canvas->scaler.scale_factor          = node.at("scale_factor").get_value<float>();
         if (node.contains("fallback_dpi"))           canvas->scaler.fallback_dpi          = node.at("fallback_dpi").get_value<float>();
+        // The asset's own scale multiplier, and its opt-out from the host's player-facing one
+        // (CanvasComponent::set_ui_scale) -- see CanvasScaler::user_scale for how they differ.
+        if (node.contains("user_scale"))            canvas->scaler.user_scale            = node.at("user_scale").get_value<float>();
+        if (node.contains("ignore_ui_scale"))       canvas->ignore_ui_scale              = node.at("ignore_ui_scale").get_value<bool>();
+        // Whether the composites under this canvas attach Selectables -- see
+        // CanvasComponent::input_mode. "Pointer" (the default) attaches nothing.
+        if (node.contains("input_mode")) {
+            const std::string m = node.at("input_mode").get_value<std::string>();
+            canvas->input_mode = (m == "Gamepad") ? InputMode::Gamepad
+                               : (m == "Hybrid") ? InputMode::Hybrid
+                                                 : InputMode::Pointer;
+        }
         if (node.contains("sort_order"))            canvas->sort_order = node.at("sort_order").get_value<int>();
         // Glyph-atlas density multiplier -- see CanvasComponent::text_supersample. Float, like
         // match_width_or_height above, because the right value is a measured magnification
@@ -921,6 +935,21 @@ inline void register_ui_components() {
         } catch (const std::exception& e) {
             std::cerr << "[uicoopa] Theme: " << e.what() << "\n";
         }
+    });
+
+    // Hover text. The bubble that shows it is installed separately, by the `Tooltips`
+    // composite on the canvas root -- a TooltipOverlay needs a theme and this parser has none.
+    SceneLoader::register_component_parser("Tooltip", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
+        auto* tip = obj.add_component<Tooltip>();
+        if (node.contains("text")) tip->text = node.at("text").get_value<std::string>();
+    });
+
+    // Player-arrangeable HUD: a handle that moves its node (or `target`, by descendant name).
+    SceneLoader::register_component_parser("DragHandle", [](const fkyaml::node& node, SceneObject& obj, const SceneLoader::ParseContext&) {
+        auto* handle = obj.add_component<DragHandle>();
+        if (node.contains("enabled"))         handle->enabled         = node.at("enabled").get_value<bool>();
+        if (node.contains("clamp_to_canvas")) handle->clamp_to_canvas = node.at("clamp_to_canvas").get_value<bool>();
+        if (node.contains("keep_visible"))    handle->keep_visible    = node.at("keep_visible").get_value<float>();
     });
 
     // Themed composites (Window, MenuList, StatBar, ...) -- see builder/ui_composites_yaml.h.

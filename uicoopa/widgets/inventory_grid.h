@@ -119,6 +119,7 @@ public:
     void on_pointer_down(const PointerEventData& data) override;
     void on_drag(const PointerEventData& data) override;
     void on_pointer_up(const PointerEventData& data) override;
+    void on_secondary_click(const PointerEventData& data) override;
 
     void update_visuals(const InventoryItem& item) {
         if (icon_image) {
@@ -200,6 +201,8 @@ public:
     using SlotChangedSignal = coopa::event::Signal<int, const InventoryItem&>;
     using ItemsSwappedSignal = coopa::event::Signal<int, int>;
     using SlotClickedSignal = coopa::event::Signal<int>;
+    /** @brief (slot index) of a right-click -- "use this", "equip this", "tell me about this". */
+    using SlotContextSignal = coopa::event::Signal<int>;
 
     int rows = 4;
     int cols = 6;
@@ -213,6 +216,14 @@ public:
     SlotChangedSignal  on_slot_changed;
     ItemsSwappedSignal on_items_swapped;
     SlotClickedSignal  on_slot_clicked;
+    /**
+     * @brief A slot was right-clicked. Also published on the EventBus as the grid's
+     *        `"slot_context"` signal, carrying `slot`, for game code bound by name.
+     *
+     * The grid itself does nothing with it: what a right-click means -- equip, use, split,
+     * sell -- belongs to whatever owns the model, exactly like on_slot_clicked.
+     */
+    SlotContextSignal  on_slot_context;
 
     /**
      * @brief Optional interception point for transfer_or_swap_items(): when set, called
@@ -661,6 +672,17 @@ inline bool InventorySlot::on_drop(const DragPayload& payload) {
         return grid->transfer_or_swap_items(payload.source_index, slot_index);
     }
     return false;
+}
+
+inline void InventorySlot::on_secondary_click(const PointerEventData& data) {
+    if (!grid) return;
+    data.consume();
+    grid->on_slot_context.emit(slot_index);
+    if (grid->scene && grid->owner) {
+        coopa::event::EventArgs args;
+        args.set("slot", slot_index);
+        grid->scene->events().emit(grid->owner->name(), "slot_context", args);
+    }
 }
 
 inline void InventorySlot::on_pointer_up(const PointerEventData& data) {

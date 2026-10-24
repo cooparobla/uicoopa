@@ -348,3 +348,58 @@ COOPA_TEST(modal_blurs_and_blocks_keyboard_focus) {
     field->on_key(make_key_(coopa::input::Key::Escape));  // leave FocusContext clean
     dlg.hide();
 }
+
+COOPA_TEST(hit_object_reports_the_panel_a_handler_free_background_sits_on) {
+    // The question a host gating GAME input has to ask -- "is the pointer over the UI at all"
+    // -- and the reason hovered_object() cannot answer it: a window's frame and a modal's
+    // scrim are raycast targets that exist to stop a click reaching what is behind them, and
+    // neither is an IPointerHandler, so hovered_object() is null over both.
+    ModalContext::instance().clear();
+
+    auto canvas_obj = std::make_unique<SceneObject>("Canvas");
+    auto* canvas = canvas_obj->add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    // A plain panel: a Graphic (so a raycast target) with no pointer handler anywhere on it.
+    auto* panel = canvas_obj->add_child(std::make_unique<SceneObject>("Panel"));
+    auto* panel_rt = panel->add_component<RectTransform>();
+    panel_rt->set_anchor_min({0.0f, 0.0f});
+    panel_rt->set_anchor_max({0.0f, 0.0f});
+    panel_rt->set_pivot({0.0f, 0.0f});
+    panel_rt->set_size_delta({100.0f, 100.0f});
+    panel->add_component<Image>();
+
+    canvas_obj->start();
+    canvas->rebuild_layout(400, 300);
+
+    coopa::input::Input raw_input;
+    UiInput ui_input;
+    EventSystem event_system;
+
+    auto point_at = [&](glm::vec2 canvas_point) {
+        raw_input.begin_frame(0.016f);
+        raw_input.push_cursor_position(canvas_point.x,
+                                       canvas->root_rect().size().y - canvas_point.y);
+        ui_input.update(raw_input, canvas->root_rect(), canvas->scale_factor());
+        event_system.process(ui_input, *canvas_obj, 0.016f);
+    };
+
+    point_at({50.0f, 50.0f});   // inside the panel
+    ASSERT_TRUE(event_system.hit_object() == panel);
+    ASSERT_TRUE(event_system.hovered_object() == nullptr);  // nothing here handles pointers
+
+    point_at({300.0f, 200.0f});  // over nothing
+    ASSERT_TRUE(event_system.hit_object() == nullptr);
+
+    // A modal blocks the raw hit too, so a host asking the same question while a menu is up
+    // gets "yes, the UI owns this" everywhere rather than "no" outside the menu's own rect.
+    point_at({50.0f, 50.0f});
+    ASSERT_TRUE(event_system.hit_object() == panel);
+    auto* blocker = canvas_obj->add_child(std::make_unique<SceneObject>("Blocker"));
+    blocker->add_component<RectTransform>();
+    ModalContext::instance().push(blocker);
+    point_at({50.0f, 50.0f});
+    ASSERT_TRUE(event_system.hit_object() == nullptr);
+    ModalContext::instance().clear();
+}

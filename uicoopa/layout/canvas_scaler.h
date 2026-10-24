@@ -32,6 +32,7 @@ enum class ScaleMode {
  * scaler.mode = ScaleMode::ScaleWithScreenSize;
  * scaler.reference_resolution = {1920.0f, 1080.0f};
  * scaler.match_width_or_height = 0.5f;
+ * scaler.user_scale = 1.25f;   // "Interface scale: 125%"
  * float scale = scaler.compute_scale_factor(screen_w, screen_h);
  * @endcode
  */
@@ -48,6 +49,18 @@ public:
     float     fallback_dpi = 96.0f;                     /**< Used in ConstantPhysicalSize mode when actual_dpi <= 0. */
 
     /**
+     * @brief A flat multiplier on whichever mode's result, for "make the interface bigger".
+     *
+     * It multiplies the scale factor rather than dividing reference_resolution, so it reads the
+     * same in all three modes and composes with a player-facing scale the host drives
+     * separately (CanvasComponent::set_ui_scale()). The canvas spans screen / scale_factor
+     * canvas pixels, so 1.25 here means a canvas 20% smaller in authored units -- every widget
+     * keeps its authored size but covers 25% more of the screen, and anchored edges stay on
+     * their edges. <= 0 is ignored.
+     */
+    float     user_scale = 1.0f;
+
+    /**
      * @brief Computes the canvas scale factor for the given screen size.
      *
      * @param screen_w Framebuffer width in pixels.
@@ -57,6 +70,12 @@ public:
      * @return The scale factor: canvas pixel space = screen pixels / scale factor.
      */
     float compute_scale_factor(uint32_t screen_w, uint32_t screen_h, float actual_dpi = 0.0f) const {
+        return mode_scale_factor_(screen_w, screen_h, actual_dpi) * (user_scale > 0.0f ? user_scale : 1.0f);
+    }
+
+private:
+    /** @brief The scale factor `mode` alone implies, before user_scale. */
+    float mode_scale_factor_(uint32_t screen_w, uint32_t screen_h, float actual_dpi) const {
         switch (mode) {
             case ScaleMode::ConstantPixelSize:
                 return scale_factor;

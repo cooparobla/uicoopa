@@ -24,6 +24,7 @@
 #include <uicoopa/render/draw_list.h>
 #include <uicoopa/input/ui_input.h>
 #include <uicoopa/input/event_system.h>
+#include <uicoopa/input/nav_types.h>
 #include <coopa/scene/scene_object.h>
 #include <coopa/scene/scene.h>
 #include <coopa/scene/components/transform_component.h>
@@ -311,6 +312,46 @@ public:
     void set_display_zoom(float zoom) { display_zoom_ = zoom > 0.0f ? zoom : 1.0f; }
     float display_zoom() const { return display_zoom_; }
 
+    /**
+     * @brief A player-facing interface scale the HOST drives, multiplied into scale_factor()
+     *        on top of whatever CanvasScaler computed. 1 (the default) changes nothing.
+     *
+     * Distinct from CanvasScaler::user_scale, which a UI asset authors for itself, and from
+     * set_display_zoom(), which magnifies an already-laid-out canvas on the target without
+     * changing its layout. This one changes the layout: the canvas spans screen / scale_factor
+     * canvas pixels, so 1.25 gives a canvas 20% smaller in authored units -- every widget keeps
+     * its authored size while covering 25% more screen, and anchored edges stay on their edges.
+     * That is what a "HUD scale" slider means, and why text stays sharp through it
+     * (effective_text_scale() folds scale_factor_ in, so glyph atlases re-bake).
+     *
+     * A host applies one value to every canvas it owns; a canvas that must stay pixel-exact
+     * regardless -- a letterboxed cinematic frame, a debug readout -- sets ignore_ui_scale and
+     * is skipped. <= 0 is ignored.
+     */
+    void set_ui_scale(float scale) { ui_scale_ = scale > 0.0f ? scale : 1.0f; }
+    float ui_scale() const { return ui_scale_; }
+
+    /**
+     * @brief Authored opt-out from the host's set_ui_scale(). The host reads it and leaves
+     *        such a canvas at 1; nothing in this class consults it.
+     */
+    bool ignore_ui_scale = false;
+
+    /**
+     * @brief Whether widgets built UNDER this canvas get a Selectable for directional
+     *        navigation. Nothing in this class consults it; it is read by whatever builds.
+     *
+     * The seam a gamepad plugs into. UIBuilder takes an InputMode in its constructor, but a
+     * canvas authored in YAML has no UIBuilder in scope -- its composites build themselves in
+     * their own start(), from a BuildContext that would otherwise always say Pointer. So the
+     * mode is stated once here and every composite below reads it (see UiComposite::start()),
+     * which is what makes "this screen can be driven by a pad" one line in the asset rather
+     * than a rewrite of how the screen is authored.
+     *
+     * Pointer (the default) attaches nothing, leaving an existing scene byte-identical.
+     */
+    InputMode input_mode = InputMode::Pointer;
+
     /** @brief The size set_viewport() last gave, in target pixels (0 until it is called). */
     glm::uvec2 viewport_size() const { return {viewport_w_, viewport_h_}; }
 
@@ -530,7 +571,7 @@ private:
             root_rect_ = Rect{ glm::vec2(0.0f), world_size };
             return;
         }
-        scale_factor_ = scaler.compute_scale_factor(screen_w, screen_h);
+        scale_factor_ = scaler.compute_scale_factor(screen_w, screen_h) * ui_scale_;
         glm::vec2 screen_size(static_cast<float>(screen_w), static_cast<float>(screen_h));
         glm::vec2 canvas_size = scale_factor_ > 0.0f ? screen_size / scale_factor_ : screen_size;
         root_rect_ = Rect{ glm::vec2(0.0f), canvas_size };
@@ -617,6 +658,7 @@ private:
     glm::vec2 screen_origin_{0.0f};   ///< See set_screen_origin().
     bool input_enabled_ = true;       ///< See set_input_enabled().
     float display_zoom_ = 1.0f;       ///< See set_display_zoom().
+    float ui_scale_ = 1.0f;           ///< See set_ui_scale().
 
     // World-space state, all recomputed together by update_world_transform() so nothing is
     // ever derived twice or left inconsistent between the render and hit-test paths.

@@ -347,6 +347,13 @@ inline void resolve_theme_fonts(UITheme& theme, const std::string& theme_dir) {
             std::string joined = theme_dir + "/" + path;
             if (std::filesystem::exists(joined)) return joined;
         }
+        // The application's own asset roots, for a theme that reaches for a shared face it
+        // does not ship beside itself. See FontDefaults::search_dirs.
+        for (const std::string& dir : FontDefaults::search_dirs) {
+            if (dir.empty()) continue;
+            std::string joined = dir + "/" + path;
+            if (std::filesystem::exists(joined)) return joined;
+        }
         return path;
     };
 

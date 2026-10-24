@@ -71,6 +71,20 @@ public:
     virtual void on_drag(const PointerEventData&) {}
     virtual void on_scroll(const PointerEventData&) {}
 
+    /**
+     * @brief The secondary (right) button was pressed and released over this object.
+     *
+     * Its own callback rather than a `button` check inside on_pointer_click(), because every
+     * widget that already exists treats a click as "the thing happened": a Button would fire,
+     * a Toggle would flip and a slot would be picked up on a right-click meant as "tell me
+     * about this". Only a handler that overrides this sees the secondary button at all, so
+     * adding a context action to one widget cannot change another's behaviour.
+     *
+     * No enter/exit/down/up/drag counterpart: a secondary press starts no gesture, so there is
+     * nothing for a handler to track between the press and the release.
+     */
+    virtual void on_secondary_click(const PointerEventData&) {}
+
     /** @brief Which cursor icon to show while this handler's object is hovered. See CursorRole. */
     virtual CursorRole cursor_role() const { return CursorRole::Default; }
 };
@@ -87,7 +101,8 @@ public:
  */
 class EventSystem {
 public:
-    static constexpr int kPrimaryButton = 0; /**< coopa::input::MouseButton::Left. */
+    static constexpr int kPrimaryButton = 0;   /**< coopa::input::MouseButton::Left. */
+    static constexpr int kSecondaryButton = 1; /**< coopa::input::MouseButton::Right. */
 
     /** @brief Max seconds between two clicks on the same object for the second to count as a double-click. */
     float double_click_interval = 0.35f;
@@ -110,6 +125,7 @@ public:
             hit_object = nullptr;
             hit_chain.clear();
         }
+        hit_object_ = hit_object;
 
         // A press/drag already in flight when the modal opened isn't re-validated by
         // the raycast above (press_chain_ is carried over from a previous frame) --
@@ -185,6 +201,22 @@ public:
             press_chain_.clear();
         }
 
+        // The secondary button: press and release over the same topmost object is a context
+        // click, and nothing else. Its own press chain, so holding the right button while the
+        // left one drags cannot make either gesture end on the other's object.
+        if (input.is_button_pressed(kSecondaryButton)) {
+            secondary_press_object_ = hit_object;
+        }
+        if (input.is_button_released(kSecondaryButton)) {
+            if (hit_object != nullptr && hit_object == secondary_press_object_) {
+                PointerEventData data = make_data_(input);
+                data.button = kSecondaryButton;
+                dispatch_chain_(hit_chain, data,
+                                [](IPointerHandler* h, const PointerEventData& d) { h->on_secondary_click(d); });
+            }
+            secondary_press_object_ = nullptr;
+        }
+
         if (input.scroll_delta() != glm::vec2(0.0f)) {
             PointerEventData scroll_data = make_data_(input);
             scroll_data.delta = input.scroll_delta();
@@ -211,6 +243,19 @@ public:
     }
 
     coopa::scene::SceneObject* hovered_object() const { return hovered_object_; }
+
+    /**
+     * @brief The raw raycast winner from the last process(), before "nearest ancestor with a
+     *        handler" resolution -- null when the pointer is over nothing, or over something a
+     *        modal is blocking.
+     *
+     * The question hovered_object() cannot answer: *is the pointer over the UI at all*. A
+     * window's own frame, a modal's scrim and a panel background are all raycast targets that
+     * exist precisely to stop a click reaching what is behind them, and not one of them is an
+     * IPointerHandler -- so hovered_object() is null over every one, and a host using it to
+     * gate game input would let a click on a menu's background hit the world too.
+     */
+    coopa::scene::SceneObject* hit_object() const { return hit_object_; }
     coopa::scene::SceneObject* pressed_object() const { return press_chain_.empty() ? nullptr : press_chain_.front(); }
 
 private:
@@ -293,6 +338,8 @@ private:
     }
 
     coopa::scene::SceneObject* hovered_object_ = nullptr;
+    coopa::scene::SceneObject* hit_object_ = nullptr;   ///< See hit_object().
+    coopa::scene::SceneObject* secondary_press_object_ = nullptr;  ///< See the secondary path in process().
     std::vector<coopa::scene::SceneObject*> press_chain_;
     coopa::scene::SceneObject* last_click_object_ = nullptr;
     float time_since_last_click_ = 1e9f;

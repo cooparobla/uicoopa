@@ -347,3 +347,61 @@ COOPA_TEST(shipped_test_window_scenes_load_with_prefab_merges) {
         ASSERT_TRUE(scene.find_object("DialogClose") != nullptr);
     }
 }
+
+COOPA_TEST(a_canvas_input_mode_gives_the_composites_under_it_selectables) {
+    // The seam a gamepad plugs into: an authored screen has no UIBuilder in scope, so without
+    // this every widget it builds would be Pointer-mode and a pad could never find one.
+    register_ui_components();
+
+    const char* kYaml = R"(
+scene:
+  scene_name: nav
+  root_objects:
+    - name: Screen
+      components:
+        - {type: RectTransform, anchor_min: {x: 0, y: 0}, anchor_max: {x: 1, y: 1}}
+        - {type: Canvas, mode: ConstantPixelSize, scale_factor: 1, input_mode: Hybrid}
+      children:
+        - name: Go
+          components:
+            - {type: RectTransform, size_delta: {x: 120, y: 30}}
+            - {type: ThemedButton, label: "Go"}
+)";
+    coopa::scene::Scene scene =
+        coopa::scene::SceneLoader::load_from_node(fkyaml::node::deserialize(std::string(kYaml)), "nav.yaml");
+    scene.start();
+
+    SceneObject* go = scene.find_object("Go");
+    ASSERT_TRUE(go != nullptr);
+    ASSERT_TRUE(go->get_component<Button>() != nullptr);
+    ASSERT_TRUE(go->get_component<Selectable>() != nullptr);
+}
+
+COOPA_TEST(a_canvas_without_an_input_mode_attaches_nothing) {
+    // Pointer is the default, and it has to stay byte-identical to a pre-gamepad build:
+    // a scene that never asked for navigation must not grow a Selectable per widget.
+    register_ui_components();
+
+    const char* kYaml = R"(
+scene:
+  scene_name: nav_off
+  root_objects:
+    - name: Screen
+      components:
+        - {type: RectTransform, anchor_min: {x: 0, y: 0}, anchor_max: {x: 1, y: 1}}
+        - {type: Canvas, mode: ConstantPixelSize, scale_factor: 1}
+      children:
+        - name: Go
+          components:
+            - {type: RectTransform, size_delta: {x: 120, y: 30}}
+            - {type: ThemedButton, label: "Go"}
+)";
+    coopa::scene::Scene scene =
+        coopa::scene::SceneLoader::load_from_node(fkyaml::node::deserialize(std::string(kYaml)), "nav_off.yaml");
+    scene.start();
+
+    SceneObject* go = scene.find_object("Go");
+    ASSERT_TRUE(go != nullptr);
+    ASSERT_TRUE(go->get_component<Button>() != nullptr);
+    ASSERT_TRUE(go->get_component<Selectable>() == nullptr);
+}

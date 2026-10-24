@@ -12,6 +12,50 @@
 
 COOPA_TEST_SUITE("canvas");
 
+COOPA_TEST(user_scale_and_host_ui_scale_both_shrink_the_canvas) {
+    // The two multipliers a "make the interface bigger" setting is built from: one the asset
+    // authors for itself, one the host drives for every canvas at once. Both multiply the
+    // scale factor, and a bigger scale factor means FEWER canvas pixels across the same
+    // screen -- which is what makes every authored widget cover more of it.
+    CanvasScaler scaler;
+    scaler.mode = ScaleMode::ScaleWithScreenSize;
+    scaler.reference_resolution = { 1920.0f, 1080.0f };
+    scaler.match_width_or_height = 0.0f;
+    ASSERT_NEAR(scaler.compute_scale_factor(1920, 1080), 1.0f, 1e-4f);
+    scaler.user_scale = 1.25f;
+    ASSERT_NEAR(scaler.compute_scale_factor(1920, 1080), 1.25f, 1e-4f);
+    // A nonsensical value is ignored rather than collapsing the canvas to nothing.
+    scaler.user_scale = 0.0f;
+    ASSERT_NEAR(scaler.compute_scale_factor(1920, 1080), 1.0f, 1e-4f);
+
+    SceneObject canvas_obj("Canvas");
+    canvas_obj.add_component<RectTransform>();
+    auto* canvas = canvas_obj.add_component<CanvasComponent>();
+    canvas->scaler.mode = ScaleMode::ConstantPixelSize;
+    canvas->scaler.scale_factor = 1.0f;
+
+    canvas->set_viewport(1920, 1080);
+    ASSERT_NEAR(canvas->scale_factor(), 1.0f, 1e-4f);
+    ASSERT_NEAR(canvas->root_rect().size().x, 1920.0f, 1e-3f);
+
+    canvas->set_ui_scale(2.0f);
+    canvas->set_viewport(1920, 1080);
+    ASSERT_NEAR(canvas->scale_factor(), 2.0f, 1e-4f);
+    ASSERT_NEAR(canvas->root_rect().size().x, 960.0f, 1e-3f);   // half the canvas pixels...
+    ASSERT_NEAR(canvas->root_rect().size().y, 540.0f, 1e-3f);   // ...so everything looks twice as big
+
+    // Text re-bakes rather than being magnified: the atlas density follows the scale factor.
+    ASSERT_NEAR(canvas->effective_text_scale(), 2.0f, 1e-4f);
+
+    // Composes with the asset's own multiplier, and <= 0 is ignored here too.
+    canvas->scaler.user_scale = 1.5f;
+    canvas->set_viewport(1920, 1080);
+    ASSERT_NEAR(canvas->scale_factor(), 3.0f, 1e-4f);
+    canvas->set_ui_scale(-1.0f);
+    canvas->set_viewport(1920, 1080);
+    ASSERT_NEAR(canvas->scale_factor(), 1.5f, 1e-4f);
+}
+
 COOPA_TEST(scaler_modes_compute_expected_scale_factor) {
     // ConstantPixelSize: always returns scale_factor, regardless of screen size.
     {

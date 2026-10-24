@@ -55,10 +55,13 @@
 #include <uicoopa/builder/detail/inventory.h>
 #include <uicoopa/builder/detail/tabs.h>
 #include <uicoopa/builder/detail/prompts.h>
+#include <uicoopa/builder/detail/selectables.h>
+#include <uicoopa/builder/detail/tooltip.h>
 #include <uicoopa/groups/content_size_fitter.h>
 #include <uicoopa/groups/layout_group.h>
 #include <uicoopa/groups/scroll_rect.h>
 #include <uicoopa/layout/layout_element.h>
+#include <uicoopa/layout/canvas.h>
 #include <uicoopa/layout/rect_transform.h>
 #include <uicoopa/widgets/button.h>
 #include <uicoopa/widgets/dialog.h>
@@ -120,7 +123,7 @@ public:
         const UITheme& theme = theme_for(owner);
         std::vector<SceneObject*> authored;
         for (auto& c : owner->children()) authored.push_back(c.get());
-        expand(detail::BuildContext{owner, &theme}, theme);
+        expand(detail::BuildContext{owner, &theme, input_mode_for_(owner)}, theme);
         adopt(authored);
         // Scene::start() stamped every component's scene pointer before this ran; what was
         // just generated (and any component expand() added to the owner) needs it too, or
@@ -186,6 +189,15 @@ public:
     }
 
 protected:
+    /** @brief The nearest ancestor canvas's input_mode -- what decides whether the widgets this
+     *         composite builds get a Selectable. Pointer when there is no canvas above it. */
+    static InputMode input_mode_for_(const SceneObject* node) {
+        for (const SceneObject* o = node; o; o = o->parent()) {
+            if (const auto* c = o->get_component<CanvasComponent>()) return c->input_mode;
+        }
+        return InputMode::Pointer;
+    }
+
     /** @brief Builds the subtree into ctx.parent (== owner); sets slot_/generated_. */
     virtual void expand(detail::BuildContext ctx, const UITheme& theme) = 0;
 
@@ -211,6 +223,23 @@ protected:
         std::rotate(kids.begin(), kids.end() - 1, kids.end());
         generated_ = raw;
         return raw;
+    }
+
+    /**
+     * @brief Takes `node` and everything under it out of hit testing.
+     *
+     * For a composite that is a READOUT: a message log, a row of button hints. Raycaster
+     * recurses into children regardless of a parent's `hittable` (a descendant with its own
+     * z_order can escape an ancestor's clip, so the walk cannot prune), which means clearing
+     * the generated root alone leaves every node under it a raycast target -- and a host that
+     * asks "is the pointer over the UI" to decide whether a click reaches the game would then
+     * find the whole log's footprint opaque. A readout should never take a click from what it
+     * is drawn over.
+     */
+    static void clear_subtree_hittable_(SceneObject* node) {
+        if (!node) return;
+        if (auto* rt = node->get_component<RectTransform>()) rt->hittable = false;
+        for (auto& child : node->children()) clear_subtree_hittable_(child.get());
     }
 
     /** @brief A StretchAll node under `parent` inset by the four paddings (left/right/top/bottom). */
@@ -458,7 +487,7 @@ class ThemedButtonComposite : public UiComposite {
 public:
     std::string type_name() const override { return "ThemedButton"; }
 protected:
-    void expand(detail::BuildContext, const UITheme& theme) override {
+    void expand(detail::BuildContext ctx, const UITheme& theme) override {
         const ButtonStyle& style = detail::button_style(theme, detail::parse_button_role(str("role")));
         auto* img = owner->get_component<Image>();
         if (!img) img = owner->add_component<Image>();
@@ -471,6 +500,11 @@ protected:
         btn->colors.pressed = style.press;
         btn->colors.disabled = style.disabled;
         btn->interactable = flag("interactable", true);
+        // Unlike every other interactive composite, this one puts its widget straight on the
+        // owner instead of going through a detail::make_* factory -- so the Selectable the
+        // factories attach for a navigable canvas has to be attached here too, or the one
+        // button a screen is most likely to be built from would be the one a pad cannot find.
+        if (ctx.builds_gamepad()) detail::attach_selectable(owner, btn);
         SceneObject* root = make_root_("Label");
         auto* txt = root->add_component<Text>();
         detail::apply_role_font(txt, theme, detail::parse_font_role(str("font_role"), FontRole::Label));
@@ -962,6 +996,7 @@ protected:
         rt->set_size_delta({0.0f, 0.0f});
         const float hold = num("hold_seconds", -1.0f);
         if (hold >= 0.0f) log->hold_seconds = hold;
+        clear_subtree_hittable_(root);
     }
 };
 
@@ -988,6 +1023,24 @@ protected:
                 g->child_alignment = detail::parse_alignment(str("align"), ChildAlignment::MiddleRight);
             }
         }
+        clear_subtree_hittable_(root);
+    }
+};
+
+/**
+ * @brief `Tooltips {}` -- installs the one TooltipOverlay that shows every Tooltip on a canvas.
+ *
+ * Authored on the canvas root (anywhere inside the canvas works; the overlay places itself at
+ * the root either way). It generates no subtree of its own -- the bubble builds itself on demand
+ * -- so it is the one composite that does not call make_root_(). Its look and its hover delay
+ * come from the theme's `tooltip:` block, so there is nothing to author here.
+ */
+class TooltipsComposite : public UiComposite {
+public:
+    std::string type_name() const override { return "Tooltips"; }
+protected:
+    void expand(detail::BuildContext ctx, const UITheme&) override {
+        detail::make_tooltip_overlay(ctx);
     }
 };
 
@@ -1002,6 +1055,7 @@ inline const std::vector<std::string>& ui_composite_types() {
         "Window", "Dialog", "ScrollView", "TabView", "Collapsible",
         "MenuList", "ActionBar", "SettingRow",
         "HudCorner", "StatBar", "Hotbar", "ItemGrid", "MessageLog", "PromptBar",
+        "Tooltips",
     };
     return types;
 }
@@ -1035,6 +1089,7 @@ inline void register_ui_composites() {
     detail::register_composite_<ItemGridComposite>("ItemGrid");
     detail::register_composite_<MessageLogComposite>("MessageLog");
     detail::register_composite_<PromptBarComposite>("PromptBar");
+    detail::register_composite_<TooltipsComposite>("Tooltips");
 }
 
 }  // namespace ui
