@@ -818,6 +818,21 @@ public:
     /** @brief Draws an icon (see imm_icons.h) fitted into `b`. */
     void icon(Icon i, const Box& b, const glm::vec4& c) { draw_icon(*this, i, b, c); }
 
+    /**
+     * @brief Draws a texture into `b`.
+     *
+     * The UV rectangle is Y-flipped on purpose: canvas space runs +Y up from the bottom-left
+     * while an image's first row is its top, so the obvious {{0,0},{1,1}} draws it upside
+     * down. Binding a second texture only starts another draw batch -- the default is put back
+     * straight away, exactly as the text renderer does, so no later primitive inherits it.
+     */
+    void image(coopa::gfx::TextureView view, const Box& b, const glm::vec4& tint = glm::vec4(1.0f)) {
+        if (!dl_ || b.empty() || !view.valid()) return;
+        dl_->set_texture(view);
+        dl_->add_quad(to_canvas_(b), Rect{{0.0f, 1.0f}, {1.0f, 0.0f}}, pack(tint));
+        dl_->set_texture(dl_->default_texture());
+    }
+
     void gradient(const Box& b, const glm::vec4& tl, const glm::vec4& tr, const glm::vec4& br, const glm::vec4& bl) {
         dl_->set_texture(dl_->default_texture());
         dl_->add_quad_gradient(flip_(b.pos()), flip_({b.right(), b.y}), flip_({b.right(), b.bottom()}),
@@ -1278,6 +1293,84 @@ public:
         std::snprintf(buf, sizeof(buf), fmt, *v);
         text_in(b, buf, style.text, 0.0f, true);
         set_last_(id, b, hovered);
+        return changed;
+    }
+
+    /**
+     * @brief A small set of choices as a row of joined buttons: every option readable at a
+     *        glance and one click away, where a dropdown hides them behind a popup.
+     * @return True when a different item was picked.
+     */
+    bool segmented(std::string_view lbl, int* index, const std::vector<std::string>& items) {
+        Box b = property_row(lbl);
+        return segmented_in(get_id(lbl), b, index, items);
+    }
+
+    /** @brief segmented() in a box placed by the caller. */
+    bool segmented_in(Id id, const Box& b, int* index, const std::vector<std::string>& items) {
+        if (items.empty() || b.w <= 0) return false;
+        push_id(id);
+        bool changed = false;
+        bool row_hovered = false;
+        const int n = static_cast<int>(items.size());
+        const float w = b.w / static_cast<float>(n);
+        for (int i = 0; i < n; ++i) {
+            const Box cell{b.x + static_cast<float>(i) * w, b.y, w - (i + 1 < n ? 1.0f : 0.0f), b.h};
+            bool hovered = false, held = false;
+            push_id(static_cast<int64_t>(i));
+            const bool clicked = invisible_button("seg", cell, &hovered, &held);
+            pop_id();
+            row_hovered |= hovered;
+            const bool on = i == *index;
+            int corners = 0;
+            if (n == 1) corners = kAll;
+            else if (i == 0) corners = kLeft;
+            else if (i + 1 == n) corners = kRight;
+            fill_rounded(cell, on ? style.button_active : hovered || held ? style.button_hover : style.button, -1, corners);
+            text_in(cell, items[static_cast<size_t>(i)], on ? style.text : style.text_dim, 0.0f, true);
+            if (clicked && !on) { *index = i; changed = true; }
+        }
+        pop_id();
+        set_last_(id, b, row_hovered);   // a tooltip after this covers the whole row, not one cell
+        return changed;
+    }
+
+    /**
+     * @brief A low and a high value on one track -- a span, rather than two numbers that happen
+     *        to sit next to each other. Each handle stops at the other, so it cannot invert.
+     * @return True on any change.
+     */
+    bool range_slider(std::string_view lbl, float* lo, float* hi, float min, float max, const char* fmt = "%.2f") {
+        Box b = property_row(lbl);
+        const Id id = get_id(lbl);
+        push_id(lbl);
+        const float span = max - min;
+        auto pos = [&](float v) { return b.x + (span > 0 ? std::clamp((v - min) / span, 0.0f, 1.0f) : 0.0f) * b.w; };
+        auto value_at = [&](float x) { return min + span * std::clamp((x - b.x) / std::max(1.0f, b.w), 0.0f, 1.0f); };
+        bool changed = false;
+        const float grab = std::max(8.0f, b.h * 0.6f);
+        bool lo_hot = false, lo_held = false, hi_hot = false, hi_held = false;
+        invisible_button("lo", {pos(*lo) - grab * 0.5f, b.y, grab, b.h}, &lo_hot, &lo_held);
+        if (lo_held) {
+            const float v = std::min(value_at(in_.mouse.x), *hi);
+            if (v != *lo) { *lo = v; changed = true; }
+        }
+        invisible_button("hi", {pos(*hi) - grab * 0.5f, b.y, grab, b.h}, &hi_hot, &hi_held);
+        if (hi_held) {
+            const float v = std::max(value_at(in_.mouse.x), *lo);
+            if (v != *hi) { *hi = v; changed = true; }
+        }
+        fill_rounded(b, style.number);
+        const float x0 = pos(*lo), x1 = pos(*hi);
+        fill_rounded({x0, b.y, std::max(2.0f, x1 - x0), b.h}, style.accent);
+        fill_rounded({x0 - 2.0f, b.y + 1.0f, 4.0f, b.h - 2.0f}, lo_hot || lo_held ? style.text : style.text_dim, 2.0f);
+        fill_rounded({x1 - 2.0f, b.y + 1.0f, 4.0f, b.h - 2.0f}, hi_hot || hi_held ? style.text : style.text_dim, 2.0f);
+        char buf[96];
+        const std::string both = std::string(fmt) + "  ..  " + fmt;
+        std::snprintf(buf, sizeof(buf), both.c_str(), *lo, *hi);
+        text_in(b, buf, style.text, 0.0f, true);
+        pop_id();
+        set_last_(id, b, lo_hot || hi_hot || hoverable_(b));
         return changed;
     }
 
@@ -1833,6 +1926,17 @@ public:
     }
     /** @brief True if `b` is under the mouse and nothing (popup, active widget) blocks it. */
     bool is_hovered(const Box& b) const { return hoverable_(b); }
+
+    /**
+     * @brief A number a widget keeps between frames, under its own id -- which stop of a
+     *        gradient is selected, how far a strip has scrolled.
+     *
+     * Four slots per id. Use it for presentation state only: anything the document should
+     * remember belongs in the document.
+     */
+    float& persistent(std::string_view id_str, int slot = 0) {
+        return state_(get_id(id_str)).f[std::clamp(slot, 0, 3)];
+    }
 
 private:
     // --- constants ---

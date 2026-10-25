@@ -16,7 +16,10 @@
 
 #include <uicoopa/immediate/imm.h>
 
+#include <cctype>
 #include <cmath>
+#include <string_view>
+#include <utility>
 
 namespace coopa {
 namespace ui {
@@ -482,6 +485,62 @@ inline void draw_icon(Context& ctx, Icon icon, const Box& b, const glm::vec4& co
             d.l(12, 2.5f, 12, 12); d.tri(9.5f, 11, 14.5f, 11, 12, 14);
             break;
     }
+}
+
+/**
+ * @brief The Icon whose enumerator spells `name`, matched without regard to case, or
+ *        Icon::None for an empty or unknown name.
+ *
+ * Lets data that must not depend on this header -- a schema table, a YAML file -- choose an
+ * icon by name.
+ */
+inline Icon icon_from_name(std::string_view name) {
+    static const std::pair<const char*, Icon> table[] = {
+        {"Cube", Icon::Cube}, {"Mesh", Icon::Mesh}, {"Sphere", Icon::Sphere}, {"Cylinder", Icon::Cylinder},
+        {"Plane", Icon::Plane}, {"Empty", Icon::Empty}, {"Sun", Icon::Sun}, {"PointLight", Icon::PointLight},
+        {"SpotLight", Icon::SpotLight}, {"EnvLight", Icon::EnvLight}, {"Camera", Icon::Camera},
+        {"Terrain", Icon::Terrain}, {"Object", Icon::Object}, {"Material", Icon::Material},
+        {"Texture", Icon::Texture}, {"World", Icon::World}, {"Scene", Icon::Scene},
+        {"Collection", Icon::Collection}, {"Physics", Icon::Physics}, {"Collider", Icon::Collider},
+        {"Rigidbody", Icon::Rigidbody}, {"Component", Icon::Component}, {"Script", Icon::Script},
+        {"Render", Icon::Render}, {"Output", Icon::Output}, {"Tool", Icon::Tool}, {"Gear", Icon::Gear},
+        {"Eye", Icon::Eye}, {"EyeClosed", Icon::EyeClosed}, {"Monitor", Icon::Monitor},
+        {"MonitorOff", Icon::MonitorOff}, {"Check", Icon::Check}, {"Lock", Icon::Lock},
+        {"SelectBox", Icon::SelectBox}, {"Cursor", Icon::Cursor}, {"Move", Icon::Move}, {"Rotate", Icon::Rotate},
+        {"Scale", Icon::Scale}, {"Transform", Icon::Transform}, {"Extrude", Icon::Extrude},
+        {"Inset", Icon::Inset}, {"Bevel", Icon::Bevel}, {"Knife", Icon::Knife}, {"LoopCut", Icon::LoopCut},
+        {"Vertex", Icon::Vertex}, {"Edge", Icon::Edge}, {"Face", Icon::Face}, {"ObjectMode", Icon::ObjectMode},
+        {"EditMode", Icon::EditMode}, {"SculptMode", Icon::SculptMode}, {"LocalView", Icon::LocalView},
+        {"BrushDraw", Icon::BrushDraw}, {"BrushSmooth", Icon::BrushSmooth}, {"BrushInflate", Icon::BrushInflate},
+        {"BrushGrab", Icon::BrushGrab}, {"BrushFlatten", Icon::BrushFlatten}, {"ShadeWire", Icon::ShadeWire},
+        {"ShadeSolid", Icon::ShadeSolid}, {"ShadeMaterial", Icon::ShadeMaterial},
+        {"ShadeRendered", Icon::ShadeRendered}, {"Overlays", Icon::Overlays}, {"XRay", Icon::XRay},
+        {"Grid", Icon::Grid}, {"Snap", Icon::Snap}, {"Pivot", Icon::Pivot}, {"Orientation", Icon::Orientation},
+        {"ViewCamera", Icon::ViewCamera}, {"Ortho", Icon::Ortho}, {"Persp", Icon::Persp}, {"Zoom", Icon::Zoom},
+        {"Hand", Icon::Hand}, {"Play", Icon::Play}, {"Pause", Icon::Pause}, {"Step", Icon::Step},
+        {"Stop", Icon::Stop}, {"Folder", Icon::Folder}, {"File", Icon::File}, {"Image", Icon::Image},
+        {"Search", Icon::Search}, {"Filter", Icon::Filter}, {"Asset", Icon::Asset}, {"Console", Icon::Console},
+        {"Save", Icon::Save}, {"Package", Icon::Package}, {"Plus", Icon::Plus}, {"X", Icon::X},
+        {"Trash", Icon::Trash}, {"Duplicate", Icon::Duplicate}, {"Link", Icon::Link},
+        {"ArrowRight", Icon::ArrowRight}, {"ArrowDown", Icon::ArrowDown}, {"Dots", Icon::Dots},
+        {"Undo", Icon::Undo}, {"Redo", Icon::Redo}, {"Restart", Icon::Restart}, {"Info", Icon::Info},
+        {"Warning", Icon::Warning}, {"Error", Icon::Error}, {"Palette", Icon::Palette},
+        {"MouseLeft", Icon::MouseLeft}, {"MouseMiddle", Icon::MouseMiddle}, {"MouseRight", Icon::MouseRight},
+        {"Keyboard", Icon::Keyboard}, {"VertexPaint", Icon::VertexPaint}, {"WeightPaint", Icon::WeightPaint},
+        {"UiCanvas", Icon::UiCanvas}, {"UiText", Icon::UiText}, {"UiButton", Icon::UiButton},
+        {"UiLayout", Icon::UiLayout}, {"UiWidget", Icon::UiWidget}, {"UiAnchor", Icon::UiAnchor},
+        {"Tag", Icon::Tag}, {"Sort", Icon::Sort}, {"Proportional", Icon::Proportional},
+    };
+    for (const auto& [n, icon] : table) {
+        std::string_view other(n);
+        if (other.size() != name.size()) continue;
+        bool same = true;
+        for (size_t i = 0; i < name.size() && same; ++i) {
+            same = std::tolower(static_cast<unsigned char>(name[i])) == std::tolower(static_cast<unsigned char>(other[i]));
+        }
+        if (same) return icon;
+    }
+    return Icon::None;
 }
 
 } // namespace imm
