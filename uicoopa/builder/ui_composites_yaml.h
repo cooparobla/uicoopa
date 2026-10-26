@@ -733,7 +733,16 @@ private:
     std::vector<SceneObject*> pages_;
 };
 
-/** @brief `Collapsible { title, start_expanded }` -- a header that folds its body away. */
+/**
+ * @brief `Collapsible { title, start_expanded, boxed, expanded_extent }` -- a header that folds
+ *        its body away.
+ *
+ * `expanded_extent` is the open height (along the layout axis) to restore on expanding, and is
+ * needed whenever this sits in a layout group: CollapsiblePanel never writes a negative extent,
+ * so without it the first collapse shrinks the authored object to the header and the re-expand
+ * has nothing to grow back to. The C++ builder solves this with `CollapsibleHandle::fit()`,
+ * which measures the built body; from YAML the author supplies the number.
+ */
 class CollapsibleComposite : public UiComposite {
 public:
     std::string type_name() const override { return "Collapsible"; }
@@ -743,6 +752,7 @@ protected:
         detail::CollapsibleOptions opts;
         opts.start_expanded = flag("start_expanded", true);
         opts.boxed = flag("boxed", true);
+        opts.expanded_extent = num("expanded_extent", -1.0f);
         // Fold the AUTHORED object's size, so a parent layout group closes the gap.
         if (!owner->get_component<LayoutElement>()) owner->add_component<LayoutElement>();
         opts.size_node = owner;
