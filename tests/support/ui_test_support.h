@@ -42,34 +42,12 @@
 #include <uicoopa/render/ui_pass.h>
 #include <uicoopa/render/sprite_sheet.h>
 #include <uicoopa/render/icon_library.h>
-#include <uicoopa/widgets/graphic.h>
-#include <uicoopa/widgets/image.h>
 
 #include <uicoopa/text/font_atlas.h>
 #include <uicoopa/text/font.h>
-#include <uicoopa/widgets/text.h>
 
 #include <uicoopa/input/ui_input.h>
-#include <uicoopa/input/raycaster.h>
-#include <uicoopa/input/event_system.h>
-#include <uicoopa/input/nav_types.h>
-#include <uicoopa/input/nav_geometry.h>
-#include <uicoopa/input/nav_mapper.h>
-#include <uicoopa/input/navigation.h>
-#include <uicoopa/widgets/button.h>
 
-#include <uicoopa/groups/layout_group.h>
-#include <uicoopa/groups/grid_layout_group.h>
-#include <uicoopa/groups/content_size_fitter.h>
-#include <uicoopa/groups/scroll_rect.h>
-#include <uicoopa/widgets/scrollbar.h>
-#include <uicoopa/widgets/mask.h>
-#include <uicoopa/ui_yaml.h>
-#include <uicoopa/builder/ui_builder.h>
-#include <uicoopa/widgets/progress_bar.h>
-#include <uicoopa/widgets/message_log.h>
-#include <uicoopa/widgets/inventory_binding.h>
-#include <uicoopa/widgets/console.h>
 
 #include <coopa/scene/scene_object.h>
 #include <coopa/scene/scene_manager.h>

@@ -45,7 +45,6 @@
 #include <uicoopa/render/ui_vertex.h>
 #include <uicoopa/text/font.h>
 #include <uicoopa/input/ui_input.h>
-#include <uicoopa/builder/ui_theme.h>
 
 #include <coopa/input/keys.h>
 
@@ -61,6 +60,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace coopa {
@@ -243,19 +243,6 @@ struct Style {
     glm::vec4 shadow         {0.0f, 0.0f, 0.0f, 0.09f};   ///< one layer of a popup's soft shadow
     glm::vec4 modal_dim      {0.0f, 0.0f, 0.0f, 0.45f};   ///< behind modal dialogs
     glm::vec4 check_mark     {1.0f, 1.0f, 1.0f, 1.0f};
-
-    /** @brief The defaults, derived from uicoopa's own dark theme where the roles overlap. */
-    static Style from_theme(const UITheme& t) {
-        Style s;
-        s.panel_bg   = glm::vec4(glm::vec3(t.panel.panel), 1.0f);
-        s.panel_alt  = glm::vec4(glm::vec3(t.panel.panel_alt), 1.0f);
-        s.header     = glm::vec4(glm::vec3(t.panel.header_bar), 1.0f);
-        s.text       = t.text.primary;
-        s.text_dim   = t.text.secondary;
-        s.accent     = t.text.accent;
-        s.selection  = with_alpha(t.text.selection, 0.55f);
-        return s;
-    }
 };
 
 // =====================================================================================
@@ -274,6 +261,14 @@ public:
     void set_font(Font* font) { font_ = font; }
     Font* font() const { return font_; }
 
+    /**
+     * @brief The width of `s` at `size`, in canvas pixels.
+     *
+     * Measured off the UNSCALED atlas, so layout is stable whatever the canvas's text scale
+     * is -- a panel must not reflow because the window moved to a Retina display. The glyph
+     * advances stb reports do not depend on oversampling, so this agrees with draw() even
+     * when draw() picks the 2x atlas (see the note there).
+     */
     float width(std::string_view s, float size) const {
         if (!font_) return static_cast<float>(s.size()) * size * 0.55f;
         FontAtlas& atlas = font_->atlas_for_size(px_(size), 1);
@@ -312,16 +307,24 @@ public:
         const float scale = std::clamp(dl.text_scale(), 1.0f, 4.0f);
         const uint32_t px = px_(size * scale);
         const float inv = size / static_cast<float>(px);
-        // Baked 1:1 at every scale and drawn pixel-snapped (below): crisp, evenly weighted
-        // stems, the way desktop UI text is rendered. An oversampled atlas allows sub-pixel x,
-        // but a stem between two pixel columns draws as two grey ones -- letters of one word
-        // then look unevenly soft and out of line.
-        FontAtlas& atlas = font_->atlas_for_size(px, 1);
+        // On a SCREEN canvas: baked 1:1 and drawn pixel-snapped (below) -- crisp, evenly
+        // weighted stems, the way desktop UI text is rendered. An oversampled atlas allows
+        // sub-pixel x, but a stem between two pixel columns draws as two grey ones, so one
+        // word's letters look unevenly soft and out of line.
+        //
+        // On a WORLD canvas there is no device-pixel grid to snap to (the host clears
+        // DrawList::pixel_snap() for one), so snapping would quantize glyphs to an arbitrary
+        // canvas-pixel lattice for nothing. Keep the 2x oversampled atlas built for sub-pixel
+        // placement instead -- the same choice Text::emit() makes, for the same reason.
+        const bool snap_to_pixels = dl.pixel_snap();
+        const uint32_t over = (px > px_(size) || snap_to_pixels) ? 1u : 2u;
+        FontAtlas& atlas = font_->atlas_for_size(px, over);
         dl.set_texture(atlas.texture().view_typed());
         // Baseline in imm space (y down): top + ascent. Canvas y = canvas_h - imm y.
         const float snap = 1.0f / scale;
-        const float baseline = std::round((pos.y + atlas.ascent() * inv) / snap) * snap;
-        float pen = std::round(pos.x / snap) * snap;
+        const float baseline = snap_to_pixels ? std::round((pos.y + atlas.ascent() * inv) / snap) * snap
+                                              : pos.y + atlas.ascent() * inv;
+        float pen = snap_to_pixels ? std::round(pos.x / snap) * snap : pos.x;
         for (unsigned char c : s) {
             const GlyphInfo* g = atlas.glyph(c);
             if (!g) continue;
@@ -330,8 +333,10 @@ public:
             // different fraction -- uneven stems and letters that look out of line. The pen
             // itself keeps its exact advance, so spacing doesn't drift.
             const glm::vec2 size_px = (g->quad_max - g->quad_min) * inv;
-            const float x0 = std::round((pen + g->quad_min.x * inv) / snap) * snap;
-            const float y_top = std::round((baseline + g->quad_min.y * inv) / snap) * snap;   // imm space (y down)
+            const float x_raw = pen + g->quad_min.x * inv;
+            const float y_raw = baseline + g->quad_min.y * inv;                               // imm space (y down)
+            const float x0 = snap_to_pixels ? std::round(x_raw / snap) * snap : x_raw;
+            const float y_top = snap_to_pixels ? std::round(y_raw / snap) * snap : y_raw;
             Rect r;
             r.min = glm::vec2(x0, canvas_h - (y_top + size_px.y));
             r.max = glm::vec2(x0 + size_px.x, canvas_h - y_top);
@@ -392,6 +397,113 @@ struct FrameInput {
     }
 };
 
+/**
+ * @struct BarStyle
+ * @brief How a resource bar looks (Context::stat_bar()).
+ *
+ * Colours default to "unset" (a negative red) and are filled from Context::style, so `{}` is
+ * a themed bar and a caller overrides only what differs. A project's own roles -- what ITS
+ * health bar looks like -- come from its theme's `game:` section (imm_theme.h) and are passed
+ * in here, because Theme is the thing that loads YAML and sits above this header.
+ */
+struct BarStyle {
+    glm::vec4 fill{-1.0f};        /**< The filled portion. */
+    glm::vec4 track{-1.0f};       /**< The empty portion behind it. */
+    glm::vec4 trail{-1.0f};       /**< The damage trail -- where the value just dropped from. */
+    glm::vec4 label{-1.0f};       /**< Label and readout text. */
+    float rounding = -1.0f;       /**< Corner radius; negative takes the theme's. */
+    float trail_hold = 0.35f;     /**< Seconds the trail waits before it starts catching up. */
+    float trail_rate = 1.2f;      /**< Fraction of the bar the trail closes per second. */
+    bool  show_value = true;      /**< Draw "value / max" against the right edge. */
+};
+
+/**
+ * @struct SlotStyle
+ * @brief How slot cells look (Context::slot_grid()). Unset colours resolve from Context::style.
+ */
+struct SlotStyle {
+    glm::vec4 cell{-1.0f};       /**< A slot's background. */
+    glm::vec4 cell_hover{-1.0f};
+    glm::vec4 border{-1.0f};
+    float     spacing = -1.0f;   /**< Gap between cells; negative takes the theme's. */
+    float     rounding = -1.0f;
+};
+
+/** @brief What a Context::slot_grid() callback is told about one cell. */
+struct SlotInfo {
+    int  index = 0;          /**< Cell index, row-major from the top-left. */
+    Box  box;                /**< The cell, already inset by the grid's spacing. */
+    bool hovered = false;    /**< The pointer is over it and nothing above has claimed it. */
+    bool pressed = false;    /**< It was clicked this frame. */
+    bool held = false;       /**< The left button is down on it -- the start of a drag. */
+    bool right_pressed = false;  /**< Right-clicked: "use", "equip", a context menu. */
+    /**
+     * @brief A drag of the grid's own payload type is hovering this cell.
+     *
+     * The highlight an inventory needs while something is being dragged over a destination.
+     * Set only while Context::drag_source() has an active drag, so it is false in the common case.
+     */
+    bool drop_hovered = false;
+};
+
+/**
+ * @struct ItemRow
+ * @brief One line of Context::item_list(): the list-shaped inventory (Fallout/Bethesda).
+ *
+ * A grid is one way to show a bag; a categorised list with aligned columns is the other, and it
+ * is the one that scales to hundreds of items. Everything here is what the CALLER knows -- the
+ * widget sorts nothing and owns nothing, so a game with its own item model is not shut out.
+ */
+struct ItemRow {
+    std::string label;
+    int         count = 1;        /**< Shown as "(3)" after the name; 1 draws nothing. */
+    Icon        icon = Icon::None;
+    glm::vec4   tint{1.0f};       /**< The name's colour -- a rarity tier, usually. */
+    float       weight = 0.0f;
+    int         value = 0;
+    bool        equipped = false; /**< Marked, and sorted by the caller if it wants that. */
+    bool        favourite = false;
+    int         user = 0;         /**< The caller's handle: a slot index, an item id, anything. */
+};
+
+/** @brief Which numeric columns Context::item_list() right-aligns. */
+struct ItemListColumns {
+    bool count = true;
+    bool weight = false;
+    bool value = false;
+};
+
+/**
+ * @enum Anchor
+ * @brief Which part of the canvas a panel is positioned against (see Context::anchor()).
+ *
+ * Named for what they look like on screen, in imm's own space: Top is the top edge, and a
+ * positive y offset moves DOWN from it. An offset always moves the box rather than the anchor,
+ * so a right- or bottom-pinned panel insets with a negative component -- see
+ * Context::anchor(). Stretching is Context::stretch() instead, because a stretched axis
+ * ignores the size and reads the offset as a margin, and one function meaning two things is
+ * how layout bugs start.
+ */
+enum class Anchor {
+    TopLeft,    TopCenter,    TopRight,
+    MiddleLeft, Center,       MiddleRight,
+    BottomLeft, BottomCenter, BottomRight,
+};
+
+/**
+ * @enum UiSound
+ * @brief What a widget just did, for a host that wants to put a sound on it.
+ *
+ * Deliberately about the INTERACTION, not the widget: a host maps these to its own named
+ * sounds once, and every widget in the layer is covered -- rather than each widget knowing
+ * which sound it should make, which is how a UI ends up half-silent.
+ */
+enum class UiSound {
+    Hover,    ///< The pointer moved onto something interactive.
+    Press,    ///< A press began on it.
+    Release,  ///< A press completed on it (a click).
+};
+
 enum class Mouse { Left = 0, Right = 1, Middle = 2 };
 
 // =====================================================================================
@@ -445,6 +557,10 @@ public:
         // Widgets record the LEFT press themselves (it is also their drag origin); nothing ever
         // recorded the other two, so a right-click on an item could never count as a click.
         for (int b = 1; b < 3; ++b) if (in_.pressed[b]) press_pos_[b] = in_.mouse;
+
+        // Carried across the frame boundary, before hot_id_ is cleared below: it is what lets
+        // a hover sound fire on arrival rather than on every frame the pointer rests.
+        hot_prev_ = hot_id_;
 
         // Resolve which layer the mouse is over from LAST frame's layer rects: the highest z
         // containing the mouse, or the open modal (which owns all input while it is up).
@@ -504,6 +620,7 @@ public:
         dl_->set_z_order(0);
         hot_id_ = 0;
         last_item_ = {};
+        focusables_.clear();
         keyboard_consumed_ = false;
         wheel_consumed_ = false;
         tooltip_.clear();
@@ -515,6 +632,7 @@ public:
     }
 
     void end_frame() {
+        advance_focus_();
         if (!any_down_()) suppress_reopen_.clear();   // the closing click is over
         // The tooltip's item was not hovered this frame: the next hover waits the full delay again.
         if (!tooltip_seen_) tooltip_target_ = 0;
@@ -581,9 +699,21 @@ public:
     // -------------------------------------------------------------------------------
 
     Id get_id(std::string_view label) const { return hash_str(label, id_stack_.back()); }
+    /**
+     * @brief Hashes a C string's CONTENTS, like the string_view overload.
+     *
+     * Without this, `get_id("row")` binds to the `const void*` overload instead: array-to-
+     * pointer decay is a standard conversion and beats string_view's user-defined one, so a
+     * literal would silently hash its own ADDRESS. That works by accident within one binary
+     * and then fails the moment the same key is also reached through a string_view -- two
+     * different ids for the same name, so a widget loses the state it stored last frame.
+     */
+    Id get_id(const char* s) const { return hash_str(s ? std::string_view(s) : std::string_view{}, id_stack_.back()); }
     Id get_id(const void* ptr) const { return hash_int(reinterpret_cast<uintptr_t>(ptr), id_stack_.back()); }
     Id get_id(int64_t v) const { return hash_int(static_cast<uint64_t>(v) ^ 0x5bd1e995ull, id_stack_.back()); }
     void push_id(std::string_view s) { id_stack_.push_back(get_id(s)); }
+    /** @brief See get_id(const char*): keeps a literal off the pointer overload. */
+    void push_id(const char* s) { id_stack_.push_back(get_id(s)); }
     void push_id(int64_t v) { id_stack_.push_back(get_id(v)); }
     void push_id(const void* p) { id_stack_.push_back(get_id(p)); }
     void pop_id() { if (id_stack_.size() > 1) id_stack_.pop_back(); }
@@ -594,7 +724,215 @@ public:
 
     const FrameInput& input() const { return in_; }
     glm::vec2 mouse() const { return in_.mouse; }
+    /**
+     * @brief Called when any widget is hovered, pressed or clicked, for UI sound.
+     *
+     * Null by default, so a UI makes no sound until a host asks for one. Fired from the one
+     * state machine every interactive widget goes through, which is why a host wires this
+     * once rather than per widget.
+     */
+    std::function<void(UiSound)> on_sound;
+
     glm::vec2 canvas_size() const { return size_; }
+
+    // --- Anchored placement -------------------------------------------------------------
+    //
+    // imm's flow layout (next_box, same_line, begin_region) is what a form or a tool panel
+    // wants. A game's interface is the other shape: a handful of panels pinned to the edges
+    // of a screen whose size it does not control. These resolve a box against the canvas, so
+    // a HUD keeps its corners on any resolution.
+
+    /**
+     * @brief A box of `size` pinned to `a`, then moved by `offset`.
+     *
+     * `offset` is in imm space (+Y DOWN) and is added to the anchored position as-is -- it
+     * moves the BOX, never the anchor. So TopLeft with {20, 20} sits 20 in from the top-left
+     * corner, while a right- or bottom-pinned box insets with a NEGATIVE offset:
+     * BottomCenter with {0, -40} floats 40 above the bottom edge, and TopRight with {-24, 24}
+     * sits 24 in from the top-right. A positive x on a right anchor pushes the box
+     * off-canvas, which is why this is stated rather than left to be discovered.
+     */
+    Box anchor(Anchor a, glm::vec2 offset, glm::vec2 size) const {
+        const glm::vec2 free = size_ - size;
+        float x = 0.0f;
+        float y = 0.0f;
+        switch (a) {
+            case Anchor::TopLeft:      x = 0.0f;        y = 0.0f;        break;
+            case Anchor::TopCenter:    x = free.x * 0.5f; y = 0.0f;      break;
+            case Anchor::TopRight:     x = free.x;      y = 0.0f;        break;
+            case Anchor::MiddleLeft:   x = 0.0f;        y = free.y * 0.5f; break;
+            case Anchor::Center:       x = free.x * 0.5f; y = free.y * 0.5f; break;
+            case Anchor::MiddleRight:  x = free.x;      y = free.y * 0.5f; break;
+            case Anchor::BottomLeft:   x = 0.0f;        y = free.y;      break;
+            case Anchor::BottomCenter: x = free.x * 0.5f; y = free.y;    break;
+            case Anchor::BottomRight:  x = free.x;      y = free.y;      break;
+        }
+        return Box{x + offset.x, y + offset.y, size.x, size.y};
+    }
+
+    /** @brief The whole canvas, inset by `margin` on every side. */
+    Box stretch(float margin = 0.0f) const { return stretch(glm::vec2(margin)); }
+
+    /** @brief The whole canvas, inset by `margin.x` left/right and `margin.y` top/bottom. */
+    Box stretch(glm::vec2 margin) const {
+        return Box{margin.x, margin.y,
+                   std::max(0.0f, size_.x - margin.x * 2.0f),
+                   std::max(0.0f, size_.y - margin.y * 2.0f)};
+    }
+
+    /**
+     * @brief A full-width band: `h` tall, its top `y` from the canvas top, inset `margin_x`.
+     * @param y Negative measures UP from the BOTTOM edge, so a footer is stretch_h(-48, 40).
+     */
+    Box stretch_h(float y, float h, float margin_x = 0.0f) const {
+        const float top = y < 0.0f ? size_.y + y : y;
+        return Box{margin_x, top, std::max(0.0f, size_.x - margin_x * 2.0f), h};
+    }
+
+    /**
+     * @brief A full-height column: `w` wide, its left edge `x` from the canvas left.
+     * @param x Negative measures LEFT from the RIGHT edge, so a sidebar is stretch_v(-240, 240).
+     */
+    Box stretch_v(float x, float w, float margin_y = 0.0f) const {
+        const float left = x < 0.0f ? size_.x + x : x;
+        return Box{left, margin_y, w, std::max(0.0f, size_.y - margin_y * 2.0f)};
+    }
+
+    // --- Game composites (immediate/imm_game.h) ----------------------------------------
+    //
+    // The widgets above are tool-shaped: property rows, drag fields, trees. A game's
+    // interface is a different vocabulary, declared here and defined in imm_game.h so this
+    // header stays about the core. Each takes a Box -- position it with anchor()/stretch(),
+    // or with a box read from a tunables file -- and reports back what the player did.
+
+    /** @brief A plain fraction bar: track and fill, no label. `t` is clamped to 0..1. */
+    void value_bar(const Box& b, float t, const BarStyle& style = {});
+
+    /**
+     * @brief A labelled resource bar with a damage trail.
+     *
+     * The trail is what makes a hit readable: the fill drops at once, a ghost holds where the
+     * value used to be, then slides down to meet it. Without it, a bar that loses a third of
+     * its length in one frame just looks like a different bar.
+     *
+     * @param id  Distinguishes this bar's trail state from every other bar's.
+     * @param max Zero or less draws an empty bar rather than dividing by it.
+     */
+    void stat_bar(std::string_view id, const Box& b, std::string_view label, float value, float max,
+                  const BarStyle& style = {});
+
+    /**
+     * @brief A grid of uniform cells, each drawn by `fn(Context&, const SlotInfo&)`.
+     *
+     * The shared body of every slotted interface -- an inventory, a hotbar, a row of worn
+     * equipment -- because the only thing that differs between them is what goes IN a cell.
+     * Cells divide `b` exactly, so a grid fills its box instead of leaving a ragged margin.
+     */
+    template <class SlotFn>
+    void slot_grid(std::string_view id, const Box& b, int cols, int rows, SlotFn&& fn,
+                   const SlotStyle& style = {});
+
+    /**
+     * @brief One row of slots with keybind labels drawn in the corner, for an action bar.
+     * @param keys One short label per slot ("1", "Q", "LMB"); longer ones crowd a small slot.
+     */
+    template <class SlotFn>
+    void hotbar(std::string_view id, const Box& b, int count, const std::vector<std::string>& keys,
+                SlotFn&& fn, const SlotStyle& style = {});
+
+    /**
+     * @brief A cooldown wipe over a slot, retreating downward as the ability comes back.
+     * @param t Fraction of the cooldown REMAINING; 0 draws nothing, 1 covers the slot.
+     */
+    void cooldown(const Box& b, float t);
+
+    /**
+     * @brief A log of lines, newest last, pinned to the bottom of `b`.
+     *
+     * Draws only the lines that fit, counting back from the newest, so a thousand-line history
+     * costs what ten do. Lines are not wrapped: one entry is one row.
+     * @param colors Optional, parallel to `lines`; short or null uses the theme's text colour.
+     */
+    void message_log(const Box& b, const std::vector<std::string>& lines,
+                     const std::vector<glm::vec4>* colors = nullptr, bool background = true);
+
+    /** @brief A strip of "key -- action" hints, laid left to right and clipped to `b`. */
+    void prompt_bar(const Box& b, const std::vector<std::pair<std::string, std::string>>& prompts);
+
+    /**
+     * @brief A titled frame; returns the box its contents go in.
+     *
+     * Unlike begin_panel() this pushes no layout and no clip -- a game's window usually places
+     * its contents itself. The ones that want flow can begin_region() inside the result.
+     * @param close_clicked Set when the corner close button was pressed, if a pointer is given.
+     */
+    Box panel_frame(std::string_view id, const Box& b, std::string_view title, bool* close_clicked = nullptr);
+
+    /**
+     * @brief A vertical list of names, one selected -- an inventory's category column.
+     *
+     * @param active In/out: which entry is selected.
+     * @return The index clicked this frame, or -1.
+     */
+    int category_list(std::string_view id, const Box& b, const std::vector<std::string>& names,
+                      int* active);
+
+    /**
+     * @brief A scrolling list of items with right-aligned numeric columns.
+     *
+     * The list-shaped inventory. Rows are the caller's, in the caller's order: filtering by
+     * category and sorting are decisions only the game can make, and doing them here would mean
+     * every game got the same ones.
+     *
+     * @param selected In/out: which row is highlighted; clamped to the list.
+     * @return The index activated this frame (a click), or -1.
+     */
+    int item_list(std::string_view id, const Box& b, const std::vector<ItemRow>& rows,
+                  int* selected, const ItemListColumns& cols = {});
+
+    /**
+     * @brief The detail card beside an item list: a title, a description and labelled stats.
+     *
+     * @param stats Name/value pairs, drawn with the value right-aligned.
+     */
+    void item_detail(const Box& b, std::string_view title, std::string_view description,
+                     const std::vector<std::pair<std::string, std::string>>& stats);
+
+    /**
+     * @brief A vertical list of full-width buttons -- a main menu, a pause menu.
+     * @param disabled Optional, parallel to `items`: those draw dimmed and do not respond.
+     * @return The index pressed this frame, or -1.
+     */
+    int menu_list(std::string_view id, const Box& b, const std::vector<std::string>& items,
+                  const std::vector<bool>* disabled = nullptr);
+
+    /**
+     * @brief A grab area that moves `offset` with the pointer.
+     *
+     * What lets a player drag a HUD group where they want it, and a designer drag a tunable
+     * box. The caller owns `offset` and decides whether to clamp, snap or persist it -- where a
+     * dragged thing may end up is never this function's business.
+     * @return True while the drag is in progress, so a caller can save on the frame it ends.
+     */
+    bool drag_handle(std::string_view id, const Box& b, glm::vec2* offset);
+
+    /**
+     * @brief Text centred on a point, for damage numbers and pickup labels.
+     *
+     * Centred rather than left-aligned so a number that grows a digit stays over the thing it
+     * belongs to instead of drifting right.
+     */
+    void floating_text(glm::vec2 at, std::string_view s, const glm::vec4& color, float size = 0.0f);
+
+    /**
+     * @brief A world plate: a name over a resource bar, filling `b`.
+     *
+     * On a world-space canvas the plate IS the canvas, so pass stretch() and let it own the
+     * quad. Keep plates to bars and labels: a popup on a small plate is clamped to the plate
+     * and clipped rather than relocated.
+     */
+    void nameplate(std::string_view id, const Box& b, std::string_view name, float value, float max,
+                   const BarStyle& style = {});
     double time() const { return time_; }
     DrawList& draw_list() { return *dl_; }
 
@@ -653,6 +991,25 @@ public:
 
     /** @brief Gives the text field `id_str` (declared later this frame) keyboard focus with `value`. */
     void begin_text_edit(std::string_view id_str, const std::string& value) { begin_text_edit_(get_id(id_str), value, false); }
+
+    // --- Keyboard focus ---
+    //
+    // Every widget that takes a click is focusable, in the order it is declared. Tab moves to
+    // the next, Shift+Tab to the previous, and Enter or Space activates the focused one -- so
+    // a form is reachable without a mouse. The ring is drawn centrally (set_last_()), not by
+    // each widget, so nothing has to opt in.
+
+    /** @brief The focused widget's id, or 0. */
+    Id focus_id() const { return focus_id_; }
+
+    /** @brief Focuses the widget `id_str` (same id scope as the widget itself). */
+    void set_focus(std::string_view id_str) { focus_id_ = get_id(id_str); }
+
+    /** @brief Drops focus, so nothing is reachable by Enter until Tab moves again. */
+    void clear_focus() { focus_id_ = 0; }
+
+    /** @brief Whether this frame drew a focus ring -- i.e. the keyboard is driving the UI. */
+    bool focus_visible() const { return focus_id_ != 0; }
 
     /** @brief Marks the keyboard as used this frame, so later shortcut() calls return false. */
     void consume_keyboard() { keyboard_consumed_ = true; }
@@ -1028,27 +1385,21 @@ public:
     }
 
     /** @brief A push button. @return True when clicked. */
+    /** @brief A button in the next layout box; `w` negative fits it to its label. */
     bool button(std::string_view lbl, float w = -1.0f, bool enabled = true, Icon ic = Icon::None) {
-        const Id id = get_id(lbl);
-        const std::string_view shown = label_text(lbl);
         const float iw = ic != Icon::None ? style.row_height - 4 : 0.0f;
-        if (w < 0) w = text_width(shown) + style.padding * 3 + iw;
-        Box b = next_box(style.row_height, w);
-        bool hovered = false, held = false;
-        const bool clicked = enabled && behavior_(id, b, hovered, held);
-        fill_rounded(b, !enabled ? style.panel_alt : held ? style.button_active : hovered ? style.button_hover : style.button);
-        const glm::vec4 tc = enabled ? style.text : style.text_disabled;
-        if (ic != Icon::None) {
-            const float tw = text_width(shown);
-            const float total = iw + (tw > 0 ? tw + 4 : 0);
-            const float x0 = b.x + (b.w - total) * 0.5f;
-            icon(ic, {x0, b.y + 2, iw, b.h - 4}, tc);
-            if (!shown.empty()) text_in({x0 + iw + 4, b.y, b.w, b.h}, shown, tc, 0.0f);
-        } else {
-            text_in(b, shown, tc, 0.0f, true);
-        }
-        set_last_(id, b, hovered);
-        return clicked;
+        if (w < 0) w = text_width(label_text(lbl)) + style.padding * 3 + iw;
+        return button_in_(lbl, next_box(style.row_height, w), enabled, ic);
+    }
+
+    /**
+     * @brief A button at an explicit box.
+     *
+     * What a game's interface wants: its buttons are placed against the screen (anchor() /
+     * stretch(), or a box from a tunables file) rather than flowed down a panel.
+     */
+    bool button(std::string_view lbl, const Box& b, bool enabled = true, Icon ic = Icon::None) {
+        return button_in_(lbl, b, enabled, ic);
     }
 
     /**
@@ -1288,7 +1639,7 @@ public:
         }
         fill_rounded(b, hovered || held ? style.number_hover : style.number);
         const float t = hi > lo ? std::clamp((*v - lo) / (hi - lo), 0.0f, 1.0f) : 0.0f;
-        if (t > 0) fill_rounded({b.x, b.y, std::max(b.h * 0.5f, b.w * t), b.h}, style.accent, -1, t > 0.98f ? kAll : kLeft);
+        if (t > 0) fill_rounded({b.x, b.y, std::min(b.w, std::max(b.h * 0.5f, b.w * t)), b.h}, style.accent, -1, t > 0.98f ? kAll : kLeft);
         char buf[64];
         std::snprintf(buf, sizeof(buf), fmt, *v);
         text_in(b, buf, style.text, 0.0f, true);
@@ -1938,6 +2289,7 @@ public:
         return state_(get_id(id_str)).f[std::clamp(slot, 0, 3)];
     }
 
+
 private:
     // --- constants ---
     static constexpr int kPopupZ = 1000;
@@ -2029,19 +2381,93 @@ private:
     bool behavior_(Id id, const Box& b, bool& hovered, bool& held) {
         hovered = layer_ok_() && b.contains(in_.mouse) && clip_stack_.back().contains(in_.mouse) &&
                   (active_id_ == 0 || active_id_ == id);
-        if (hovered) hot_id_ = id;
+        // Hover fires on the frame the pointer ARRIVES, not every frame it stays: comparing
+        // against the previous frame's hot id is what keeps a tick from becoming a drone.
+        if (hovered) {
+            if (hot_id_ != id && hot_prev_ != id && on_sound) on_sound(UiSound::Hover);
+            hot_id_ = id;
+        }
         bool clicked = false;
+        // Declaration order IS tab order: every widget that can be clicked registers here, so
+        // a new widget is reachable by keyboard without having to say so.
+        if (id && layer_ok_()) focusables_.push_back(id);
+        // Enter/Space on the focused widget is a click. Guarded on the text editor, which owns
+        // Enter while it is open, and on keyboard_consumed_ so a shortcut wins.
+        if (id && id == focus_id_ && !text_edit_.active && !keyboard_consumed_) {
+            if (key_pressed(coopa::input::Key::Enter) || key_pressed(coopa::input::Key::Space)) {
+                clicked = true;
+                keyboard_consumed_ = true;
+                if (on_sound) on_sound(UiSound::Press);
+            }
+        }
         if (hovered && in_.pressed[0]) {
             active_id_ = id;
             press_pos_[0] = in_.mouse;
             activated_id_ = id;
+            focus_id_ = id;   // clicking moves focus, so Tab continues from where you were
+            if (on_sound) on_sound(UiSound::Press);
         }
         held = active_id_ == id && in_.down[0];
         if (active_id_ == id && in_.released[0]) {
             clicked = hovered && !drag_.active;
             active_id_ = 0;
             deactivated_id_ = id;
+            // Only a completed click: a press dragged off its widget is a cancel, and should
+            // sound like nothing.
+            if (clicked && on_sound) on_sound(UiSound::Release);
         }
+        return clicked;
+    }
+
+    /**
+     * @brief Moves focus on Tab / Shift+Tab, using the ids this frame declared.
+     *
+     * Run at END of frame on purpose: the list is only complete once every widget has been
+     * declared, and a UI whose shape changes between frames then gets a tab order that follows
+     * it rather than one captured when it was first built.
+     */
+    void advance_focus_() {
+        using coopa::input::Key;
+        using coopa::input::Mods;
+        if (text_edit_.active || keyboard_consumed_) return;   // a field owns Tab while open
+        const bool fwd = key_pressed(Key::Tab, Mods::None, true);
+        const bool back = key_pressed(Key::Tab, Mods::Shift, true);
+        if (!fwd && !back) return;
+        if (focusables_.empty()) {
+            focus_id_ = 0;
+            return;
+        }
+        keyboard_consumed_ = true;
+        auto it = std::find(focusables_.begin(), focusables_.end(), focus_id_);
+        if (it == focusables_.end()) {
+            // Nothing focused (or the focused widget is gone this frame): start at an end.
+            focus_id_ = fwd ? focusables_.front() : focusables_.back();
+            return;
+        }
+        const size_t n = focusables_.size();
+        const size_t i = static_cast<size_t>(it - focusables_.begin());
+        focus_id_ = focusables_[fwd ? (i + 1) % n : (i + n - 1) % n];
+    }
+
+    /** @brief The shared body of both button() overloads. */
+    bool button_in_(std::string_view lbl, const Box& b, bool enabled, Icon ic) {
+        const Id id = get_id(lbl);
+        const std::string_view shown = label_text(lbl);
+        const float iw = ic != Icon::None ? style.row_height - 4 : 0.0f;
+        bool hovered = false, held = false;
+        const bool clicked = enabled && behavior_(id, b, hovered, held);
+        fill_rounded(b, !enabled ? style.panel_alt : held ? style.button_active : hovered ? style.button_hover : style.button);
+        const glm::vec4 tc = enabled ? style.text : style.text_disabled;
+        if (ic != Icon::None) {
+            const float tw = text_width(shown);
+            const float total = iw + (tw > 0 ? tw + 4 : 0);
+            const float x0 = b.x + (b.w - total) * 0.5f;
+            icon(ic, {x0, b.y + 2, iw, b.h - 4}, tc);
+            if (!shown.empty()) text_in({x0 + iw + 4, b.y, b.w, b.h}, shown, tc, 0.0f);
+        } else {
+            text_in(b, shown, tc, 0.0f, true);
+        }
+        set_last_(id, b, hovered);
         return clicked;
     }
 
@@ -2051,6 +2477,9 @@ private:
         last_item_.hovered = hovered;
         last_item_.deactivated = id != 0 && deactivated_id_ == id;
         if (last_item_.deactivated) deactivated_id_ = 0;
+        // Drawn here rather than in each widget: every widget calls this after painting
+        // itself, so the ring lands on top and no widget has to opt in.
+        if (id != 0 && id == focus_id_) outline_rounded(b.shrink(-1.0f), style.accent, -1.0f, 1.5f);
     }
 
     int find_popup_(Id id) const {
@@ -2551,6 +2980,8 @@ private:
     MenuBarState menubar_;
 
     Id hot_id_ = 0;
+    /// Last frame's hot id, so Hover fires once on arrival. See behavior_().
+    Id hot_prev_ = 0;
     Id active_id_ = 0;
     Id activated_id_ = 0;
     Id deactivated_id_ = 0;
@@ -2562,6 +2993,11 @@ private:
     Box last_label_box_;
     LastItem last_item_;
     bool keyboard_consumed_ = false;
+    /// The focused widget, or 0. Survives the frame; everything else about focus does not.
+    Id focus_id_ = 0;
+    /// Every focusable id declared this frame, in order. Rebuilt per frame, which is what lets
+    /// Tab follow a UI whose shape changes between frames.
+    std::vector<Id> focusables_;
     bool wheel_consumed_ = false;
 
     Id last_click_id_ = 0;
@@ -2596,5 +3032,6 @@ private:
 }  // namespace coopa
 
 #include <uicoopa/immediate/imm_icons.h>
+#include <uicoopa/immediate/imm_game.h>
 
 #endif  // UICOOPA_IMMEDIATE_IMM_H

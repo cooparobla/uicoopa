@@ -3,7 +3,7 @@
  * @brief Root driver for a UI tree: screen- or world-derived root rect, the
  *        explicit measure -> arrange -> emit rebuild pipeline, and (via
  *        late_update()) a fully self-driving per-frame UI pass owning its own
- *        DrawList, UiInput, and EventSystem.
+ *        DrawList and UiInput.
  *
  * Two render modes, mirroring Unity's Canvas.renderMode -- see
  * CanvasRenderMode. The world-space mode is deliberately confined to this file:
@@ -23,8 +23,6 @@
 #include <uicoopa/layout/canvas_scaler.h>
 #include <uicoopa/render/draw_list.h>
 #include <uicoopa/input/ui_input.h>
-#include <uicoopa/input/event_system.h>
-#include <uicoopa/input/nav_types.h>
 #include <coopa/scene/scene_object.h>
 #include <coopa/scene/scene.h>
 #include <coopa/scene/components/transform_component.h>
@@ -98,7 +96,7 @@ enum class CanvasBillboard {
  *
  * rebuild_layout()/rebuild_emit() remain public and independently callable —
  * rebuild_layout() is pure layout math (no DrawList, no GPU type), still safe
- * to exercise from a headless unit test with no window/device/EventSystem
+ * to exercise from a headless unit test with no window or device
  * involved at all.
  */
 class CanvasComponent : public UIComponent {
@@ -337,20 +335,6 @@ public:
      */
     bool ignore_ui_scale = false;
 
-    /**
-     * @brief Whether widgets built UNDER this canvas get a Selectable for directional
-     *        navigation. Nothing in this class consults it; it is read by whatever builds.
-     *
-     * The seam a gamepad plugs into. UIBuilder takes an InputMode in its constructor, but a
-     * canvas authored in YAML has no UIBuilder in scope -- its composites build themselves in
-     * their own start(), from a BuildContext that would otherwise always say Pointer. So the
-     * mode is stated once here and every composite below reads it (see UiComposite::start()),
-     * which is what makes "this screen can be driven by a pad" one line in the asset rather
-     * than a rewrite of how the screen is authored.
-     *
-     * Pointer (the default) attaches nothing, leaving an existing scene byte-identical.
-     */
-    InputMode input_mode = InputMode::Pointer;
 
     /** @brief The size set_viewport() last gave, in target pixels (0 until it is called). */
     glm::uvec2 viewport_size() const { return {viewport_w_, viewport_h_}; }
@@ -378,11 +362,26 @@ public:
         rebuild_emit(draw_list_);
     }
 
+    /**
+     * @brief Lays out but emits NOTHING, so a drawn-but-not-simulating canvas shows as empty.
+     *
+     * The counterpart to preview_refresh(), for a host that wants a scene's interface out of
+     * the way while it is being edited. Clearing the DrawList is the whole point: simply not
+     * calling preview_refresh() would leave last frame's geometry in it, and the canvas would
+     * keep drawing a frozen copy of itself forever.
+     *
+     * Layout still runs, so root_rect() and every resolved rect stay queryable -- an editor
+     * still needs to know where a widget would be in order to select it.
+     */
+    void clear_emitted() {
+        if (!owner) return;
+        rebuild_layout(viewport_w_, viewport_h_);
+        update_world_transform(view_);
+        draw_list_.begin(root_rect_);
+    }
+
     /** @brief This canvas's own per-frame pointer/keyboard state, as of the last set_input(). */
     const UiInput& input() const { return input_; }
-
-    /** @brief This canvas's own EventSystem — owns hover/press state across frames. */
-    EventSystem& event_system() { return event_system_; }
 
     // --- World space (no-ops / identity in ScreenSpaceOverlay mode) ---
 
@@ -398,7 +397,6 @@ public:
      * Cheap (a handful of vector ops, no matrix inverse) and idempotent, so it is safe
      * to call more than once per frame. late_update() calls it automatically; a host
      * that needs model() *before* late_update() runs -- which hit testing does, since
-     * EventSystem::process() is dispatched from inside late_update() -- calls it
      * itself, right after Scene::update() has resolved the transform hierarchy.
      *
      * @param view World-to-camera matrix. Only read in CanvasBillboard::CameraFacing
@@ -476,9 +474,11 @@ public:
      * @brief Intersects a world-space ray with this canvas's plane.
      *
      * The pointer-picking half of world-space UI: the host turns a cursor position into
-     * a world ray, this turns the ray into a canvas-space point, and Raycaster /
-     * EventSystem then run completely unmodified. One ray/plane path serves both
-     * billboard modes -- a CameraFacing quad's projection happens to be affine (constant
+     * a world ray, this turns the ray into a canvas-space point, which a caller hit-tests
+     * against whatever it drew.
+     *
+     * One exact ray/plane solve serves both billboard modes -- a CameraFacing quad's
+     * projection happens to be affine (constant
      * view depth) and could be inverted with a 2x2 solve, but Transform mode under
      * perspective is genuinely projective, and one exact path beats two special cases.
      *
@@ -487,7 +487,7 @@ public:
      * @return Canvas-space point in canvas pixels (+Y up), or nullopt when the ray is
      *         edge-on to the plane or the plane lies behind the origin. The point is NOT
      *         clamped to the canvas: a hit outside root_rect() is a real miss that
-     *         Raycaster is already responsible for rejecting.
+     *         the caller is responsible for rejecting.
      */
     std::optional<glm::vec2> ray_to_canvas(const glm::vec3& ray_origin,
                                            const glm::vec3& ray_dir) const {
@@ -535,8 +535,7 @@ public:
 
     /**
      * @brief Full per-frame UI pass: layout (using the viewport set_viewport()
-     *        supplied) -> emit into this canvas's own draw_list() -> input
-     *        dispatch through this canvas's own EventSystem.
+     *        supplied), then emit into this canvas's own draw_list().
      *
      * Driven automatically by Scene::late_update() — see the class doc for
      * the full per-frame sequence an application drives.
@@ -545,15 +544,13 @@ public:
         if (!owner) return;
         rebuild_layout(viewport_w_, viewport_h_);
         // After rebuild_layout(), so a world_size written this frame is already reflected
-        // in the matrix; before event_system_.process(), so the matrix a host used for hit
-        // testing and the matrix the render pass will use are the same one. Uses the view
+        // in the matrix the render pass will use. Uses the view
         // matrix the host last supplied -- a host driving a CameraFacing canvas calls
         // update_world_transform(view) itself before Scene::late_update() anyway (it needs
         // model() for the pointer ray), and this call re-uses that same cached view.
         update_world_transform(view_);
         draw_list_.begin(root_rect_);
         rebuild_emit(draw_list_);
-        event_system_.process(input_, *owner, delta_time);
     }
 
 private:
@@ -669,7 +666,6 @@ private:
     glm::vec3 normal_{0.0f, 0.0f, 1.0f};  ///< cross(model_[0], model_[1]); unnormalized.
     glm::vec3 origin_{0.0f};              ///< World position of canvas-space (0, 0).
     UiInput     input_;
-    EventSystem event_system_;
     DrawList    draw_list_;
 };
 

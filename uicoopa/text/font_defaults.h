@@ -3,9 +3,6 @@
  * @brief Process-wide fallback font used by widgets that need one but weren't
  *        handed a specific Font (e.g. auto-generated tooltip/inventory text).
  *
- * Split out of the builder layer so widgets (widgets/inventory_grid.h) don't
- * have to include a builder/ header to reach it (widgets sit below the builder
- * in the include graph).
  * Application code sets FontDefaults::font once at startup (typically right
  * after loading its UI font -- see ui_yaml.h's UIResources::register_font()
  * and UIResourceCache::font_for(), which both do this automatically) and
@@ -17,7 +14,6 @@
 #ifndef UICOOPA_TEXT_FONT_DEFAULTS_H
 #define UICOOPA_TEXT_FONT_DEFAULTS_H
 
-#include <uicoopa/widgets/text.h>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -66,23 +62,6 @@ struct FontDefaults {
     static inline std::vector<std::string> search_dirs{};
 };
 
-/**
- * @brief Assigns a font + pixel size to `txt`, falling back to FontDefaults::font
- *        when `preferred` is null, then reports the (font, size) pair via
- *        FontDefaults::note_text_size if one is set.
- * @param txt Text component to configure. No-op if null.
- * @param size Pixel font size.
- * @param preferred Font to prefer over FontDefaults::font, if non-null.
- */
-inline void apply_font(Text* txt, float size, Font* preferred = nullptr) {
-    if (!txt) return;
-    Font* font = preferred ? preferred : FontDefaults::font;
-    txt->font = font;
-    txt->font_size = static_cast<uint32_t>(size);
-    if (font && FontDefaults::note_text_size) {
-        FontDefaults::note_text_size(font, txt->font_size);
-    }
-}
 
 }  // namespace ui
 }  // namespace coopa

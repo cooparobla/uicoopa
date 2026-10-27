@@ -1,88 +1,39 @@
 # uicoopa
 
-**A C++20 game UI library: anchored retained widgets, a fluent builder, and an immediate-mode layer for tools.**
+**A C++20 immediate-mode UI library: tool panels and game interfaces, rendered through Vulkan.**
 
-uicoopa is a header-only UI toolkit that renders through Vulkan. Game UI is built from
-Unity-style `RectTransform` nodes with layout groups, text, and interactive widgets, either
-from YAML scenes or with a fluent C++ builder. Tool UI (editors, debug panels) uses an
-immediate-mode API that draws through the same renderer. The UI composites into a render
-pass the host has already opened, so it layers over an existing 3D frame. Canvases can be
-screen-space or placed in the 3D world.
+uicoopa is header-only. A UI is declared every frame from your own data -- `if (ctx.button("Save"))
+save();` -- rather than built as a tree of widget objects that has to be kept in step with the
+model. The same layer draws the [toyengine](https://github.com/cooparobla/toyengine) editor,
+its hub, and the games built on it.
 
-![The UIBuilder settings demo: tabbed inspector, live readout, inventory grid and icon bar](docs/images/settings_builder.jpg)
-
-<table>
-  <tr>
-    <td><img src="docs/images/dialog_builder.jpg" alt="Split layout with tabs and a blocking modal dialog"></td>
-    <td><img src="docs/images/hud_builder.jpg" alt="Gameplay HUD with stat bars, message log and hotbar"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub><b>dialog_builder</b>: split columns, tabs, a blocking modal</sub></td>
-    <td align="center"><sub><b>hud_builder</b>: stat bars, message log, hotbar bound to game data</sub></td>
-  </tr>
-  <tr>
-    <td><img src="docs/images/test_window.jpg" alt="Anchored panels, a button and a layout bar loaded from YAML"></td>
-    <td><img src="docs/images/editor.jpg" alt="A Blender-style level editor built with the immediate-mode layer"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub><b>test_window</b>: a UI declared entirely in scene YAML</sub></td>
-    <td align="center"><sub>the <a href="https://github.com/cooparobla/toyengine">toyengine</a> editor, built entirely on the immediate-mode layer</sub></td>
-  </tr>
-</table>
+It composites into a render pass the host has already opened, so it layers over an existing 3D
+frame. A canvas can be screen-space or a quad placed in the 3D world.
 
 ## Features
 
-### Layout
-- **Anchored rects.** `RectTransform` uses Unity's model: anchors, pivot, anchored position
-  and size delta, with named presets such as `TopLeft` and `StretchAll`.
-- **Explicit layout passes.** `CanvasComponent` runs measure, arrange and emit each frame,
-  so layout groups know their children's sizes before they are placed.
-- **Layout groups.** Horizontal, vertical and grid groups, `LayoutElement` size overrides,
-  `ContentSizeFitter`, and `ScrollRect` with clamped or elastic scrolling.
-- **Resolution scaling.** `CanvasScaler` scales from a reference resolution.
-- **World-space canvases.** A canvas can billboard toward the camera or follow a 3D
-  transform. Every widget works unchanged there, including clicks via a pointer ray.
+### The immediate layer (`immediate/`)
+- **`imm::Context`.** Panels, menus, popups, modals, trees, property rows, drag fields, text
+  input, a colour picker, splitters, tab bars, drag and drop -- re-declared every frame.
+- **Game composites.** `stat_bar` with a damage trail, `slot_grid`, `hotbar`, `cooldown`,
+  `message_log`, `prompt_bar`, `panel_frame`, `menu_list`, `drag_handle`, `floating_text`,
+  `nameplate`.
+- **Anchored placement.** `anchor()` / `stretch()` pin a panel to a corner or an edge, so an
+  interface keeps its layout on any resolution.
+- **Themes.** `imm::Theme` -- YAML with `inherits:`, hex or float colours, a per-theme font, and
+  any number of application colour sections. One field list (`visit_style()`) is walked by the
+  loader, the serializer and any editor, so they cannot drift.
+- **Built-in vector icons**, a Finder-style `imm::FileDialog`, and a UI sound hook fired from
+  the one state machine every widget passes through.
 
-### Widgets
-- **Basics.** `Image` (solid, sprite, or 9-sliced), `Text` (wrap, truncate, alignment), and
-  `Mask` clipping.
-- **Controls.** `Button`, `Toggle`, `Slider`, `Scrollbar`, `NumberField`, `SpinBox`,
-  `TextField`, `ComboBox`, `TabView`, `CollapsiblePanel`, and `MenuBar`.
-- **Overlays.** Modal and windowed dialogs, file open/save dialogs, tooltips, and a themed
-  software cursor.
-- **Gameplay HUD.** `ProgressBar` with a damage trail, `MessageLog`, `InventoryGrid` with
-  drag and drop, a hotbar, and a backtick dev `Console`. Bars and grids can bind to libcoopa's
-  `coopa::stat` and `coopa::item` models.
-- **Gamepad navigation.** A focus ring with directional search, button-prompt bars, and a
-  hybrid mode that switches between mouse and pad on the last input.
-
-### Building UI
-- **`UIBuilder`.** A fluent, theme-driven API: panels, cards, scroll views, split rows and
-  columns, tabs, dialogs, and labelled settings rows. Read or write any widget's value by
-  name with `get_value<T>()` / `set_value()`.
-- **Themes.** `UITheme` groups styles per widget family. Dark and light themes ship as YAML,
-  with per-role fonts (title, body, numeric, and more).
-- **YAML scenes.** `register_ui_components()` lets scene files declare every widget, with
-  prefab-style `inherit_from`.
-- **Signals and reactors.** Widgets emit `coopa::event::Signal`s and publish to the scene's
-  event bus. Reactor components (`SetActiveOnSignal`, `ColorOnSignal`, `TextOnSignal`, ...)
-  respond from YAML with no C++ wiring.
-- **UI sound.** Optional. `UiSoundPlayer` adds hover and click sounds to every widget under
-  it.
-- **Animation.** `RectTransform` and graphic colour fields are registered as animatable
-  properties for libcoopa's animator.
-
-### Immediate mode
-- **`imm::Context`.** Menus, popups, modals, trees, property rows, drag fields, text input,
-  a colour picker, splitters, and drag and drop, re-declared every frame from your data.
-- **Built-in vector icons** and YAML themes with inheritance.
-- **`imm::FileDialog`** (`immediate/imm_file_dialog.h`). A Finder-style Open / Save / Choose
-  Folder modal. It has back / forward / up buttons, a clickable path bar with live search,
-  Favorites / Recent / Locations in a sidebar, a sortable Name / Date / Size / Kind list, a
-  Format menu, full keyboard navigation, and Finder-style New Folder with in-place rename. An
-  app names its own document kinds and adds its own Favorites.
-- **Searchable combos.** `combo()` lists longer than 15 items get a type-to-filter field.
-- **`ImmediateCanvas`** hosts it inside a normal screen-space canvas.
+### The canvas host (`layout/`, `render/`, `text/`)
+- **`CanvasComponent`.** Screen-space, or world-space with `CameraFacing` / `Transform`
+  billboarding, depth occlusion and supersampled glyphs. `ray_to_canvas()` turns a pointer ray
+  into a point in canvas pixels, so a world panel is clickable.
+- **`DrawList` / `UiPass` / `UiWorldPass`.** One batched vertex stream, broken only when the
+  texture, clip rect or z-order changes.
+- **Fonts.** stb_truetype atlases, cached per (face, size), with a registry so a host can mark
+  glyph atlases for the text pipeline variant.
 
 ## Dependencies
 
@@ -125,120 +76,32 @@ cmake -B build && cmake --build build -j
 ### 3. Run the demos
 
 ```bash
-./build/uicoopa_settings_builder   # tabbed settings inspector built with UIBuilder
-./build/uicoopa_dialog_builder     # split layout, tabs, modal dialogs
-./build/uicoopa_hud_builder        # gameplay HUD: stat bars, hotbar, log, console (`)
-./build/uicoopa_gamepad_builder    # pad navigation with arrow keys / WASD; F10 quits
-./build/uicoopa_test_window        # a UI declared entirely in YAML
+ctest --test-dir build -j8          # every headless suite
+./build/uicoopa --list              # every test, as <suite> <name>
 ```
 
 Esc quits (F10 in the gamepad demo). Each demo writes a screenshot of its last frame to
 `output/<name>.png`. `MAX_FRAMES=<n>`, `ONESHOT=1`, `THEME=light` and `UI_AUDIO=0` help with
 scripted runs; the [reference](docs/reference.md#running-a-demo) lists every variable.
 
-### 4. Build a UI in code
-
-This is an abridged version of `demos/demo_dialog_builder.cpp`. It builds a canvas with
-`UIBuilder`, then draws it each frame with `UiPass` inside gfxcoopa's frame loop.
+### 4. Draw a UI
 
 ```cpp
-#include <gfxcoopa/app/context.h>
-#include <uicoopa/layout/canvas.h>
-#include <uicoopa/render/ui_pass.h>
-#include <uicoopa/text/font.h>
-#include <uicoopa/text/font_defaults.h>
-#include <uicoopa/builder/ui_builder.h>
-#include <uicoopa/ui_yaml.h>          // UIResourceCache
-#include <coopa/scene/scene.h>
+#include <uicoopa/immediate/imm_canvas.h>
 
-using namespace coopa::ui;
-using coopa::scene::Scene;
-using coopa::scene::SceneObject;
-
-coopa::gfx::app::Context ctx(coopa::gfx::app::ContextConfig{.title = "my ui", .width = 1280, .height = 720});
-UiPass ui_pass(ctx.device(), ctx.allocator(), ctx.command_pool(), ctx.render_pass(),
-               "assets/shaders/ui.vert.spv", "assets/shaders/ui_quad.frag.spv",
-               "assets/shaders/ui_text.frag.spv");
-
-Font font(ctx.device(), ctx.allocator(), ctx.command_pool(), "assets/fonts/DejaVuSans.ttf");
-FontDefaults::font = &font;
-const UITheme theme = UITheme::builtin_dark();
-
-Scene scene("ui");
-auto canvas_obj = std::make_unique<SceneObject>("Canvas");
-auto* canvas = canvas_obj->add_component<CanvasComponent>();
-canvas->scaler.mode = ScaleMode::ScaleWithScreenSize;
-canvas->scaler.reference_resolution = {1280.0f, 720.0f};
-
-UIBuilder root(canvas_obj.get(), &theme);
-UIBuilder card = root.card("Settings", "Preferences", AnchorPreset::TopLeft, {20, -20}, {400, 300});
-card.add_toggle_row("vsync", true);
-card.add_slider_row("volume", 0.0f, 1.0f, 0.8f);
-card.add_button("Apply", ButtonRole::Primary, [&] {
-    bool vsync = card.get_value<bool>("vsync");   // read back by name
-    // ...
-});
-
-scene.add_root_object(std::move(canvas_obj));
-scene.start();                                    // after the whole UI is built
-canvas->set_default_texture(ui_pass.white_view());
-
-while (!ctx.should_close()) {
-    ctx.poll();
-    auto [w, h] = ctx.window().framebuffer_size();
-    canvas->set_viewport(w, h);
-    canvas->set_input(ctx.input());
-    scene.update(ctx.delta_time());
-    scene.late_update(ctx.delta_time());          // layout, input and emit happen here
-
-    UIResourceCache::instance().mark_text_atlases(ui_pass);   // glyph atlases are R8 coverage
-    ui_pass.register_textures(canvas->draw_list());
-    ui_pass.begin_frame(ctx.current_frame(), canvas->draw_list().vertices().size(),
-                        canvas->draw_list().indices().size());
-    coopa::gfx::app::FrameCallbacks cb;
-    cb.record = [&](coopa::gfx::command::CommandBuffer& cmd) {
-        ui_pass.draw(cmd, ctx.current_frame(), w, h, canvas->scale_factor(), canvas->draw_list());
-    };
-    ctx.frame(cb);
-}
+auto* ui = coopa::ui::build_immediate_canvas(scene, "UI");
+ui->context().text.set_font(&font);
+ui->on_draw = [&](coopa::ui::imm::Context& ctx) {
+    const auto b = ctx.anchor(coopa::ui::imm::Anchor::TopLeft, {20, 20}, {260, 28});
+    ctx.stat_bar("hp", b, "Health", player.health, player.max_health);
+    if (ctx.button("Heal")) player.health = player.max_health;
+};
 ```
 
-The full demo also loads icon sheets, theme files with per-role fonts, and audio, and saves
-a screenshot on exit. Copy its `main()` as a starting point.
+The canvas emits during `Scene::late_update()`; the host hands its `DrawList` to `UiPass`
+inside its own frame loop. For a plate in the 3D world use
+`build_world_immediate_canvas(scene, parent, ...)` instead.
 
-### 5. Or declare it in YAML
-
-Register the YAML parsers once, then load the scene with libcoopa's `SceneManager`, as
-`demos/demo_window.cpp` does:
-
-```cpp
-coopa::ui::register_ui_components(ctx.device(), ctx.allocator(), ctx.command_pool());
-coopa::scene::SceneManager scenes;
-scenes.load_scene("assets/scenes/hello/scene.yaml");
-```
-
-
-```yaml
-format: uicoopa
-scene:
-  scene_name: hello
-  root_objects:
-    - name: Canvas
-      components:
-        - type: Canvas
-          reference_resolution: { x: 1280.0, y: 720.0 }
-      children:
-        - name: Panel
-          components:
-            - type: RectTransform
-              anchor_preset: TopLeft
-              anchored_position: { x: 20.0, y: -20.0 }
-            - type: Image
-              color: { r: 0.20, g: 0.55, b: 0.60, a: 0.95 }
-```
-
-[`assets/scenes/test_window/scene.yaml`](assets/scenes/test_window/scene.yaml) is a complete,
-commented example with layout groups, a button and reactors.
 
 ## Use it in your project
 
@@ -277,23 +140,16 @@ never registered with ctest.
 
 ```
 uicoopa/
-├── layout/      RectTransform, CanvasComponent, CanvasScaler, LayoutElement
-├── groups/      layout groups, grid, ContentSizeFitter, ScrollRect
-├── widgets/     Image, Text, Button, Slider, ..., dialogs, HUD widgets, console
-├── input/       raycaster, event system, focus, modal stack, drag and drop, gamepad nav
-├── render/      DrawList, UiPass, UiWorldPass, sprites, sprite sheets, icon library
-├── text/        Font, FontAtlas (stb_truetype)
-├── builder/     UIBuilder, UITheme, ThemeLibrary; one detail/ header per concern
-├── reactors/    YAML-declared responses to signals
+├── immediate/   imm::Context, the game composites, icons, themes, FileDialog, ImmediateCanvas
+├── layout/      CanvasComponent, CanvasScaler, Rect/RectParams, RectTransform
+├── render/      DrawList, UiPass, UiWorldPass, sprites, sprite sheets, the icon library
+├── text/        Font, FontAtlas (stb_truetype), the text-atlas registry
+├── input/       UiInput: window pixels -> canvas pixels, for screen and world canvases
 ├── audio/       optional UI sound (sfxcoopa)
-├── binding/     UiHandle: bind game code to named widgets in authored UI
-├── immediate/   imm::Context, ImmediateCanvas, icons, themes, FileDialog
-└── ui_yaml.h    register_ui_components()
-assets/          shaders, fonts, themes, icon sheets, sounds, demo scenes and prefabs
+└── ui_resources.h  the process-wide font cache and text-atlas marking
+assets/          shaders, fonts, icon sheets, sounds
 src/             ui_impl.cpp: the one compiled file (stb_truetype)
-tools/           scripts that generate the icon, cursor and button-prompt sheets
-tests/           headless test suites, one <suite>_test.cpp per system; support/ fixtures
-demos/           the five windowed demos (demo_*.cpp)
+tests/           headless suites, one <suite>_test.cpp per system
 ```
 
 ## Notes
