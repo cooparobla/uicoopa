@@ -997,7 +997,17 @@ public:
     // Every widget that takes a click is focusable, in the order it is declared. Tab moves to
     // the next, Shift+Tab to the previous, and Enter or Space activates the focused one -- so
     // a form is reachable without a mouse. The ring is drawn centrally (set_last_()), not by
-    // each widget, so nothing has to opt in.
+    // each widget, so no widget has to opt in.
+    //
+    // OFF BY DEFAULT, and that is the important part: Tab, Enter and Space are only free keys
+    // in a UI that has no keymap of its own. A host that does -- toyengine's editor binds Tab
+    // to "leave edit mode" and Enter to "confirm the modal transform" -- would have those
+    // swallowed, because taking a key means consuming the keyboard and shortcut() then returns
+    // false. So a host asks for focus navigation; it is not imposed. ImmScreen turns it on for
+    // game screens, where a form really should be reachable without a mouse.
+
+    /** @brief Whether Tab/Shift+Tab move focus and Enter/Space activate it. Off by default. */
+    bool keyboard_focus = false;
 
     /** @brief The focused widget's id, or 0. */
     Id focus_id() const { return focus_id_; }
@@ -2390,10 +2400,10 @@ private:
         bool clicked = false;
         // Declaration order IS tab order: every widget that can be clicked registers here, so
         // a new widget is reachable by keyboard without having to say so.
-        if (id && layer_ok_()) focusables_.push_back(id);
+        if (keyboard_focus && id && layer_ok_()) focusables_.push_back(id);
         // Enter/Space on the focused widget is a click. Guarded on the text editor, which owns
         // Enter while it is open, and on keyboard_consumed_ so a shortcut wins.
-        if (id && id == focus_id_ && !text_edit_.active && !keyboard_consumed_) {
+        if (keyboard_focus && id && id == focus_id_ && !text_edit_.active && !keyboard_consumed_) {
             if (key_pressed(coopa::input::Key::Enter) || key_pressed(coopa::input::Key::Space)) {
                 clicked = true;
                 keyboard_consumed_ = true;
@@ -2404,7 +2414,7 @@ private:
             active_id_ = id;
             press_pos_[0] = in_.mouse;
             activated_id_ = id;
-            focus_id_ = id;   // clicking moves focus, so Tab continues from where you were
+            if (keyboard_focus) focus_id_ = id;   // Tab continues from where you were
             if (on_sound) on_sound(UiSound::Press);
         }
         held = active_id_ == id && in_.down[0];
@@ -2429,6 +2439,7 @@ private:
     void advance_focus_() {
         using coopa::input::Key;
         using coopa::input::Mods;
+        if (!keyboard_focus) return;                           // the host has its own keymap
         if (text_edit_.active || keyboard_consumed_) return;   // a field owns Tab while open
         const bool fwd = key_pressed(Key::Tab, Mods::None, true);
         const bool back = key_pressed(Key::Tab, Mods::Shift, true);
@@ -2479,7 +2490,9 @@ private:
         if (last_item_.deactivated) deactivated_id_ = 0;
         // Drawn here rather than in each widget: every widget calls this after painting
         // itself, so the ring lands on top and no widget has to opt in.
-        if (id != 0 && id == focus_id_) outline_rounded(b.shrink(-1.0f), style.accent, -1.0f, 1.5f);
+        if (keyboard_focus && id != 0 && id == focus_id_) {
+            outline_rounded(b.shrink(-1.0f), style.accent, -1.0f, 1.5f);
+        }
     }
 
     int find_popup_(Id id) const {
