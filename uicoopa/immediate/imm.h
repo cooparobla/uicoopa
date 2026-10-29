@@ -181,6 +181,8 @@ enum class Icon : int {
     Tag, Sort,
     // mesh editing (appended)
     Proportional,
+    // list reordering (appended)
+    Grip,
 };
 
 class Context;
@@ -1122,6 +1124,64 @@ public:
             const float a0 = 6.2831853f * i / segments, a1 = 6.2831853f * (i + 1) / segments;
             line(c + glm::vec2(std::cos(a0), std::sin(a0)) * r, c + glm::vec2(std::cos(a1), std::sin(a1)) * r, col, t);
         }
+    }
+
+    /**
+     * @brief A connected run of segments.
+     *
+     * `line()` is a single oriented quad with no caps and no joins, so a chain of them above
+     * about two pixels thick shows a wedge-shaped gap on the OUTSIDE of every bend. This fills
+     * each interior joint with a disc, which is the same trick `ring()` relies on implicitly and
+     * the reason a path belongs here rather than being re-derived by each caller.
+     *
+     * @param closed Also joins the last point back to the first.
+     */
+    void polyline(const glm::vec2* pts, std::size_t n, const glm::vec4& c, float t = 1.0f,
+                  bool closed = false) {
+        if (pts == nullptr || n < 2 || c.a <= 0.0f || t <= 0.0f) return;
+        for (std::size_t i = 1; i < n; ++i) line(pts[i - 1], pts[i], c, t);
+        if (closed) line(pts[n - 1], pts[0], c, t);
+        // Only worth the discs once the gap is visible; below ~2 px the segments already overlap.
+        if (t > 2.0f) {
+            const float r = t * 0.5f;
+            const std::size_t first = closed ? 0 : 1;
+            const std::size_t last = closed ? n : n - 1;
+            for (std::size_t i = first; i < last; ++i) circle(pts[i], r, c);
+        }
+    }
+
+    /// @brief polyline() over a vector.
+    void polyline(const std::vector<glm::vec2>& pts, const glm::vec4& c, float t = 1.0f,
+                  bool closed = false) {
+        polyline(pts.data(), pts.size(), c, t, closed);
+    }
+
+    /**
+     * @brief A cubic bezier, flattened to straight segments.
+     *
+     * @param segments 0 picks a count from the curve's rough length, so a short curve is not
+     *        oversampled and a long one does not come out faceted. Clamped to [4, 64].
+     */
+    void bezier(glm::vec2 p0, glm::vec2 c0, glm::vec2 c1, glm::vec2 p1, const glm::vec4& c,
+                float t = 1.0f, int segments = 0) {
+        if (c.a <= 0.0f || t <= 0.0f) return;
+        if (segments <= 0) {
+            // The control polygon's length bounds the arc length from above and is three cheap
+            // distances rather than an integral -- ample for choosing a segment count.
+            const float rough = glm::length(c0 - p0) + glm::length(c1 - c0) + glm::length(p1 - c1);
+            segments = static_cast<int>(rough / 10.0f);
+        }
+        segments = std::clamp(segments, 4, 64);
+
+        std::vector<glm::vec2> pts;
+        pts.reserve(static_cast<std::size_t>(segments) + 1);
+        for (int i = 0; i <= segments; ++i) {
+            const float s = static_cast<float>(i) / static_cast<float>(segments);
+            const float u = 1.0f - s;
+            pts.push_back(u * u * u * p0 + 3.0f * u * u * s * c0 + 3.0f * u * s * s * c1 +
+                          s * s * s * p1);
+        }
+        polyline(pts, c, t);
     }
 
     /** @brief Rounded-rect corner flags for fill_rounded() (combine with |). */
