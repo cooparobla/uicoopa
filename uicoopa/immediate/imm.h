@@ -183,6 +183,8 @@ enum class Icon : int {
     Proportional,
     // list reordering (appended)
     Grip,
+    // curve authoring (appended)
+    Pen,
 };
 
 class Context;

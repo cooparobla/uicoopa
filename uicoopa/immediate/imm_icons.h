@@ -487,6 +487,11 @@ inline void draw_icon(Context& ctx, Icon icon, const Box& b, const glm::vec4& co
         case Icon::Grip:   // three equal bars: the drag handle of a reorderable row
             d.l(4, 4.5f, 12, 4.5f); d.l(4, 8, 12, 8); d.l(4, 11.5f, 12, 11.5f);
             break;
+        case Icon::Pen:    // a nib on a shaft, over the curve it draws
+            d.l(9.5f, 2.5f, 13, 6); d.l(9.5f, 2.5f, 6, 6); d.l(6, 6, 9.5f, 9.5f);
+            d.l(13, 6, 9.5f, 9.5f); d.l(9.5f, 6.5f, 9.5f, 9.5f);
+            d.l(2.5f, 13.5f, 6, 11.5f); d.l(6, 11.5f, 10, 13.5f); d.l(10, 13.5f, 13.5f, 11);
+            break;
     }
 }
 
@@ -533,7 +538,7 @@ inline Icon icon_from_name(std::string_view name) {
         {"UiCanvas", Icon::UiCanvas}, {"UiText", Icon::UiText}, {"UiButton", Icon::UiButton},
         {"UiLayout", Icon::UiLayout}, {"UiWidget", Icon::UiWidget}, {"UiAnchor", Icon::UiAnchor},
         {"Tag", Icon::Tag}, {"Sort", Icon::Sort}, {"Proportional", Icon::Proportional},
-        {"Grip", Icon::Grip},
+        {"Grip", Icon::Grip}, {"Pen", Icon::Pen},
     };
     for (const auto& [n, icon] : table) {
         std::string_view other(n);
