@@ -185,6 +185,8 @@ enum class Icon : int {
     Grip,
     // curve authoring (appended)
     Pen,
+    // curve anchor modes (appended)
+    AnchorCorner, AnchorSmooth, AnchorVector, AnchorAuto,
 };
 
 class Context;

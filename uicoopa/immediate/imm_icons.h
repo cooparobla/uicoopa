@@ -492,6 +492,26 @@ inline void draw_icon(Context& ctx, Icon icon, const Box& b, const glm::vec4& co
             d.l(13, 6, 9.5f, 9.5f); d.l(9.5f, 6.5f, 9.5f, 9.5f);
             d.l(2.5f, 13.5f, 6, 11.5f); d.l(6, 11.5f, 10, 13.5f); d.l(10, 13.5f, 13.5f, 11);
             break;
+
+        // --- curve anchor modes: a square anchor is a corner, a round one is smooth, matching
+        //     Illustrator/Photoshop's own convention; the handles either bend (Corner) or run
+        //     straight through (Smooth/Vector), and Auto gets a curl no other mode has. ---
+        case Icon::AnchorCorner:
+            d.box(6.5f, 6.5f, 3, 3); d.l(8, 8, 13, 3); d.l(8, 8, 13, 12);
+            d.circle(13, 3, 1.2f, dim); d.circle(13, 12, 1.2f, dim);
+            break;
+        case Icon::AnchorSmooth:
+            d.circle(8, 8, 1.8f); d.l(2, 8, 14, 8);
+            d.circle(2, 8, 1.2f, dim); d.circle(14, 8, 1.2f, dim);
+            break;
+        case Icon::AnchorVector:
+            d.box(6.5f, 6.5f, 3, 3); d.l(2.5f, 13, 13, 2.5f);
+            d.circle(2.5f, 13, 1.2f, dim); d.circle(13, 2.5f, 1.2f, dim);
+            break;
+        case Icon::AnchorAuto:   // an S-curve: the shape this mode derives on its own
+            d.circle(8, 8, 1.8f);
+            d.arc(6, 8, 3.0f, -1.5708f, 1.5708f); d.arc(10, 8, 3.0f, 1.5708f, 4.7124f);
+            break;
     }
 }
 
